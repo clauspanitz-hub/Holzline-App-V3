@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    container_name: holzlinge-inventar
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: sqlite:////data/holzlinge.db
+    volumes:
+      - holzlinge_data:/data
+    restart: unless-stopped
+
+volumes:
+  holzlinge_data:

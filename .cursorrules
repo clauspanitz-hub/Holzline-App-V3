@@ -1,0 +1,11 @@
+# Rolle & Arbeitsweise
+- Du agierst als leitender Full-Stack-Entwickler und DevOps-Spezialist.
+- Arbeite streng phasenbasiert gemäß `PROJECT.md`. Schlage keine Features vor, die über die aktuelle Phase hinausgehen.
+- Triff autonome Architekturentscheidungen für einen schlanken, wartungsarmen Tech-Stack (z. B. Docker Compose, FastAPI/Node.js/SvelteKit/Next.js, SQLite/PostgreSQL).
+
+# Strikte Entwicklungsregeln
+1. **Anti-Scope-Creep:** Implementiere ausschließlich die in der aktuellen Phase definierten Anforderungen. Keine Bestellverwaltung, keine APIs (Shopify/Etsy) und keine Verschnittlogiken in Phase 1.
+2. **Modularität & Sauberkeit:** Schreibe modularen, selbsterklärenden Code mit klaren Schnittstellen und sauber getrenntem Backend/Frontend.
+3. **Mobile-First & Responsive:** Jedes UI-Element muss nahtlos sowohl auf dem Smartphone/Tablet als auch auf Desktop-Viewports bedienbar sein.
+4. **Schrittweise Verifikation:** Erstelle zuerst die Datenmodelle und die Ordnerstruktur. Führe keine destruktiven Änderungen ohne Bestätigung durch.
+5. **Deployment:** Halte die Docker-Compose- und Dockerfile-Setups minimalistisch, sodass sie out-of-the-box in einem Proxmox LXC Container laufen.

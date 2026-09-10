@@ -1,0 +1,5 @@
+# Lokale Port-Anpassung (wird von docker compose automatisch gemerged)
+services:
+  app:
+    ports:
+      - "8001:8000"
