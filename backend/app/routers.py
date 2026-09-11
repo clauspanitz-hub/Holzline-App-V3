@@ -23,6 +23,8 @@ from app.schemas import (
     BackupImportResult,
     BomLineCreate,
     BomLineUpdate,
+    BulkDeleteRequest,
+    BulkDeleteResult,
     ChangePasswordRequest,
     ColorCreate,
     ColorMatchSuggestion,
@@ -202,6 +204,11 @@ def bulk_update_materials(payload: MaterialBulkUpdate, db: Session = Depends(get
     return services.bulk_update_materials(db, payload)
 
 
+@router.post("/materials/bulk-delete", response_model=BulkDeleteResult)
+def bulk_delete_materials(payload: BulkDeleteRequest, db: Session = Depends(get_db)) -> BulkDeleteResult:
+    return services.bulk_delete_materials(db, payload)
+
+
 @router.delete("/materials/{material_id}", status_code=204)
 def delete_material(material_id: int, db: Session = Depends(get_db)) -> None:
     services.delete_material(db, material_id)
@@ -269,6 +276,11 @@ def update_product(product_id: int, payload: ProductUpdate, db: Session = Depend
 @router.post("/products/bulk-update", response_model=list[ProductRead])
 def bulk_update_products(payload: ProductBulkUpdate, db: Session = Depends(get_db)) -> list[ProductRead]:
     return services.bulk_update_products(db, payload)
+
+
+@router.post("/products/bulk-delete", response_model=BulkDeleteResult)
+def bulk_delete_products(payload: BulkDeleteRequest, db: Session = Depends(get_db)) -> BulkDeleteResult:
+    return services.bulk_delete_products(db, payload)
 
 
 @router.delete("/products/{product_id}", status_code=204)

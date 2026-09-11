@@ -183,6 +183,7 @@
 
   function emptyBulkEditForm() {
     return {
+      deleteSelected: false,
       min_stock: '',
       clear_min_stock: false,
       setTags: false,
@@ -462,6 +463,50 @@
     const kind = bulkEditModal?.kind
     const ids = kind === 'material' ? selectedMaterialIds : selectedProductIds
     if (!ids.length) return
+
+    if (bulkEditForm.deleteSelected) {
+      const label = kind === 'material' ? 'Materialien' : 'Produkte'
+      if (
+        !confirm(
+          `WARNUNG: ${ids.length} ${label} unwiderruflich löschen?\n\n` +
+            `Nicht löschbare Einträge (z. B. Material in einer Produkt-Stückliste) bleiben erhalten und werden gemeldet.`,
+        )
+      ) {
+        return
+      }
+      saving = true
+      try {
+        const result =
+          kind === 'material'
+            ? await api.materials.bulkDelete({ ids })
+            : await api.products.bulkDelete({ ids })
+        if (kind === 'material') selectedMaterialIds = []
+        else selectedProductIds = []
+        bulkEditModal = null
+        await refresh()
+        const deleted = result.deleted_ids?.length || 0
+        const skipped = result.skipped || []
+        if (skipped.length) {
+          const lines = skipped
+            .slice(0, 8)
+            .map((s) => `• ${s.name}: ${s.reason}`)
+            .join('\n')
+          const more = skipped.length > 8 ? `\n… und ${skipped.length - 8} weitere` : ''
+          showFlash(
+            deleted ? 'warn' : 'error',
+            `${deleted} gelöscht, ${skipped.length} übersprungen:\n${lines}${more}`,
+          )
+        } else {
+          showFlash('ok', `${deleted} Eintrag/Einträge gelöscht.`)
+        }
+        markSaved()
+      } catch (error) {
+        showFlash('error', error.message)
+      } finally {
+        saving = false
+      }
+      return
+    }
 
     if (bulkEditForm.setStock) {
       const locId = Number(bulkEditForm.stock_location_id)
@@ -4071,107 +4116,171 @@
 
 {#if bulkEditModal}
   <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (bulkEditModal = null)}>
-    <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal modal-bulk" role="dialog" aria-modal="true">
       <h3>{bulkEditModal.kind === 'material' ? 'Materialien' : 'Produkte'} mehrfach bearbeiten</h3>
       <p class="empty" style="margin-top:0">
         {bulkEditModal.kind === 'material' ? selectedMaterialIds.length : selectedProductIds.length} ausgewählt —
-        leere Felder bleiben unverändert.
+        {bulkEditForm.deleteSelected ? 'Löschmodus aktiv.' : 'leere Felder bleiben unverändert.'}
       </p>
-      <form class="form-grid" onsubmit={(e) => { e.preventDefault(); submitBulkEdit() }}>
-        <label>Mindestbestand
-          <input
-            type="number"
-            step="0.001"
-            min="0"
-            bind:value={bulkEditForm.min_stock}
-            placeholder="leer = nicht ändern"
-            disabled={bulkEditForm.clear_min_stock}
-          />
-        </label>
-        <label class="tag-check">
-          <input type="checkbox" bind:checked={bulkEditForm.clear_min_stock} />
-          Mindestbestand leeren
-        </label>
-        {#if bulkEditModal.kind === 'product' || bulkEditModal.kind === 'material'}
-          <label>{bulkEditModal.kind === 'material' ? 'Materialfamilie' : 'Produktfamilie'}
-            <input
-              bind:value={bulkEditForm.family}
-              placeholder="leer = nicht ändern"
-              disabled={bulkEditForm.clear_family}
-            />
-          </label>
-          <label class="tag-check">
-            <input type="checkbox" bind:checked={bulkEditForm.clear_family} />
-            Familie leeren
-          </label>
-        {/if}
-        {#if bulkEditModal.kind === 'product'}
-          <label>Ist Vorlage
-            <select bind:value={bulkEditForm.is_template}>
-              <option value="">nicht ändern</option>
-              <option value="yes">ja</option>
-              <option value="no">nein</option>
-            </select>
-          </label>
-        {/if}
-        <label class="tag-check">
-          <input type="checkbox" bind:checked={bulkEditForm.setStock} />
-          Bestand setzen (Absolutwert, mit Warnung)
-        </label>
-        {#if bulkEditForm.setStock}
-          <label>Standort
-            <select bind:value={bulkEditForm.stock_location_id} required>
-              <option value="">wählen…</option>
-              {#each (bulkEditModal.kind === 'material' ? materialLocations : orderedLocations) as loc}
-                <option value={loc.id}>{loc.name}</option>
-              {/each}
-            </select>
-          </label>
-          <label>Bestand (Absolut)
-            <input type="number" step="0.001" bind:value={bulkEditForm.stock_quantity} placeholder="z. B. 10" />
-          </label>
-        {/if}
-        {#if bulkEditModal.kind === 'product'}
-          <label class="tag-check">
-            <input type="checkbox" bind:checked={bulkEditForm.setBom} />
-            Stücklistenzeile hinzufügen/ändern (mit Warnung)
-          </label>
-          {#if bulkEditForm.setBom}
-            <label>Material
-              <select bind:value={bulkEditForm.bom_material_id}>
-                <option value="">wählen…</option>
-                {#each materials as m}<option value={m.id}>{m.name}</option>{/each}
-              </select>
+      <form class="bulk-edit-form" onsubmit={(e) => { e.preventDefault(); submitBulkEdit() }}>
+        <section class="bulk-block bulk-block-danger">
+          <div class="bulk-block-head">
+            <label class="bulk-block-toggle">
+              <input type="checkbox" bind:checked={bulkEditForm.deleteSelected} />
+              <span>
+                <strong>Ausgewählte löschen</strong>
+                <small>Unwiderruflich — andere Aktionen unten sind dann deaktiviert</small>
+              </span>
             </label>
-            <label>Menge pro Produkteinheit
-              <input type="number" step="0.001" min="0.001" bind:value={bulkEditForm.bom_quantity} />
-            </label>
-          {/if}
-        {/if}
-        <label class="tag-check">
-          <input type="checkbox" bind:checked={bulkEditForm.setTags} />
-          Tags ersetzen
-        </label>
-        {#if bulkEditForm.setTags}
-          <fieldset class="tag-picker">
-            <legend>Tags</legend>
-            {#each allTags as t}
-              <label class="tag-check">
+          </div>
+        </section>
+
+        <fieldset class="bulk-edit-fields" disabled={bulkEditForm.deleteSelected}>
+          <section class="bulk-block">
+            <h4 class="bulk-block-title">Mindestbestand</h4>
+            <div class="bulk-block-body">
+              <label class="bulk-field">Wert setzen
                 <input
-                  type="checkbox"
-                  checked={bulkEditForm.tagIds.includes(t.id)}
-                  onchange={() => toggleTagId(bulkEditForm, t.id)}
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  bind:value={bulkEditForm.min_stock}
+                  placeholder="leer = nicht ändern"
+                  disabled={bulkEditForm.clear_min_stock}
                 />
-                {t.name}
               </label>
-            {:else}
-              <p class="empty">Keine Tags im Katalog — unter „Kataloge“ anlegen.</p>
-            {/each}
-          </fieldset>
-        {/if}
+              <label class="bulk-inline-check">
+                <input type="checkbox" bind:checked={bulkEditForm.clear_min_stock} />
+                Stattdessen leeren
+              </label>
+            </div>
+          </section>
+
+          <section class="bulk-block">
+            <h4 class="bulk-block-title">{bulkEditModal.kind === 'material' ? 'Materialfamilie' : 'Produktfamilie'}</h4>
+            <div class="bulk-block-body">
+              <label class="bulk-field">Name setzen
+                <input
+                  bind:value={bulkEditForm.family}
+                  placeholder="leer = nicht ändern"
+                  disabled={bulkEditForm.clear_family}
+                />
+              </label>
+              <label class="bulk-inline-check">
+                <input type="checkbox" bind:checked={bulkEditForm.clear_family} />
+                Stattdessen leeren
+              </label>
+            </div>
+          </section>
+
+          {#if bulkEditModal.kind === 'product'}
+            <section class="bulk-block">
+              <h4 class="bulk-block-title">Ist Vorlage</h4>
+              <div class="bulk-block-body">
+                <label class="bulk-field">Status
+                  <select bind:value={bulkEditForm.is_template}>
+                    <option value="">nicht ändern</option>
+                    <option value="yes">ja</option>
+                    <option value="no">nein</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+          {/if}
+
+          <section class="bulk-block">
+            <div class="bulk-block-head">
+              <label class="bulk-block-toggle">
+                <input type="checkbox" bind:checked={bulkEditForm.setStock} />
+                <span>
+                  <strong>Bestand setzen</strong>
+                  <small>Absolutwert an einem Standort (mit Warnung)</small>
+                </span>
+              </label>
+            </div>
+            {#if bulkEditForm.setStock}
+              <div class="bulk-block-body bulk-block-nested">
+                <label class="bulk-field">Standort
+                  <select bind:value={bulkEditForm.stock_location_id} required>
+                    <option value="">wählen…</option>
+                    {#each (bulkEditModal.kind === 'material' ? materialLocations : orderedLocations) as loc}
+                      <option value={loc.id}>{loc.name}</option>
+                    {/each}
+                  </select>
+                </label>
+                <label class="bulk-field">Bestand (Absolut)
+                  <input type="number" step="0.001" bind:value={bulkEditForm.stock_quantity} placeholder="z. B. 10" />
+                </label>
+              </div>
+            {/if}
+          </section>
+
+          {#if bulkEditModal.kind === 'product'}
+            <section class="bulk-block">
+              <div class="bulk-block-head">
+                <label class="bulk-block-toggle">
+                  <input type="checkbox" bind:checked={bulkEditForm.setBom} />
+                  <span>
+                    <strong>Stücklistenzeile</strong>
+                    <small>Hinzufügen oder Menge ändern (mit Warnung)</small>
+                  </span>
+                </label>
+              </div>
+              {#if bulkEditForm.setBom}
+                <div class="bulk-block-body bulk-block-nested">
+                  <label class="bulk-field">Material
+                    <select bind:value={bulkEditForm.bom_material_id}>
+                      <option value="">wählen…</option>
+                      {#each materials as m}<option value={m.id}>{m.name}</option>{/each}
+                    </select>
+                  </label>
+                  <label class="bulk-field">Menge pro Produkteinheit
+                    <input type="number" step="0.001" min="0.001" bind:value={bulkEditForm.bom_quantity} />
+                  </label>
+                </div>
+              {/if}
+            </section>
+          {/if}
+
+          <section class="bulk-block">
+            <div class="bulk-block-head">
+              <label class="bulk-block-toggle">
+                <input type="checkbox" bind:checked={bulkEditForm.setTags} />
+                <span>
+                  <strong>Tags ersetzen</strong>
+                  <small>Gesamte Tag-Liste der Auswahl überschreiben</small>
+                </span>
+              </label>
+            </div>
+            {#if bulkEditForm.setTags}
+              <div class="bulk-block-body bulk-block-nested">
+                <fieldset class="tag-picker">
+                  <legend>Tags wählen</legend>
+                  {#each allTags as t}
+                    <label class="tag-check">
+                      <input
+                        type="checkbox"
+                        checked={bulkEditForm.tagIds.includes(t.id)}
+                        onchange={() => toggleTagId(bulkEditForm, t.id)}
+                      />
+                      {t.name}
+                    </label>
+                  {:else}
+                    <p class="empty">Keine Tags im Katalog — unter „Kataloge“ anlegen.</p>
+                  {/each}
+                </fieldset>
+              </div>
+            {/if}
+          </section>
+        </fieldset>
+
         <div class="modal-actions">
           <button type="button" class="btn secondary" onclick={() => (bulkEditModal = null)}>Abbrechen</button>
-          <button class="btn" disabled={saving}>Speichern</button>
+          {#if bulkEditForm.deleteSelected}
+            <button class="btn danger" disabled={saving}>Löschen</button>
+          {:else}
+            <button class="btn" disabled={saving}>Speichern</button>
+          {/if}
         </div>
       </form>
     </div>

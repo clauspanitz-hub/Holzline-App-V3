@@ -1020,20 +1020,53 @@ def update_material(db: Session, material_id: int, payload: MaterialUpdate) -> M
 
 def delete_material(db: Session, material_id: int) -> None:
     material = _load_material(db, material_id)
+    err = _delete_material_row(db, material)
+    if err:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=err)
+    db.commit()
+
+
+def _delete_material_row(db: Session, material: Material) -> str | None:
+    """Remove material in-session. Returns error reason or None. Caller commits."""
     if material.product_links:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Material ist in einer Produkt-Stückliste verknüpft und kann nicht gelöscht werden",
-        )
-    # Set-Zuordnungen und Varianten-Stücklisten lösen (sonst RESTRICT).
-    for mapping in db.scalars(select(OptionMapping).where(OptionMapping.material_id == material_id)).all():
+        return "Material ist in einer Produkt-Stückliste verknüpft und kann nicht gelöscht werden"
+    for mapping in db.scalars(select(OptionMapping).where(OptionMapping.material_id == material.id)).all():
         db.delete(mapping)
-    for line in db.scalars(select(SetBomLine).where(SetBomLine.material_id == material_id)).all():
+    for line in db.scalars(select(SetBomLine).where(SetBomLine.material_id == material.id)).all():
         db.delete(line)
     db.flush()
     db.delete(material)
-    db.commit()
+    return None
 
+
+def bulk_delete_materials(db: Session, payload: "BulkDeleteRequest") -> "BulkDeleteResult":
+    from app.schemas import BulkDeleteRequest, BulkDeleteResult, BulkDeleteSkip
+
+    if not isinstance(payload, BulkDeleteRequest):
+        payload = BulkDeleteRequest.model_validate(payload)
+    deleted_ids: list[int] = []
+    skipped: list[BulkDeleteSkip] = []
+    seen: set[int] = set()
+    for mid in payload.ids:
+        if mid in seen:
+            continue
+        seen.add(mid)
+        material = db.scalars(
+            select(Material)
+            .where(Material.id == mid)
+            .options(selectinload(Material.product_links))
+        ).first()
+        if not material:
+            skipped.append(BulkDeleteSkip(id=mid, name="?", reason="nicht gefunden"))
+            continue
+        name = material.name
+        err = _delete_material_row(db, material)
+        if err:
+            skipped.append(BulkDeleteSkip(id=mid, name=name, reason=err))
+            continue
+        deleted_ids.append(mid)
+    db.commit()
+    return BulkDeleteResult(deleted_ids=deleted_ids, skipped=skipped)
 
 def adjust_material_stock(db: Session, material_id: int, payload: StockAdjustRequest) -> MaterialRead:
     _load_material(db, material_id)
@@ -1438,13 +1471,47 @@ def suggest_for_option_value(db: Session, option_value: str) -> list[ColorMatchS
 
 def delete_product(db: Session, product_id: int) -> None:
     product = _load_product(db, product_id)
-    for mapping in db.scalars(select(OptionMapping).where(OptionMapping.product_id == product_id)).all():
+    err = _delete_product_row(db, product)
+    if err:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=err)
+    db.commit()
+
+
+def _delete_product_row(db: Session, product: Product) -> str | None:
+    """Remove product in-session. Returns error reason or None. Caller commits."""
+    for mapping in db.scalars(select(OptionMapping).where(OptionMapping.product_id == product.id)).all():
         db.delete(mapping)
-    for line in db.scalars(select(SetBomLine).where(SetBomLine.product_id == product_id)).all():
+    for line in db.scalars(select(SetBomLine).where(SetBomLine.product_id == product.id)).all():
         db.delete(line)
     db.flush()
     db.delete(product)
+    return None
+
+
+def bulk_delete_products(db: Session, payload: "BulkDeleteRequest") -> "BulkDeleteResult":
+    from app.schemas import BulkDeleteRequest, BulkDeleteResult, BulkDeleteSkip
+
+    if not isinstance(payload, BulkDeleteRequest):
+        payload = BulkDeleteRequest.model_validate(payload)
+    deleted_ids: list[int] = []
+    skipped: list[BulkDeleteSkip] = []
+    seen: set[int] = set()
+    for pid in payload.ids:
+        if pid in seen:
+            continue
+        seen.add(pid)
+        product = db.get(Product, pid)
+        if not product:
+            skipped.append(BulkDeleteSkip(id=pid, name="?", reason="nicht gefunden"))
+            continue
+        name = product.name
+        err = _delete_product_row(db, product)
+        if err:
+            skipped.append(BulkDeleteSkip(id=pid, name=name, reason=err))
+            continue
+        deleted_ids.append(pid)
     db.commit()
+    return BulkDeleteResult(deleted_ids=deleted_ids, skipped=skipped)
 
 
 def adjust_product_stock(db: Session, product_id: int, payload: StockAdjustRequest) -> ProductRead:

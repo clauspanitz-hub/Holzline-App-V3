@@ -345,13 +345,14 @@ table .row-actions .btn {
   top: 1rem;
   right: 1rem;
   z-index: 60;
-  max-width: min(24rem, calc(100vw - 2rem));
+  max-width: min(28rem, calc(100vw - 2rem));
   margin: 0;
   padding: 0.75rem 0.9rem;
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background: var(--bg);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  white-space: pre-wrap;
 }
 
 .flash.error {
@@ -399,6 +400,106 @@ table .row-actions .btn {
 .form-grid {
   display: grid;
   gap: 0.75rem;
+}
+
+.modal-bulk {
+  width: min(640px, 100%);
+}
+
+.bulk-edit-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.bulk-edit-fields {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+.bulk-edit-fields:disabled {
+  opacity: 0.45;
+}
+
+.bulk-block {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-soft, color-mix(in srgb, var(--bg-elevated) 92%, var(--ink) 8%));
+  padding: 0.75rem 0.85rem;
+}
+
+.bulk-block-danger {
+  border-color: color-mix(in srgb, var(--danger, #c45c5c) 45%, var(--line));
+  background: color-mix(in srgb, var(--danger, #c45c5c) 12%, var(--bg-elevated));
+}
+
+.bulk-block-title {
+  margin: 0 0 0.55rem;
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: var(--ink);
+}
+
+.bulk-block-head {
+  margin: 0;
+}
+
+.bulk-block-toggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.65rem;
+  align-items: start;
+  color: var(--ink);
+  font-size: 0.95rem;
+}
+
+.bulk-block-toggle input {
+  width: auto;
+  margin-top: 0.2rem;
+}
+
+.bulk-block-toggle strong {
+  display: block;
+  font-weight: 650;
+}
+
+.bulk-block-toggle small {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.bulk-block-body {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.bulk-block-nested {
+  margin-top: 0.7rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--line);
+}
+
+.bulk-field {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.bulk-inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.bulk-inline-check input {
+  width: auto;
 }
 
 label {

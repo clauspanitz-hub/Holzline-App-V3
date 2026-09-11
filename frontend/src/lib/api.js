@@ -87,6 +87,7 @@ export const api = {
       request('/api/materials/from-colors', { method: 'POST', body: JSON.stringify(body) }),
     update: (id, body) => request(`/api/materials/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     bulkUpdate: (body) => request('/api/materials/bulk-update', { method: 'POST', body: JSON.stringify(body) }),
+    bulkDelete: (body) => request('/api/materials/bulk-delete', { method: 'POST', body: JSON.stringify(body) }),
     remove: (id) => request(`/api/materials/${id}`, { method: 'DELETE' }),
     adjustStock: (id, body) => request(`/api/materials/${id}/stock`, { method: 'PUT', body: JSON.stringify(body) }),
     deltaStock: (id, body) =>
@@ -107,6 +108,7 @@ export const api = {
       request('/api/products/from-colors', { method: 'POST', body: JSON.stringify(body) }),
     update: (id, body) => request(`/api/products/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     bulkUpdate: (body) => request('/api/products/bulk-update', { method: 'POST', body: JSON.stringify(body) }),
+    bulkDelete: (body) => request('/api/products/bulk-delete', { method: 'POST', body: JSON.stringify(body) }),
     remove: (id) => request(`/api/products/${id}`, { method: 'DELETE' }),
     adjustStock: (id, body) => request(`/api/products/${id}/stock`, { method: 'PUT', body: JSON.stringify(body) }),
     deltaStock: (id, body) =>

@@ -539,3 +539,18 @@ class ProductBulkUpdate(BaseModel):
     family: str | None = Field(default=None, max_length=200)
     clear_family: bool = False
     is_template: bool | None = None
+
+
+class BulkDeleteRequest(BaseModel):
+    ids: list[int] = Field(min_length=1)
+
+
+class BulkDeleteSkip(BaseModel):
+    id: int
+    name: str
+    reason: str
+
+
+class BulkDeleteResult(BaseModel):
+    deleted_ids: list[int]
+    skipped: list[BulkDeleteSkip] = []
