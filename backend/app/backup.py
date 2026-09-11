@@ -219,10 +219,17 @@ def _export_product(product: Product) -> dict[str, Any]:
         ],
         "bom": [
             {
-                "material_name": line.material.name,
+                "material_name": line.material.name if line.material else None,
+                "product_name": line.component_product.name if line.component_product else None,
                 "quantity_required": _num(line.quantity_required),
             }
-            for line in sorted(product.materials, key=lambda line: line.material.name)
+            for line in sorted(
+                product.materials,
+                key=lambda line: (
+                    line.material.name if line.material else "",
+                    line.component_product.name if line.component_product else "",
+                ),
+            )
         ],
         "created_at": _iso(product.created_at),
         "updated_at": _iso(product.updated_at),
@@ -716,32 +723,59 @@ def _import_product_links(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
         else:
             product.transform_target_id = None
 
-        desired: dict[int, Decimal] = {}
+        desired_mat: dict[int, Decimal] = {}
+        desired_prod: dict[int, Decimal] = {}
         for raw in entry.get("bom") or []:
             if not isinstance(raw, dict):
                 continue
-            material = ctx.resolve_material(
-                _opt_str(raw, "material_name"), context=f"{context} (Stückliste)"
-            )
-            if material is None:
-                continue
             quantity = _dec_field(raw, "quantity_required", context=f"{context} (Stückliste)")
             if quantity is None or quantity <= 0:
-                ctx.warn(f"{context}: Stücklisten-Menge für „{material.name}“ ungültig — übersprungen")
+                ctx.warn(f"{context}: Stücklisten-Menge ungültig — übersprungen")
                 continue
-            desired[material.id] = services._q(quantity)
+            material_id, product_id = _component_ids(ctx, raw, context=f"{context} (Stückliste)")
+            if material_id is not None:
+                desired_mat[material_id] = services._q(quantity)
+            elif product_id is not None:
+                if product_id == product.id:
+                    ctx.warn(f"{context}: Selbstbezug in Stückliste — übersprungen")
+                    continue
+                desired_prod[product_id] = services._q(quantity)
 
-        existing = {line.material_id: line for line in product.materials}
-        for material_id, line in existing.items():
-            if material_id not in desired:
+        existing_mat = {
+            line.material_id: line for line in product.materials if line.material_id is not None
+        }
+        existing_prod = {
+            line.component_product_id: line
+            for line in product.materials
+            if line.component_product_id is not None
+        }
+        for material_id, line in existing_mat.items():
+            if material_id not in desired_mat:
                 ctx.db.delete(line)
-        for material_id, quantity in desired.items():
-            line = existing.get(material_id)
+        for component_id, line in existing_prod.items():
+            if component_id not in desired_prod:
+                ctx.db.delete(line)
+        for material_id, quantity in desired_mat.items():
+            line = existing_mat.get(material_id)
             if line is None:
                 ctx.db.add(
                     ProductMaterial(
                         product_id=product.id,
                         material_id=material_id,
+                        component_product_id=None,
+                        quantity_required=quantity,
+                    )
+                )
+            else:
+                line.quantity_required = quantity
+        for component_id, quantity in desired_prod.items():
+            line = existing_prod.get(component_id)
+            if line is None:
+                ctx.db.add(
+                    ProductMaterial(
+                        product_id=product.id,
+                        material_id=None,
+                        component_product_id=component_id,
                         quantity_required=quantity,
                     )
                 )

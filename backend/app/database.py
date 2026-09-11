@@ -176,6 +176,7 @@ def init_db() -> None:
         migrate_product_family(engine)
         migrate_material_family(engine)
         migrate_overview_ignored(engine)
+        migrate_product_bom_components(engine)
         seed_admin_user(db)
         from app.services import backfill_incomplete_tags, ensure_system_incomplete_tags
 
@@ -307,6 +308,62 @@ def migrate_overview_ignored(engine) -> None:
                 conn.execute(
                     text(f"ALTER TABLE {table} ADD COLUMN overview_ignored BOOLEAN NOT NULL DEFAULT 0")
                 )
+
+
+def migrate_product_bom_components(engine) -> None:
+    """Allow product_materials lines to reference a component product (XOR with material)."""
+    insp = inspect(engine)
+    if "product_materials" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("product_materials")}
+    if "component_product_id" in cols:
+        return
+
+    with engine.connect() as conn:
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        conn.commit()
+        with conn.begin():
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE product_materials_new (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+                        material_id INTEGER REFERENCES materials(id) ON DELETE RESTRICT,
+                        component_product_id INTEGER REFERENCES products(id) ON DELETE RESTRICT,
+                        quantity_required NUMERIC(14, 3) NOT NULL,
+                        CHECK (
+                            (material_id IS NOT NULL AND component_product_id IS NULL)
+                            OR (material_id IS NULL AND component_product_id IS NOT NULL)
+                        )
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO product_materials_new (id, product_id, material_id, component_product_id, quantity_required)
+                    SELECT id, product_id, material_id, NULL, quantity_required FROM product_materials
+                    """
+                )
+            )
+            conn.execute(text("DROP TABLE product_materials"))
+            conn.execute(text("ALTER TABLE product_materials_new RENAME TO product_materials"))
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_product_bom_material "
+                    "ON product_materials(product_id, material_id) WHERE material_id IS NOT NULL"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_product_bom_component "
+                    "ON product_materials(product_id, component_product_id) WHERE component_product_id IS NOT NULL"
+                )
+            )
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+        conn.commit()
 
 
 def migrate_tags_colors(engine) -> None:

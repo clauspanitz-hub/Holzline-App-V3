@@ -5,10 +5,17 @@ alwaysApply: true
 
 # Commit + Push
 
-Wenn der Nutzer einen Commit verlangt (oder eine Commit-and-Push-Aktion):
+## Wann
+
+- Wenn der Nutzer einen Commit verlangt **oder**
+- nach **freigegebener / abgeschlossener Umsetzung** (Feature, Fix, Grill-Freigabe „ja jetzt“) — **ohne extra Nachfrage** committen und pushen.
+- Ausnahme: Nutzer sagt ausdrücklich „nur committen, nicht pushen“ oder „nicht committen“.
+
+## Ablauf
 
 1. **Alle zugehörigen Änderungen mitnehmen** — Code, Tests, `CONTEXT.md`, ADRs, `PROJECT.md` und UI aus derselben Aufgabe. Keine halben Commits, bei denen Doku/Regelwerk zurückbleibt.
 2. **Unrelated weglassen** — nur Dateien der aktuellen Arbeit; Secrets/`.env` nie.
 3. **Commit-Message mit Änderungsinhalt** — immer eine klare Message: kurze Überschrift (warum/was) plus Bullet-Liste der konkreten Änderungen (Dateien/Features, nicht nur „update docs“). Ausnahme nur wenn der Nutzer eine Message vorgibt.
 4. **Danach pushen** — nach erfolgreichem Commit immer `git push` auf den Tracking-Remote der aktuellen Branch (`origin`), außer der Nutzer sagt ausdrücklich „nur committen, nicht pushen“.
-5. **Kurz melden** — Commit-Hash und dass gepusht wurde (oder warum der Push scheiterte).
+5. **Deploy** — bei App-Änderungen danach wie in `DEPLOYMENT.md` auf CT 131 deployen (git pull + compose build), sofern nicht ausdrücklich nur Commit/Push gewünscht.
+6. **Kurz melden** — Commit-Hash, dass gepusht wurde, Deploy-Status (oder warum etwas scheiterte).

@@ -171,13 +171,16 @@ class MaterialRead(BaseModel):
     updated_by: str | None = None
 
 
-class BomLineBase(BaseModel):
-    material_id: int
+class BomLineCreate(BaseModel):
+    material_id: int | None = None
+    product_id: int | None = None
     quantity_required: Quantity = Field(gt=0)
 
-
-class BomLineCreate(BomLineBase):
-    pass
+    @model_validator(mode="after")
+    def one_component(self) -> "BomLineCreate":
+        if (self.material_id is None) == (self.product_id is None):
+            raise ValueError("Genau eines von material_id oder product_id setzen")
+        return self
 
 
 class BomLineUpdate(BaseModel):
@@ -185,12 +188,12 @@ class BomLineUpdate(BaseModel):
 
 
 class BomLineRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     id: int
-    material_id: int
-    material_name: str
-    material_unit: Unit
+    material_id: int | None = None
+    product_id: int | None = None
+    component_name: str
+    component_kind: Literal["material", "product"]
+    material_unit: Unit | None = None
     quantity_required: Quantity
     line_cost: Money
 

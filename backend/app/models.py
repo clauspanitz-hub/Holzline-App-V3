@@ -146,6 +146,7 @@ class Product(Base):
     materials: Mapped[list["ProductMaterial"]] = relationship(
         back_populates="product",
         cascade="all, delete-orphan",
+        foreign_keys="ProductMaterial.product_id",
     )
     stocks: Mapped[list["ProductStock"]] = relationship(back_populates="product", cascade="all, delete-orphan")
 
@@ -177,16 +178,31 @@ class ProductStock(Base):
 
 
 class ProductMaterial(Base):
+    """Stücklistenzeile eines Produkts: genau ein Material oder ein Komponenten-Produkt."""
+
     __tablename__ = "product_materials"
-    __table_args__ = (UniqueConstraint("product_id", "material_id", name="uq_product_material"),)
+    __table_args__ = (
+        CheckConstraint(
+            "(material_id IS NOT NULL AND component_product_id IS NULL) OR "
+            "(material_id IS NULL AND component_product_id IS NOT NULL)",
+            name="ck_product_bom_one_component",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
-    material_id: Mapped[int] = mapped_column(ForeignKey("materials.id", ondelete="RESTRICT"), nullable=False)
+    material_id: Mapped[int | None] = mapped_column(ForeignKey("materials.id", ondelete="RESTRICT"), nullable=True)
+    component_product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("products.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     quantity_required: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
 
-    product: Mapped[Product] = relationship(back_populates="materials")
-    material: Mapped[Material] = relationship(back_populates="product_links")
+    product: Mapped[Product] = relationship(back_populates="materials", foreign_keys=[product_id])
+    material: Mapped[Material | None] = relationship(back_populates="product_links")
+    component_product: Mapped[Product | None] = relationship(
+        foreign_keys=[component_product_id],
+    )
 
 
 class ProductSet(Base):

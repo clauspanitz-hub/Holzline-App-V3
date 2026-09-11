@@ -41,11 +41,11 @@ Einzelne Ziffern sind **Produkte**. Kanonischer Name: `Ziffern Einzeln - {0–9}
 _Avoid_: Zahlenfarbe → einzelne Ziffern als Normalfall in der Set-Zuordnung; Einzelziffern als Material; Name ohne zweiten Bindestrich vor der Farbe (`… - 1 Beige`); Familie pro Ziffer statt `Ziffern`
 
 **Stückliste**:
-Die Zuordnung, welche Positionen in welcher Menge für eine Einheit benötigt werden. Produkt-Stückliste: Materialien fürs Fertigen. Set-/Varianten-Stückliste: Materialien und/oder Produkte zum Zusammenstellen.
-_Avoid_: Recipe, BOM, Rezept, Bill of Materials (in der UI)
+Die Zuordnung, welche Positionen in welcher Menge für eine Einheit benötigt werden. **Produkt-Stückliste:** Materialien und/oder **Produkte** (Komponenten) fürs Fertigen — genau eines je Zeile. **Set-/Varianten-Stückliste:** Materialien und/oder Produkte zum Zusammenstellen.
+_Avoid_: Recipe, BOM, Rezept, Bill of Materials (in der UI); Produkt-Stückliste nur Materialien (veraltet)
 
 **Fertigen**:
-Der Vorgang, bei dem eine Menge eines Produkts hergestellt wird: Produktbestand steigt, Materialbestände werden laut Stückliste abgebucht.
+Der Vorgang, bei dem eine Menge eines Produkts hergestellt wird: Produktbestand steigt; Stücklistenzeilen werden am gewählten Standort abgebucht (Material **oder** Komponenten-Produkt, eine Ebene — keine rekursive Materialabbuchung der Komponenten).
 _Avoid_: Produzieren, Herstellen, Buchen (als alleiniger Begriff für diesen Vorgang); Zusammenstellen eines Sets (das ist kein Fertigen auf Set-Ebene)
 
 **Zusammenstellen**:

@@ -704,22 +704,53 @@ def _get_or_create_product_stock(db: Session, product_id: int, location_id: int)
     return row
 
 
-def material_cost_for_product(product: Product) -> Decimal:
+def material_cost_for_product(product: Product, *, _seen: set[int] | None = None) -> Decimal:
+    """Roll up material purchase cost through nested product BOM lines."""
+    seen = set() if _seen is None else _seen
+    if product.id in seen:
+        return Decimal("0")
+    seen.add(product.id)
     total = Decimal("0")
     for line in product.materials:
-        total += Decimal(line.quantity_required) * Decimal(line.material.cost_per_unit)
+        qty = Decimal(line.quantity_required)
+        if line.material_id is not None and line.material is not None:
+            total += qty * Decimal(line.material.cost_per_unit)
+        elif line.component_product is not None:
+            total += qty * material_cost_for_product(line.component_product, _seen=seen)
+        elif line.component_product_id is not None:
+            # lazy: cost unknown without load — treat as 0 in this path
+            pass
     return _m(total)
 
 
-def bom_line_read(line: ProductMaterial) -> BomLineRead:
-    line_cost = _m(Decimal(line.quantity_required) * Decimal(line.material.cost_per_unit))
+def bom_line_read(line: ProductMaterial, *, db: Session | None = None) -> BomLineRead:
+    qty = Decimal(line.quantity_required)
+    if line.material_id is not None and line.material is not None:
+        line_cost = _m(qty * Decimal(line.material.cost_per_unit))
+        return BomLineRead(
+            id=line.id,
+            material_id=line.material_id,
+            product_id=None,
+            component_name=line.material.name,
+            component_kind="material",
+            material_unit=line.material.unit,
+            quantity_required=line.quantity_required,
+            line_cost=line_cost,
+        )
+    component = line.component_product
+    if component is None and db is not None and line.component_product_id is not None:
+        component = _load_product(db, line.component_product_id)
+    name = component.name if component else f"Produkt #{line.component_product_id}"
+    nested_cost = material_cost_for_product(component) if component else Decimal("0")
     return BomLineRead(
         id=line.id,
-        material_id=line.material_id,
-        material_name=line.material.name,
-        material_unit=line.material.unit,
+        material_id=None,
+        product_id=line.component_product_id,
+        component_name=name,
+        component_kind="product",
+        material_unit=None,
         quantity_required=line.quantity_required,
-        line_cost=line_cost,
+        line_cost=_m(qty * Decimal(nested_cost)),
     )
 
 
@@ -1115,6 +1146,13 @@ def _load_product(db: Session, product_id: int) -> Product:
         .where(Product.id == product_id)
         .options(
             selectinload(Product.materials).selectinload(ProductMaterial.material),
+            selectinload(Product.materials).selectinload(ProductMaterial.component_product).selectinload(
+                Product.materials
+            ).selectinload(ProductMaterial.material),
+            selectinload(Product.materials)
+            .selectinload(ProductMaterial.component_product)
+            .selectinload(Product.materials)
+            .selectinload(ProductMaterial.component_product),
             selectinload(Product.stocks).selectinload(ProductStock.location),
             selectinload(Product.color).selectinload(Color.medium),
             selectinload(Product.tags),
@@ -1137,6 +1175,13 @@ def list_products(
         .order_by(Product.updated_at.desc(), Product.name)
         .options(
             selectinload(Product.materials).selectinload(ProductMaterial.material),
+            selectinload(Product.materials).selectinload(ProductMaterial.component_product).selectinload(
+                Product.materials
+            ).selectinload(ProductMaterial.material),
+            selectinload(Product.materials)
+            .selectinload(ProductMaterial.component_product)
+            .selectinload(Product.materials)
+            .selectinload(ProductMaterial.component_product),
             selectinload(Product.stocks).selectinload(ProductStock.location),
             selectinload(Product.color).selectinload(Color.medium),
             selectinload(Product.tags),
@@ -1208,6 +1253,62 @@ def _material_for_target_color(db: Session, source_material: Material, target_co
     ).first()
 
 
+def _product_for_target_color(db: Session, source: Product, target_color_id: int) -> Product | None:
+    """Remap a BOM component product to the same series name with the target color."""
+    if source.color_id is None:
+        return source
+    if source.color_id == target_color_id:
+        return source
+    target_color = get_color(db, target_color_id)
+    source_color = source.color or get_color(db, source.color_id)
+    if not target_color or not source_color:
+        return None
+    name = source.name
+    for sep in (f" - {source_color.name}", f" {source_color.name}"):
+        if name.endswith(sep):
+            base = name[: -len(sep)]
+            for new_sep in (f" - {target_color.name}", f" {target_color.name}"):
+                candidate = f"{base}{new_sep}"
+                found = db.scalars(select(Product).where(Product.name == candidate).limit(1)).first()
+                if found:
+                    return found
+    if source.family:
+        matches = list(
+            db.scalars(
+                select(Product).where(
+                    Product.family == source.family,
+                    Product.color_id == target_color_id,
+                )
+            ).all()
+        )
+        if len(matches) == 1:
+            return matches[0]
+    return None
+
+
+def _bom_would_cycle(db: Session, parent_id: int, component_product_id: int) -> bool:
+    """True if adding component_product_id under parent_id would create a cycle."""
+    if component_product_id == parent_id:
+        return True
+    stack = [component_product_id]
+    seen: set[int] = set()
+    while stack:
+        current = stack.pop()
+        if current == parent_id:
+            return True
+        if current in seen:
+            continue
+        seen.add(current)
+        child_ids = db.scalars(
+            select(ProductMaterial.component_product_id).where(
+                ProductMaterial.product_id == current,
+                ProductMaterial.component_product_id.is_not(None),
+            )
+        ).all()
+        stack.extend(int(cid) for cid in child_ids if cid is not None)
+    return False
+
+
 def create_products_from_colors(db: Session, payload: ProductsFromColorsRequest) -> ProductsFromColorsResult:
     from app.schemas import BulkSkipInfo
 
@@ -1270,32 +1371,64 @@ def create_products_from_colors(db: Session, payload: ProductsFromColorsRequest)
         )
 
         used_material_ids: set[int] = set()
+        used_component_ids: set[int] = set()
         for line in template_lines:
-            source_mat = line.material
-            if source_mat is None:
-                source_mat = db.get(Material, line.material_id)
-            if source_mat is None:
-                continue
-            # ensure color loaded for remap
-            if source_mat.color_id is not None and source_mat.color is None:
-                source_mat = _load_material(db, source_mat.id)
-            target_mat = _material_for_target_color(db, source_mat, color.id)
-            if target_mat is None:
-                warnings.append(
-                    f"Produkt „{name}“: Stückliste ohne „{source_mat.name}“ "
-                    f"(kein Material mit Farbe {color.name})."
+            if line.material_id is not None:
+                source_mat = line.material
+                if source_mat is None:
+                    source_mat = db.get(Material, line.material_id)
+                if source_mat is None:
+                    continue
+                if source_mat.color_id is not None and source_mat.color is None:
+                    source_mat = _load_material(db, source_mat.id)
+                target_mat = _material_for_target_color(db, source_mat, color.id)
+                if target_mat is None:
+                    warnings.append(
+                        f"Produkt „{name}“: Stückliste ohne „{source_mat.name}“ "
+                        f"(kein Material mit Farbe {color.name})."
+                    )
+                    continue
+                if target_mat.id in used_material_ids:
+                    warnings.append(
+                        f"Produkt „{name}“: doppelte Stücklistenzeile für „{target_mat.name}“ übersprungen."
+                    )
+                    continue
+                used_material_ids.add(target_mat.id)
+                db.add(
+                    ProductMaterial(
+                        product_id=product.id,
+                        material_id=target_mat.id,
+                        component_product_id=None,
+                        quantity_required=_q(line.quantity_required),
+                    )
                 )
                 continue
-            if target_mat.id in used_material_ids:
+
+            source_comp = line.component_product
+            if source_comp is None and line.component_product_id is not None:
+                source_comp = db.get(Product, line.component_product_id)
+            if source_comp is None:
+                continue
+            if source_comp.color_id is not None and source_comp.color is None:
+                source_comp = _load_product(db, source_comp.id)
+            target_comp = _product_for_target_color(db, source_comp, color.id)
+            if target_comp is None:
                 warnings.append(
-                    f"Produkt „{name}“: doppelte Stücklistenzeile für „{target_mat.name}“ übersprungen."
+                    f"Produkt „{name}“: Stückliste ohne „{source_comp.name}“ "
+                    f"(kein Produkt mit Farbe {color.name})."
                 )
                 continue
-            used_material_ids.add(target_mat.id)
+            if target_comp.id in used_component_ids or target_comp.id == product.id:
+                warnings.append(
+                    f"Produkt „{name}“: doppelte/ungültige Stücklistenzeile für „{target_comp.name}“ übersprungen."
+                )
+                continue
+            used_component_ids.add(target_comp.id)
             db.add(
                 ProductMaterial(
                     product_id=product.id,
-                    material_id=target_mat.id,
+                    material_id=None,
+                    component_product_id=target_comp.id,
                     quantity_required=_q(line.quantity_required),
                 )
             )
@@ -1479,6 +1612,11 @@ def delete_product(db: Session, product_id: int) -> None:
 
 def _delete_product_row(db: Session, product: Product) -> str | None:
     """Remove product in-session. Returns error reason or None. Caller commits."""
+    used_as_component = db.scalars(
+        select(ProductMaterial.id).where(ProductMaterial.component_product_id == product.id).limit(1)
+    ).first()
+    if used_as_component is not None:
+        return "Produkt ist in einer Produkt-Stückliste verknüpft und kann nicht gelöscht werden"
     for mapping in db.scalars(select(OptionMapping).where(OptionMapping.product_id == product.id)).all():
         db.delete(mapping)
     for line in db.scalars(select(SetBomLine).where(SetBomLine.product_id == product.id)).all():
@@ -1603,12 +1741,28 @@ def transform_product(
 def add_bom_line(db: Session, product_id: int, payload: BomLineCreate) -> ProductRead:
     product = _load_product(db, product_id)
     before_missing = product_incomplete_fields_raw(product)
-    _load_material(db, payload.material_id)
-    line = ProductMaterial(
-        product_id=product.id,
-        material_id=payload.material_id,
-        quantity_required=_q(payload.quantity_required),
-    )
+    if payload.material_id is not None:
+        _load_material(db, payload.material_id)
+        line = ProductMaterial(
+            product_id=product.id,
+            material_id=payload.material_id,
+            component_product_id=None,
+            quantity_required=_q(payload.quantity_required),
+        )
+    else:
+        assert payload.product_id is not None
+        if _bom_would_cycle(db, product.id, payload.product_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Stückliste würde einen Zyklus erzeugen (Produkt enthält sich selbst).",
+            )
+        _load_product(db, payload.product_id)
+        line = ProductMaterial(
+            product_id=product.id,
+            material_id=None,
+            component_product_id=payload.product_id,
+            quantity_required=_q(payload.quantity_required),
+        )
     db.add(line)
     db.flush()
     db.expire(product, ["materials"])
@@ -1621,7 +1775,7 @@ def add_bom_line(db: Session, product_id: int, payload: BomLineCreate) -> Produc
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Material ist bereits in der Stückliste",
+            detail="Komponente ist bereits in der Stückliste",
         ) from exc
     return product_read(_load_product(db, product.id))
 
@@ -1665,14 +1819,31 @@ def manufacture(db: Session, product_id: int, quantity: Decimal, location_id: in
 
     for line in product.materials:
         needed = _q(qty * Decimal(line.quantity_required))
-        mat_stock = _get_or_create_material_stock(db, line.material_id, location.id)
-        new_stock = _q(Decimal(mat_stock.quantity) - needed)
-        if new_stock < 0:
-            warnings.append(
-                f"Material „{line.material.name}“ an {location.name} wird negativ "
-                f"(Bestand {new_stock} {line.material.unit.value} nach Abbuchung von {needed})."
+        if line.material_id is not None:
+            mat_stock = _get_or_create_material_stock(db, line.material_id, location.id)
+            new_stock = _q(Decimal(mat_stock.quantity) - needed)
+            mat_name = line.material.name if line.material else f"#{line.material_id}"
+            unit = line.material.unit.value if line.material else ""
+            if new_stock < 0:
+                warnings.append(
+                    f"Material „{mat_name}“ an {location.name} wird negativ "
+                    f"(Bestand {new_stock} {unit} nach Abbuchung von {needed})."
+                )
+            mat_stock.quantity = new_stock
+        elif line.component_product_id is not None:
+            comp_stock = _get_or_create_product_stock(db, line.component_product_id, location.id)
+            new_stock = _q(Decimal(comp_stock.quantity) - needed)
+            comp_name = (
+                line.component_product.name
+                if line.component_product
+                else f"#{line.component_product_id}"
             )
-        mat_stock.quantity = new_stock
+            if new_stock < 0:
+                warnings.append(
+                    f"Produkt „{comp_name}“ an {location.name} wird negativ "
+                    f"(Bestand {new_stock} nach Abbuchung von {needed})."
+                )
+            comp_stock.quantity = new_stock
 
     db.commit()
     refreshed = _load_product(db, product.id)

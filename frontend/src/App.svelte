@@ -101,7 +101,7 @@
 
   let materialForm = $state(emptyMaterial())
   let productForm = $state(emptyProduct())
-  let bomForm = $state({ material_id: '', quantity_required: '' })
+  let bomForm = $state({ kind: 'material', material_id: '', product_id: '', quantity_required: '' })
   let manufactureForm = $state({ quantity: '1', location_id: '' })
   let transferForm = $state({ from_location_id: '', to_location_id: '', quantity: '1', note: '' })
   let transformForm = $state({ location_id: '', quantity: '1', note: '' })
@@ -1215,7 +1215,7 @@
       tagIds: (product.tags || []).map((t) => t.id),
     }
     showProductTags = productForm.tagIds.length > 0
-    bomForm = { material_id: '', quantity_required: '' }
+    bomForm = { kind: 'material', material_id: '', product_id: '', quantity_required: '' }
     initStockDrafts(product)
     productModal = { mode: 'edit', product }
     loadColorSuggestions(product.color_id)
@@ -1227,7 +1227,7 @@
       return
     }
     try {
-      colorSuggestions = await api.suggestions.byColor(colorId, { materials: true, products: false })
+      colorSuggestions = await api.suggestions.byColor(colorId, { materials: true, products: true })
     } catch {
       colorSuggestions = []
     }
@@ -1479,7 +1479,13 @@
 
   function applySuggestion(s) {
     if (productModal && s.kind === 'material') {
+      bomForm.kind = 'material'
       bomForm.material_id = String(s.id)
+      bomForm.product_id = ''
+    } else if (productModal && s.kind === 'product') {
+      bomForm.kind = 'product'
+      bomForm.product_id = String(s.id)
+      bomForm.material_id = ''
     } else if (setModal) {
       mappingForm.kind = s.kind
       mappingForm.component_id = String(s.id)
@@ -1691,7 +1697,7 @@
           tagIds: (item.tags || []).map((t) => t.id),
         }
         initStockDrafts(fresh || created)
-        bomForm = { material_id: '', quantity_required: '' }
+        bomForm = { kind: 'material', material_id: '', product_id: '', quantity_required: '' }
         inlineMaterialForm = null
         await loadColorSuggestions((fresh || created).color_id)
         const mid = productForm.medium_id
@@ -1806,13 +1812,24 @@
       showFlash('error', 'Bitte die Menge pro Produkteinheit angeben (z. B. 0,056).')
       return
     }
+    const body = { quantity_required: bomForm.quantity_required }
+    if (bomForm.kind === 'product') {
+      if (!bomForm.product_id) {
+        showFlash('error', 'Bitte ein Produkt für die Stückliste wählen.')
+        return
+      }
+      body.product_id = Number(bomForm.product_id)
+    } else {
+      if (!bomForm.material_id) {
+        showFlash('error', 'Bitte ein Material für die Stückliste wählen.')
+        return
+      }
+      body.material_id = Number(bomForm.material_id)
+    }
     saving = true
     try {
-      const updated = await api.products.addBom(productModal.product.id, {
-        material_id: Number(bomForm.material_id),
-        quantity_required: bomForm.quantity_required,
-      })
-      bomForm = { material_id: '', quantity_required: '' }
+      const updated = await api.products.addBom(productModal.product.id, body)
+      bomForm = { kind: bomForm.kind, material_id: '', product_id: '', quantity_required: '' }
       await refresh()
       productModal = { mode: 'edit', product: products.find((p) => p.id === updated.id) || updated }
       initStockDrafts(productModal.product)
@@ -1837,7 +1854,7 @@
         location_id: Number(inlineMaterialForm.location_id),
       })
       await refresh()
-      bomForm = { material_id: String(created.id), quantity_required: bomForm.quantity_required || '' }
+      bomForm = { kind: 'material', material_id: String(created.id), product_id: '', quantity_required: bomForm.quantity_required || '' }
       inlineMaterialForm = null
       showFlash('ok', `Material „${created.name}“ angelegt — Menge eintragen und hinzufügen.`)
     } catch (error) {
@@ -2040,6 +2057,14 @@
 
   const availableBomMaterials = $derived(
     materials.filter((m) => !productModal?.product?.bom?.some((line) => line.material_id === m.id)),
+  )
+
+  const availableBomProducts = $derived(
+    products.filter(
+      (p) =>
+        p.id !== productModal?.product?.id &&
+        !productModal?.product?.bom?.some((line) => line.product_id === p.id),
+    ),
   )
 
   const optionNames = $derived(
@@ -3419,14 +3444,17 @@
         </div>
         <div class="bom-block">
           <h4>Stückliste · Materialkosten {formatMoney(productModal.product.material_cost)}</h4>
-          <p class="empty" style="margin-top:0">Menge = Verbrauch <strong>pro 1 Produkt</strong>. Beispiel: 18 Ringe aus 1 Platte → 0,056.</p>
+          <p class="empty" style="margin-top:0">
+            Menge = Verbrauch <strong>pro 1 Produkt</strong>. Zeilen können Material oder Produkt sein
+            (z. B. Ziffernset aus Einzelziffern).
+          </p>
           {#if colorSuggestions.length}
             <div class="suggest-block">
               <p class="empty" style="margin:0 0 .35rem">Vorschläge gleiche Farbe (nicht automatisch eingefügt):</p>
               <div class="suggest-chips">
                 {#each colorSuggestions as s}
                   <button type="button" class="chip" onclick={() => applySuggestion(s)}>
-                    {s.name} · {s.color_label}
+                    {s.kind === 'product' ? 'Produkt' : 'Material'}: {s.name} · {s.color_label}
                   </button>
                 {/each}
               </div>
@@ -3434,33 +3462,63 @@
           {/if}
           {#each productModal.product.bom as line}
             <div class="bom-line">
-              <div>{line.material_name} · {formatQty(line.quantity_required)} {line.material_unit} · {formatMoney(line.line_cost)}</div>
+              <div>
+                {line.component_kind === 'product' ? 'Produkt' : 'Material'}:
+                {line.component_name || line.material_name}
+                · {formatQty(line.quantity_required)}{line.material_unit ? ` ${line.material_unit}` : ''}
+                · {formatMoney(line.line_cost)}
+              </div>
               <button class="btn danger" onclick={() => removeBomLine(line)}>Entfernen</button>
             </div>
           {:else}
             <p class="empty">Keine Stückliste.</p>
           {/each}
           <div class="form-grid" style="margin-top:.75rem">
-            <label>Material
-              <select bind:value={bomForm.material_id}>
-                <option value="">wählen…</option>
-                {#each availableBomMaterials as m}<option value={m.id}>{m.name} ({m.unit})</option>{/each}
+            <label>Art
+              <select bind:value={bomForm.kind}>
+                <option value="material">Material</option>
+                <option value="product">Produkt</option>
               </select>
             </label>
+            {#if bomForm.kind === 'product'}
+              <label>Produkt
+                <select bind:value={bomForm.product_id}>
+                  <option value="">wählen…</option>
+                  {#each availableBomProducts as p}<option value={p.id}>{p.name}</option>{/each}
+                </select>
+              </label>
+            {:else}
+              <label>Material
+                <select bind:value={bomForm.material_id}>
+                  <option value="">wählen…</option>
+                  {#each availableBomMaterials as m}<option value={m.id}>{m.name} ({m.unit})</option>{/each}
+                </select>
+              </label>
+            {/if}
             <label>Menge pro Produkteinheit
               <input type="number" step="0.001" min="0.001" bind:value={bomForm.quantity_required} placeholder="z. B. 0,056" required />
             </label>
             <div class="row-actions">
-              <button class="btn secondary" disabled={!bomForm.material_id || !bomForm.quantity_required || saving} onclick={addBomLine}>
+              <button
+                class="btn secondary"
+                disabled={
+                  saving ||
+                  !bomForm.quantity_required ||
+                  (bomForm.kind === 'product' ? !bomForm.product_id : !bomForm.material_id)
+                }
+                onclick={addBomLine}
+              >
                 Zur Stückliste hinzufügen
               </button>
-              <button
-                type="button"
-                class="btn secondary"
-                onclick={() => (inlineMaterialForm = inlineMaterialForm ? null : emptyInlineMaterial())}
-              >
-                {inlineMaterialForm ? 'Material-Anlage ausblenden' : 'Fehlendes Material anlegen'}
-              </button>
+              {#if bomForm.kind === 'material'}
+                <button
+                  type="button"
+                  class="btn secondary"
+                  onclick={() => (inlineMaterialForm = inlineMaterialForm ? null : emptyInlineMaterial())}
+                >
+                  {inlineMaterialForm ? 'Material-Anlage ausblenden' : 'Fehlendes Material anlegen'}
+                </button>
+              {/if}
             </div>
           </div>
           {#if inlineMaterialForm}
