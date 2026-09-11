@@ -100,6 +100,8 @@ export const api = {
     transfer: (id, body) => request(`/api/products/${id}/transfer`, { method: 'POST', body: JSON.stringify(body) }),
     transform: (id, body) => request(`/api/products/${id}/transform`, { method: 'POST', body: JSON.stringify(body) }),
     addBom: (id, body) => request(`/api/products/${id}/bom`, { method: 'POST', body: JSON.stringify(body) }),
+    updateBom: (id, lineId, body) =>
+      request(`/api/products/${id}/bom/${lineId}`, { method: 'PATCH', body: JSON.stringify(body) }),
     removeBom: (id, lineId) => request(`/api/products/${id}/bom/${lineId}`, { method: 'DELETE' }),
     manufacture: (id, body) =>
       request(`/api/products/${id}/manufacture`, { method: 'POST', body: JSON.stringify(body) }),

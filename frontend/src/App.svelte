@@ -142,6 +142,12 @@
       family: '',
       clear_family: false,
       is_template: '', // '' = nicht ändern, 'yes', 'no'
+      setStock: false,
+      stock_location_id: '',
+      stock_quantity: '',
+      setBom: false,
+      bom_material_id: '',
+      bom_quantity: '',
     }
   }
 
@@ -403,6 +409,38 @@
     const kind = bulkEditModal?.kind
     const ids = kind === 'material' ? selectedMaterialIds : selectedProductIds
     if (!ids.length) return
+
+    if (bulkEditForm.setStock) {
+      const locId = Number(bulkEditForm.stock_location_id)
+      const qty = bulkEditForm.stock_quantity
+      if (!locId || qty === '' || qty == null) {
+        showFlash('error', 'Für Bestand Standort und Menge angeben.')
+        return
+      }
+      if (
+        !confirm(
+          `WARNUNG: Bestand von ${ids.length} Einträgen an diesem Standort auf ${qty} setzen?\nDas überschreibt die bisherigen Werte.`,
+        )
+      ) {
+        return
+      }
+    }
+    if (kind === 'product' && bulkEditForm.setBom) {
+      const mid = Number(bulkEditForm.bom_material_id)
+      const qty = bulkEditForm.bom_quantity
+      if (!mid || !qty || Number(qty) <= 0) {
+        showFlash('error', 'Für Stückliste Material und Menge angeben.')
+        return
+      }
+      if (
+        !confirm(
+          `WARNUNG: Stücklistenzeile (Material ${mid}, Menge ${qty}) bei ${ids.length} Produkten hinzufügen oder ändern?\nAndere Zeilen bleiben erhalten.`,
+        )
+      ) {
+        return
+      }
+    }
+
     const body = { ids }
     if (bulkEditForm.clear_min_stock) {
       body.clear_min_stock = true
@@ -419,16 +457,44 @@
     }
     saving = true
     try {
-      if (kind === 'material') {
-        await api.materials.bulkUpdate(body)
-        selectedMaterialIds = []
-      } else {
-        await api.products.bulkUpdate(body)
-        selectedProductIds = []
+      const hasSafeFields =
+        body.clear_min_stock ||
+        body.min_stock != null ||
+        body.tag_ids ||
+        body.clear_family ||
+        body.family != null ||
+        body.is_template != null
+      if (hasSafeFields) {
+        if (kind === 'material') await api.materials.bulkUpdate(body)
+        else await api.products.bulkUpdate(body)
       }
+      if (bulkEditForm.setStock) {
+        const locId = Number(bulkEditForm.stock_location_id)
+        const quantity = String(bulkEditForm.stock_quantity)
+        for (const id of ids) {
+          if (kind === 'material') await api.materials.adjustStock(id, { location_id: locId, quantity })
+          else await api.products.adjustStock(id, { location_id: locId, quantity })
+        }
+      }
+      if (kind === 'product' && bulkEditForm.setBom) {
+        const materialId = Number(bulkEditForm.bom_material_id)
+        const quantity_required = String(bulkEditForm.bom_quantity)
+        for (const id of ids) {
+          const product = products.find((p) => p.id === id)
+          const existing = (product?.bom || []).find((line) => line.material_id === materialId)
+          if (existing) {
+            await api.products.updateBom(id, existing.id, { quantity_required })
+          } else {
+            await api.products.addBom(id, { material_id: materialId, quantity_required })
+          }
+        }
+      }
+      if (kind === 'material') selectedMaterialIds = []
+      else selectedProductIds = []
       bulkEditModal = null
       await refresh()
       showFlash('ok', `${ids.length} Eintrag/Einträge aktualisiert.`)
+      markSaved()
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -484,10 +550,67 @@
     colorSuggestions = []
   }
 
-  function toggleTagId(form, tagId) {
+  function familyMembers(kind, family, excludeId = null) {
+    const key = String(family || '').trim()
+    if (!key) return []
+    const rows = kind === 'material' ? materials : products
+    return rows.filter((row) => productFamilyKey(row) === key && row.id !== excludeId)
+  }
+
+  /** Tag ist bei allen Familienmitgliedern schon gesetzt → ausgegraut. */
+  function tagFullyOnFamily(kind, family, tagId) {
+    const members = familyMembers(kind, family)
+    if (!members.length) return false
+    return members.every((row) => (row.tags || []).some((t) => t.id === tagId))
+  }
+
+  async function toggleTagId(form, tagId, kind = null) {
     const id = Number(tagId)
-    if (form.tagIds.includes(id)) form.tagIds = form.tagIds.filter((x) => x !== id)
-    else form.tagIds = [...form.tagIds, id]
+    const adding = !form.tagIds.includes(id)
+    if (!adding) {
+      form.tagIds = form.tagIds.filter((x) => x !== id)
+      return
+    }
+    form.tagIds = [...form.tagIds, id]
+    if (!kind) return
+
+    const family = String(form.family || '').trim()
+    const editingId =
+      kind === 'material'
+        ? materialModal?.mode === 'edit'
+          ? materialModal.id
+          : null
+        : productModal?.mode === 'edit'
+          ? productModal.product?.id
+          : null
+    if (!family || !editingId) return
+
+    const siblings = familyMembers(kind, family, editingId).filter(
+      (row) => !(row.tags || []).some((t) => t.id === id),
+    )
+    if (!siblings.length) return
+    const tagName = allTags.find((t) => t.id === id)?.name || 'Tag'
+    if (
+      !confirm(
+        `Tag „${tagName}“ auch ${siblings.length} weiteren ${kind === 'material' ? 'Materialien' : 'Produkten'} der Familie „${family}“ geben?`,
+      )
+    ) {
+      return
+    }
+    saving = true
+    try {
+      for (const row of siblings) {
+        const tag_ids = [...new Set([...(row.tags || []).map((t) => t.id), id])]
+        if (kind === 'material') await api.materials.update(row.id, { tag_ids })
+        else await api.products.update(row.id, { tag_ids })
+      }
+      await refresh({ silent: true })
+      showFlash('ok', `Tag „${tagName}“ an Familie „${family}“ vergeben.`)
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
   }
 
   function mediumIdFromColor(colorId) {
@@ -2629,13 +2752,15 @@
           <fieldset class="tag-picker">
             <legend>Tags</legend>
             {#each allTags as t}
-              <label class="tag-check">
+              {@const familyTaken = tagFullyOnFamily('material', materialForm.family, t.id)}
+              <label class="tag-check" class:tag-muted={familyTaken && !materialForm.tagIds.includes(t.id)}>
                 <input
                   type="checkbox"
                   checked={materialForm.tagIds.includes(t.id)}
-                  onchange={() => toggleTagId(materialForm, t.id)}
+                  disabled={familyTaken && !materialForm.tagIds.includes(t.id)}
+                  onchange={() => toggleTagId(materialForm, t.id, 'material')}
                 />
-                {t.name}
+                {t.name}{#if familyTaken && !materialForm.tagIds.includes(t.id)} <span class="empty">(Familie hat ihn)</span>{/if}
               </label>
             {:else}
               <p class="empty">Keine Tags im Katalog — unter „Kataloge“ anlegen.</p>
@@ -2733,13 +2858,15 @@
           <fieldset class="tag-picker">
             <legend>Tags</legend>
             {#each allTags as t}
-              <label class="tag-check">
+              {@const familyTaken = tagFullyOnFamily('product', productForm.family, t.id)}
+              <label class="tag-check" class:tag-muted={familyTaken && !productForm.tagIds.includes(t.id)}>
                 <input
                   type="checkbox"
                   checked={productForm.tagIds.includes(t.id)}
-                  onchange={() => toggleTagId(productForm, t.id)}
+                  disabled={familyTaken && !productForm.tagIds.includes(t.id)}
+                  onchange={() => toggleTagId(productForm, t.id, 'product')}
                 />
-                {t.name}
+                {t.name}{#if familyTaken && !productForm.tagIds.includes(t.id)} <span class="empty">(Familie hat ihn)</span>{/if}
               </label>
             {:else}
               <p class="empty">Keine Tags im Katalog — unter „Kataloge“ anlegen.</p>
@@ -3416,6 +3543,40 @@
               <option value="no">nein</option>
             </select>
           </label>
+        {/if}
+        <label class="tag-check">
+          <input type="checkbox" bind:checked={bulkEditForm.setStock} />
+          Bestand setzen (Absolutwert, mit Warnung)
+        </label>
+        {#if bulkEditForm.setStock}
+          <label>Standort
+            <select bind:value={bulkEditForm.stock_location_id} required>
+              <option value="">wählen…</option>
+              {#each (bulkEditModal.kind === 'material' ? materialLocations : orderedLocations) as loc}
+                <option value={loc.id}>{loc.name}</option>
+              {/each}
+            </select>
+          </label>
+          <label>Bestand (Absolut)
+            <input type="number" step="0.001" bind:value={bulkEditForm.stock_quantity} placeholder="z. B. 10" />
+          </label>
+        {/if}
+        {#if bulkEditModal.kind === 'product'}
+          <label class="tag-check">
+            <input type="checkbox" bind:checked={bulkEditForm.setBom} />
+            Stücklistenzeile hinzufügen/ändern (mit Warnung)
+          </label>
+          {#if bulkEditForm.setBom}
+            <label>Material
+              <select bind:value={bulkEditForm.bom_material_id}>
+                <option value="">wählen…</option>
+                {#each materials as m}<option value={m.id}>{m.name}</option>{/each}
+              </select>
+            </label>
+            <label>Menge pro Produkteinheit
+              <input type="number" step="0.001" min="0.001" bind:value={bulkEditForm.bom_quantity} />
+            </label>
+          {/if}
         {/if}
         <label class="tag-check">
           <input type="checkbox" bind:checked={bulkEditForm.setTags} />

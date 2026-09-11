@@ -588,7 +588,9 @@ select {
   cursor: pointer;
 }
 
-.chip:hover {
+.tag-check.tag-muted {
+  opacity: 0.45;
+}
   background: var(--surface, #fff);
 }
 
