@@ -173,6 +173,7 @@ def init_db() -> None:
         migrate_product_is_template(engine)
         migrate_audit_timestamps(engine)
         migrate_transform_target(engine)
+        migrate_product_family(engine)
     finally:
         db.close()
 
@@ -241,6 +242,17 @@ def migrate_transform_target(engine) -> None:
                     "INTEGER REFERENCES products(id) ON DELETE SET NULL"
                 )
             )
+
+
+def migrate_product_family(engine) -> None:
+    """Add products.family for Produktfamilie grouping."""
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        if "products" not in insp.get_table_names():
+            return
+        cols = {c["name"] for c in insp.get_columns("products")}
+        if "family" not in cols:
+            conn.execute(text("ALTER TABLE products ADD COLUMN family VARCHAR(200)"))
 
 
 def migrate_tags_colors(engine) -> None:

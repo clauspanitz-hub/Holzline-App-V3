@@ -72,12 +72,20 @@ _Avoid_: Farb-Tag statt Katalogeintrag; „Variante“ oder „Art“ für Farbo
 Die Art der Farbgebung aus einem pflegbaren Katalog (Start: Lack, PLA). Am Artikel und in Katalogen erscheint **Medium** oberhalb der Farbe; im Katalog je Medium eine eigene Farb-Tabelle. Vorschläge und Matching nur innerhalb desselben Mediums. Katalog-Bereich: **Medien**.
 _Avoid_: Materialart, Farbtyp; UI-Label „Art“ (veraltet); „Art“ als eigenes Domänenobjekt neben Medium
 
+**Mehrfachbearbeitung**:
+Gleichzeitiges Setzen ausgewählter Felder für mehrere Materialien oder Produkte. Erlaubt: Mindestbestand, Tags; bei Produkten zusätzlich Produktfamilie und Ist-Vorlage. Nicht per Mehrfach: Name, Farbe, Stückliste, Bestand. Auswahl: Checkboxen in der Tabelle und/oder „ganze Produktfamilie“.
+_Avoid_: Massen-Umbenennung; Massen-Stücklistenänderung
+
+**Produktfamilie**:
+Optionale Bezeichnung, unter der zusammengehörige Produkte gruppiert werden (z. B. „Ziffern Einzeln - 2“). Bei der Serienanlage wird sie automatisch auf den **Basisnamen** gesetzt; am Produkt jederzeit änderbar. In der UI: Filter nach Familie und einklappbare Gruppenköpfe (ohne Familie = „Ohne Familie“). Beim Einführen: einmaliger Vorschlag Familie = Name ohne angehängten Farbnamen (nur wenn Farbe gesetzt und Name so endet), Bestätigung nötig. Unabhängig von Farbe/Tag; nicht der Produktname selbst.
+_Avoid_: Nur implizite Gruppierung über Namensähnlichkeit ohne Feld; Familie = Tag; stille automatische Befüllung ohne Nachfrage
+
 **Vorlage** (Produkt):
 Ein Produkt, das als Muster für die Serienanlage dient (Stückliste/Tags), markiert durch ein explizites Flag „Ist Vorlage“. Die Serienanlage kopiert davon und setzt je gewählter Farbe ein neues Produkt.
 _Avoid_: Template als UI-Fremdwort; nur „ohne Farbe“ als implizite Vorlage
 
 **Serienanlage** (aus Farben):
-Auf Knopfdruck Materialien oder Produkte aus gewählten Katalogfarben erzeugen (Auswahl + gemeinsame Defaults). Serien-Materialname = Medium + Farbe; manuell angelegte Materialien frei benennbar. Produktname = Basis + Farbe. Produkt-Serienanlage nutzt optional eine **Vorlage**. Materialien: bereits belegte Farben (gleicher color_id) sind nicht wählbar. Produkte: „schon vorhanden“ gilt für den konkreten Namen Basis+Farbe, nicht für die Farbe allein. Katalog-Umbenennung (Medium/Farbe) benennt Artikel um, die noch den alten Seriennamen tragen.
+Auf Knopfdruck Materialien oder Produkte aus gewählten Katalogfarben erzeugen (Auswahl + gemeinsame Defaults). Serien-Materialname = Medium + Farbe; manuell angelegte Materialien frei benennbar. Produktname = Basis + Farbe. Produkt-Serienanlage nutzt optional eine **Vorlage**. Produkt-Mindestbestand: Dialogwert überschreibt, sonst Wert der Vorlage (sonst leer). Material-Serienanlage: optionaler Mindestbestand im Dialog für alle neuen. Materialien: bereits belegte Farben (gleicher color_id) sind nicht wählbar. Produkte: „schon vorhanden“ gilt für den konkreten Namen Basis+Farbe, nicht für die Farbe allein. Katalog-Umbenennung (Medium/Farbe) benennt Artikel um, die noch den alten Seriennamen tragen.
 _Avoid_: Automatisches Anlegen ohne Nachfrage; Serien-Material nur Farbname
 
 **Umwandlung**:

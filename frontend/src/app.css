@@ -202,6 +202,49 @@ th {
   margin-top: 0.15rem;
 }
 
+.stock-table th.col-select,
+.stock-table td.col-select {
+  width: 2.25rem;
+  text-align: center;
+}
+
+.stock-table tr.group-header td {
+  background: var(--bg-soft);
+  font-weight: 600;
+}
+
+.group-header-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.group-toggle {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  font-weight: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+}
+
 .incomplete-hint {
   display: flex;
   align-items: flex-start;

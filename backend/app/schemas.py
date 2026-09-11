@@ -171,6 +171,7 @@ class ProductBase(BaseModel):
     sku: str | None = Field(default=None, max_length=100)
     min_stock: Quantity | None = None
     is_template: bool = False
+    family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     transform_target_id: int | None = None
     tag_ids: list[int] = []
@@ -178,6 +179,14 @@ class ProductBase(BaseModel):
     @field_validator("sku")
     @classmethod
     def empty_sku_to_none(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("family")
+    @classmethod
+    def empty_family_to_none(cls, value: str | None) -> str | None:
         if value is None:
             return None
         stripped = value.strip()
@@ -194,6 +203,7 @@ class ProductUpdate(BaseModel):
     sku: str | None = Field(default=None, max_length=100)
     min_stock: Quantity | None = None
     is_template: bool | None = None
+    family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     transform_target_id: int | None = None
     tag_ids: list[int] | None = None
@@ -201,6 +211,14 @@ class ProductUpdate(BaseModel):
     @field_validator("sku")
     @classmethod
     def empty_sku_to_none(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("family")
+    @classmethod
+    def empty_family_to_none(cls, value: str | None) -> str | None:
         if value is None:
             return None
         stripped = value.strip()
@@ -215,6 +233,7 @@ class ProductRead(BaseModel):
     sku: str | None
     min_stock: Quantity | None = None
     is_template: bool = False
+    family: str | None = None
     color_id: int | None = None
     color: ColorRead | None = None
     transform_target_id: int | None = None
@@ -398,6 +417,7 @@ class MaterialsFromColorsRequest(BaseModel):
     unit: Unit
     purchase_quantity: Quantity = Field(default=Decimal("1"), gt=0)
     purchase_price: Money = Decimal("0")
+    min_stock: Quantity | None = None
     location_id: int | None = None
     tag_ids: list[int] = []
 
@@ -412,6 +432,7 @@ class ProductsFromColorsRequest(BaseModel):
     color_ids: list[int] = Field(min_length=1)
     base_name: str = Field(min_length=1, max_length=180)
     template_product_id: int | None = None
+    min_stock: Quantity | None = None
     location_id: int | None = None
     tag_ids: list[int] = []
     stock_quantity: Quantity = Decimal("0")
@@ -421,3 +442,20 @@ class ProductsFromColorsResult(BaseModel):
     created: list[ProductRead]
     skipped: list[BulkSkipInfo]
     warnings: list[str] = []
+
+
+class MaterialBulkUpdate(BaseModel):
+    ids: list[int] = Field(min_length=1)
+    min_stock: Quantity | None = None
+    clear_min_stock: bool = False
+    tag_ids: list[int] | None = None
+
+
+class ProductBulkUpdate(BaseModel):
+    ids: list[int] = Field(min_length=1)
+    min_stock: Quantity | None = None
+    clear_min_stock: bool = False
+    tag_ids: list[int] | None = None
+    family: str | None = Field(default=None, max_length=200)
+    clear_family: bool = False
+    is_template: bool | None = None

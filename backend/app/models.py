@@ -123,6 +123,7 @@ class Product(Base):
     sku: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
     min_stock: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    family: Mapped[str | None] = mapped_column(String(200), nullable=True)
     color_id: Mapped[int | None] = mapped_column(ForeignKey("colors.id", ondelete="SET NULL"), nullable=True)
     transform_target_id: Mapped[int | None] = mapped_column(
         ForeignKey("products.id", ondelete="SET NULL"),

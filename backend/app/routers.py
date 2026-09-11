@@ -15,6 +15,7 @@ from app.schemas import (
     LocationRead,
     ManufactureRequest,
     ManufactureResult,
+    MaterialBulkUpdate,
     MaterialCreate,
     MaterialRead,
     MaterialsFromColorsRequest,
@@ -25,6 +26,7 @@ from app.schemas import (
     MediumUpdate,
     MediumWriteResult,
     OptionMappingCreate,
+    ProductBulkUpdate,
     ProductCreate,
     ProductRead,
     ProductsFromColorsRequest,
@@ -37,12 +39,12 @@ from app.schemas import (
     ShopifyInventoryImportResult,
     StockAdjustRequest,
     StockDeltaRequest,
+    StockMovementRead,
     TagCreate,
     TagRead,
     TagUpdate,
     TransferRequest,
     TransformRequest,
-    StockMovementRead,
     UnitInfo,
 )
 
@@ -174,6 +176,11 @@ def update_material(material_id: int, payload: MaterialUpdate, db: Session = Dep
     return services.update_material(db, material_id, payload)
 
 
+@router.post("/materials/bulk-update", response_model=list[MaterialRead])
+def bulk_update_materials(payload: MaterialBulkUpdate, db: Session = Depends(get_db)) -> list[MaterialRead]:
+    return services.bulk_update_materials(db, payload)
+
+
 @router.delete("/materials/{material_id}", status_code=204)
 def delete_material(material_id: int, db: Session = Depends(get_db)) -> None:
     services.delete_material(db, material_id)
@@ -236,6 +243,11 @@ def get_product(product_id: int, db: Session = Depends(get_db)) -> ProductRead:
 @router.patch("/products/{product_id}", response_model=ProductRead)
 def update_product(product_id: int, payload: ProductUpdate, db: Session = Depends(get_db)) -> ProductRead:
     return services.update_product(db, product_id, payload)
+
+
+@router.post("/products/bulk-update", response_model=list[ProductRead])
+def bulk_update_products(payload: ProductBulkUpdate, db: Session = Depends(get_db)) -> list[ProductRead]:
+    return services.bulk_update_products(db, payload)
 
 
 @router.delete("/products/{product_id}", status_code=204)

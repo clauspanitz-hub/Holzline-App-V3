@@ -659,6 +659,7 @@ def product_read(product: Product) -> ProductRead:
         sku=product.sku,
         min_stock=product.min_stock,
         is_template=bool(product.is_template),
+        family=product.family,
         color_id=product.color_id,
         color=color_read(product.color),
         transform_target_id=product.transform_target_id,
@@ -817,6 +818,7 @@ def create_materials_from_colors(db: Session, payload: MaterialsFromColorsReques
             purchase_quantity=purchase_quantity,
             purchase_price=purchase_price,
             cost_per_unit=cost,
+            min_stock=_q(payload.min_stock) if payload.min_stock is not None else None,
             color_id=color.id,
         )
         material.tags = list(tags)
@@ -980,6 +982,7 @@ def create_product(db: Session, payload: ProductCreate) -> ProductRead:
         sku=payload.sku,
         min_stock=_q(payload.min_stock) if payload.min_stock is not None else None,
         is_template=bool(payload.is_template),
+        family=(payload.family.strip() if payload.family else None),
         color_id=color.id if color else None,
         transform_target_id=None,
     )
@@ -1037,9 +1040,16 @@ def create_products_from_colors(db: Session, payload: ProductsFromColorsRequest)
     used_names: set[str] = set()
 
     template_lines: list[ProductMaterial] = []
+    template_min_stock: Decimal | None = None
     if payload.template_product_id is not None:
         template = _load_product(db, payload.template_product_id)
         template_lines = list(template.materials)
+        template_min_stock = template.min_stock
+
+    if payload.min_stock is not None:
+        series_min_stock: Decimal | None = _q(payload.min_stock)
+    else:
+        series_min_stock = _q(template_min_stock) if template_min_stock is not None else None
 
     seen: set[int] = set()
     for color_id in payload.color_ids:
@@ -1061,7 +1071,13 @@ def create_products_from_colors(db: Session, payload: ProductsFromColorsRequest)
             )
             continue
 
-        product = Product(name=name, sku=None, color_id=color.id)
+        product = Product(
+            name=name,
+            sku=None,
+            color_id=color.id,
+            min_stock=series_min_stock,
+            family=base,
+        )
         product.tags = list(tags)
         db.add(product)
         db.flush()
@@ -1118,6 +1134,8 @@ def update_product(db: Session, product_id: int, payload: ProductUpdate) -> Prod
     tag_ids = data.pop("tag_ids", None)
     if "name" in data and data["name"] is not None:
         data["name"] = data["name"].strip()
+    if "family" in data and data["family"] is not None:
+        data["family"] = data["family"].strip() or None
     if "min_stock" in data:
         data["min_stock"] = _q(data["min_stock"]) if data["min_stock"] is not None else None
     if "color_id" in data:
@@ -1139,6 +1157,55 @@ def update_product(db: Session, product_id: int, payload: ProductUpdate) -> Prod
             detail="Produktname oder SKU bereits vergeben",
         ) from exc
     return product_read(_load_product(db, product.id))
+
+
+def bulk_update_materials(db: Session, payload: "MaterialBulkUpdate") -> list[MaterialRead]:
+    from app.schemas import MaterialBulkUpdate
+
+    if not isinstance(payload, MaterialBulkUpdate):
+        payload = MaterialBulkUpdate.model_validate(payload)
+    tags = resolve_tags(db, payload.tag_ids) if payload.tag_ids is not None else None
+    result_ids: list[int] = []
+    for mid in payload.ids:
+        material = _load_material(db, mid)
+        if payload.clear_min_stock:
+            material.min_stock = None
+        elif payload.min_stock is not None:
+            material.min_stock = _q(payload.min_stock)
+        if tags is not None:
+            material.tags = list(tags)
+        _stamp_update(material)
+        result_ids.append(material.id)
+    db.commit()
+    return [material_read(_load_material(db, mid)) for mid in result_ids]
+
+
+def bulk_update_products(db: Session, payload: "ProductBulkUpdate") -> list[ProductRead]:
+    from app.schemas import ProductBulkUpdate
+
+    if not isinstance(payload, ProductBulkUpdate):
+        payload = ProductBulkUpdate.model_validate(payload)
+    tags = resolve_tags(db, payload.tag_ids) if payload.tag_ids is not None else None
+    family = payload.family.strip() if payload.family else None
+    result_ids: list[int] = []
+    for pid in payload.ids:
+        product = _load_product(db, pid)
+        if payload.clear_min_stock:
+            product.min_stock = None
+        elif payload.min_stock is not None:
+            product.min_stock = _q(payload.min_stock)
+        if payload.clear_family:
+            product.family = None
+        elif payload.family is not None:
+            product.family = family
+        if payload.is_template is not None:
+            product.is_template = bool(payload.is_template)
+        if tags is not None:
+            product.tags = list(tags)
+        _stamp_update(product)
+        result_ids.append(product.id)
+    db.commit()
+    return [product_read(_load_product(db, pid)) for pid in result_ids]
 
 
 def suggest_by_color(
