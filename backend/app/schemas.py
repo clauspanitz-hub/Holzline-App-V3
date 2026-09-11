@@ -1,6 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -395,6 +395,20 @@ class ShopifyInventoryImportResult(BaseModel):
     created_set: bool
     variants_upserted: int
     message: str
+
+
+class BackupImportRequest(BaseModel):
+    """Backup-Import per JSON-Body: vollständiges Backup-Objekt + Modus."""
+
+    data: dict[str, Any]
+    mode: Literal["replace", "merge"] | None = None
+
+
+class BackupImportResult(BaseModel):
+    mode: Literal["replace", "merge"]
+    created: dict[str, int] = {}
+    updated: dict[str, int] = {}
+    warnings: list[str] = []
 
 
 class ColorMatchSuggestion(BaseModel):

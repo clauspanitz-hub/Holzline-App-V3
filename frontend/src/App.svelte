@@ -2,6 +2,10 @@
   import { onMount } from 'svelte'
   import { api, formatMoney, formatQty, formatUnitCost, formatDateTime, formatActor } from './lib/api.js'
   import { filterRows, sortRows, nextSortState, sortMark, prepareRows } from './lib/tableUtils.js'
+  import { productFamilyKey, collectProductFamilies, groupProductsByFamily } from './lib/productFamily.js'
+  import FamilyFilter from './lib/components/FamilyFilter.svelte'
+  import ProductGroupSection from './lib/components/ProductGroupSection.svelte'
+  import BackupPanel from './lib/components/BackupPanel.svelte'
 
   let tab = $state('overview')
   let materials = $state([])
@@ -162,12 +166,6 @@
     }
     if (item.tags?.length) parts.push(item.tags.map((t) => t.name).join(', '))
     return parts.join(' · ')
-  }
-
-  const FAMILY_NONE = 'Ohne Familie'
-
-  function productFamily(product) {
-    return String(product?.family || '').trim()
   }
 
   function toggleFamilyCollapse(key) {
@@ -414,7 +412,7 @@
   async function suggestFamilies() {
     const proposals = new Map() // Familie -> Produkt-IDs
     for (const product of products) {
-      if (productFamily(product)) continue
+      if (productFamilyKey(product)) continue
       const family = familyFromColorSuffix(product)
       if (!family) continue
       if (!proposals.has(family)) proposals.set(family, [])
@@ -622,14 +620,20 @@
       stockSortGetter(listUi.overviewMaterials.sortKey),
     ),
   )
+  const familyFilteredOverviewProducts = $derived(
+    filterFamily
+      ? criticalProducts.filter((p) => productFamilyKey(p) === filterFamily)
+      : criticalProducts,
+  )
   const displayedOverviewProducts = $derived(
     prepareRows(
-      criticalProducts,
+      familyFilteredOverviewProducts,
       listUi.overviewProducts,
       (p) => stockRowSearchText(p, orderedLocations),
       stockSortGetter(listUi.overviewProducts.sortKey),
     ),
   )
+  const overviewProductGroups = $derived(groupProductsByFamily(displayedOverviewProducts))
   const displayedMaterials = $derived(
     prepareRows(
       materials,
@@ -639,7 +643,7 @@
     ),
   )
   const familyFilteredProducts = $derived(
-    filterFamily ? products.filter((p) => productFamily(p) === filterFamily) : products,
+    filterFamily ? products.filter((p) => productFamilyKey(p) === filterFamily) : products,
   )
   const displayedProducts = $derived(
     prepareRows(
@@ -650,26 +654,8 @@
     ),
   )
   /** Vorhandene Produktfamilien für den Filter (ohne Leerwerte). */
-  const productFamilies = $derived(
-    [...new Set(products.map(productFamily).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de')),
-  )
-  /** Produkte gruppiert nach Familie; „Ohne Familie“ steht am Ende. */
-  const productGroups = $derived.by(() => {
-    const groups = new Map()
-    for (const product of displayedProducts) {
-      const key = productFamily(product) || FAMILY_NONE
-      if (!groups.has(key)) groups.set(key, [])
-      groups.get(key).push(product)
-    }
-    return [...groups.entries()]
-      .map(([key, rows]) => ({ key, rows }))
-      .sort((a, b) => {
-        const aNone = a.key === FAMILY_NONE
-        const bNone = b.key === FAMILY_NONE
-        if (aNone !== bNone) return aNone ? 1 : -1
-        return a.key.localeCompare(b.key, 'de')
-      })
-  })
+  const productFamilies = $derived(collectProductFamilies(products))
+  const productGroups = $derived(groupProductsByFamily(displayedProducts))
   const staffQueueProducts = $derived.by(() => {
     const maLocs = locations.filter((l) => STAFF_LOCATION_NAMES.includes(l.name))
     return products.filter((p) => {
@@ -1777,6 +1763,7 @@
       </div>
       <h3 style="margin:1.25rem 0 .5rem;font-size:1rem">Produkte</h3>
       <div class="filter-bar form-grid">
+        <FamilyFilter families={productFamilies} bind:value={filterFamily} />
         <label class="list-search">Suche
           <input type="search" placeholder="Name, Standort, Meta…" bind:value={listUi.overviewProducts.q} />
         </label>
@@ -1806,31 +1793,38 @@
             </tr>
           </thead>
           <tbody>
-            {#each displayedOverviewProducts as product}
-              <tr class="row-click" onclick={() => openEditProduct(product)}>
-                <td>
-                  {product.name}
-                  {#if formatMinStock(product)}
-                    <div class="min-stock-hint">Min. {formatMinStock(product)}</div>
-                  {/if}
-                </td>
-                {#each orderedLocations as loc}
-                  <td class="num" class:neg={stockAt(product, loc.id) < 0}>{formatQty(stockAt(product, loc.id))}</td>
-                {/each}
-                <td class="num" class:neg={Number(product.stock_total) <= 0 || product.is_negative}>
-                  {formatQty(product.stock_total)}
-                </td>
-                <td onclick={(e) => e.stopPropagation()}>
-                  <button class="btn secondary" onclick={() => openEditProduct(product)}>Bearbeiten</button>
-                </td>
-              </tr>
-            {:else}
-              <tr><td colspan={orderedLocations.length + 3} class="empty">Keine kritischen Produkte.</td></tr>
-            {/each}
+            <ProductGroupSection
+              groups={overviewProductGroups}
+              {collapsedFamilies}
+              colSpan={orderedLocations.length + 3}
+              emptyMessage="Keine kritischen Produkte."
+              onToggleCollapse={toggleFamilyCollapse}
+            >
+              {#snippet row({ product })}
+                <tr class="row-click" onclick={() => openEditProduct(product)}>
+                  <td>
+                    {product.name}
+                    {#if formatMinStock(product)}
+                      <div class="min-stock-hint">Min. {formatMinStock(product)}</div>
+                    {/if}
+                  </td>
+                  {#each orderedLocations as loc}
+                    <td class="num" class:neg={stockAt(product, loc.id) < 0}>{formatQty(stockAt(product, loc.id))}</td>
+                  {/each}
+                  <td class="num" class:neg={Number(product.stock_total) <= 0 || product.is_negative}>
+                    {formatQty(product.stock_total)}
+                  </td>
+                  <td onclick={(e) => e.stopPropagation()}>
+                    <button class="btn secondary" onclick={() => openEditProduct(product)}>Bearbeiten</button>
+                  </td>
+                </tr>
+              {/snippet}
+            </ProductGroupSection>
           </tbody>
         </table>
       </div>
     </section>
+    <BackupPanel onFlash={showFlash} onImported={refresh} />
   {:else if tab === 'materials'}
     <section class="panel">
       <div class="panel-header">
@@ -1977,12 +1971,7 @@
             {#each colors as c}<option value={c.id}>{c.label}</option>{/each}
           </select>
         </label>
-        <label>Filter Familie
-          <select bind:value={filterFamily}>
-            <option value="">alle</option>
-            {#each productFamilies as f}<option value={f}>{f}</option>{/each}
-          </select>
-        </label>
+        <FamilyFilter families={productFamilies} bind:value={filterFamily} />
         <label class="list-search">Suche
           <input type="search" placeholder="Name, Standort, Farbe, Tags…" bind:value={listUi.products.q} />
         </label>
@@ -2027,78 +2016,69 @@
             </tr>
           </thead>
           <tbody>
-            {#each productGroups as group (group.key)}
-              <tr class="group-header">
-                <td colspan={orderedLocations.length + 5}>
-                  <div class="group-header-row">
-                    <button type="button" class="group-toggle" onclick={() => toggleFamilyCollapse(group.key)}>
-                      {collapsedFamilies[group.key] ? '▶' : '▼'}
-                      {group.key}
-                      <span class="empty">({group.rows.length})</span>
-                    </button>
-                    <button type="button" class="btn secondary" onclick={() => toggleFamilySelection(group)}>
-                      {isFamilySelected(group) ? 'Familie abwählen' : 'Familie wählen'}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-              {#if !collapsedFamilies[group.key]}
-                {#each group.rows as product}
-                  <tr class="row-click" onclick={() => openEditProduct(product)}>
-                    <td class="col-select" onclick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        aria-label={`Produkt ${product.name} wählen`}
-                        checked={selectedProductIds.includes(product.id)}
-                        onchange={() => toggleSelectedProduct(product.id)}
-                      />
-                    </td>
-                    <td>
-                      {product.name}
-                      {#if productFamily(product)}<div class="empty">{productFamily(product)}</div>{/if}
-                      {#if colorTagMeta(product)}<div class="empty">{colorTagMeta(product)}</div>{/if}
-                      {#if formatMinStock(product)}
-                        <div class="min-stock-hint">Min. {formatMinStock(product)}</div>
-                      {/if}
-                      {#if incompleteHint(product)}
-                        <div class="incomplete-hint" title="Unvollständige Daten">
-                          <span class="incomplete-icon" aria-hidden="true">!</span>
-                          {incompleteHint(product)}
-                        </div>
-                      {/if}
-                      {#if product.transform_target_name}
-                        <div class="empty">→ {product.transform_target_name}</div>
-                      {/if}
-                    </td>
-                    {#each orderedLocations as loc}
-                      <td class="num" class:neg={stockAt(product, loc.id) < 0}>{formatQty(stockAt(product, loc.id))}</td>
-                    {/each}
-                    <td class="num" class:neg={Number(product.stock_total) <= 0 || product.is_negative}>
-                      {formatQty(product.stock_total)}
-                    </td>
-                    <td class="meta-cell">
-                      <div>{formatDateTime(product.updated_at)}</div>
-                      <div class="empty">{formatActor(product.updated_by)}</div>
-                    </td>
-                    <td onclick={(e) => e.stopPropagation()}>
-                      <div class="row-actions">
-                        <button class="btn secondary" onclick={() => openEditProduct(product)}>Bearbeiten</button>
-                        <button class="btn secondary" onclick={() => openCreateProduct(product)}>Vorlage</button>
-                        <button class="btn" onclick={() => openManufacture(product)}>Fertigen</button>
-                        <button class="btn secondary" onclick={() => openTransfer('product', product)}>Umbuchen</button>
-                        {#if canTransformProduct(product)}
-                          <button class="btn secondary" onclick={() => openTransform(product)}>Umwandeln</button>
-                        {/if}
-                        <button class="btn secondary" onclick={() => openMovements(product)}>Historie</button>
-                        <button class="btn danger" onclick={() => removeProduct(product)}>Löschen</button>
+            <ProductGroupSection
+              groups={productGroups}
+              {collapsedFamilies}
+              colSpan={orderedLocations.length + 5}
+              emptyMessage="Keine Produkte."
+              showFamilySelect={true}
+              isFamilySelected={isFamilySelected}
+              onToggleCollapse={toggleFamilyCollapse}
+              onToggleFamilySelection={toggleFamilySelection}
+            >
+              {#snippet row({ product })}
+                <tr class="row-click" onclick={() => openEditProduct(product)}>
+                  <td class="col-select" onclick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Produkt ${product.name} wählen`}
+                      checked={selectedProductIds.includes(product.id)}
+                      onchange={() => toggleSelectedProduct(product.id)}
+                    />
+                  </td>
+                  <td>
+                    {product.name}
+                    {#if productFamilyKey(product)}<div class="empty">{productFamilyKey(product)}</div>{/if}
+                    {#if colorTagMeta(product)}<div class="empty">{colorTagMeta(product)}</div>{/if}
+                    {#if formatMinStock(product)}
+                      <div class="min-stock-hint">Min. {formatMinStock(product)}</div>
+                    {/if}
+                    {#if incompleteHint(product)}
+                      <div class="incomplete-hint" title="Unvollständige Daten">
+                        <span class="incomplete-icon" aria-hidden="true">!</span>
+                        {incompleteHint(product)}
                       </div>
-                    </td>
-                  </tr>
-                {/each}
-              {/if}
-            {:else}
-              <tr><td colspan={orderedLocations.length + 5} class="empty">Keine Produkte.</td></tr>
-            {/each}
+                    {/if}
+                    {#if product.transform_target_name}
+                      <div class="empty">→ {product.transform_target_name}</div>
+                    {/if}
+                  </td>
+                  {#each orderedLocations as loc}
+                    <td class="num" class:neg={stockAt(product, loc.id) < 0}>{formatQty(stockAt(product, loc.id))}</td>
+                  {/each}
+                  <td class="num" class:neg={Number(product.stock_total) <= 0 || product.is_negative}>
+                    {formatQty(product.stock_total)}
+                  </td>
+                  <td class="meta-cell">
+                    <div>{formatDateTime(product.updated_at)}</div>
+                    <div class="empty">{formatActor(product.updated_by)}</div>
+                  </td>
+                  <td onclick={(e) => e.stopPropagation()}>
+                    <div class="row-actions">
+                      <button class="btn secondary" onclick={() => openEditProduct(product)}>Bearbeiten</button>
+                      <button class="btn secondary" onclick={() => openCreateProduct(product)}>Vorlage</button>
+                      <button class="btn" onclick={() => openManufacture(product)}>Fertigen</button>
+                      <button class="btn secondary" onclick={() => openTransfer('product', product)}>Umbuchen</button>
+                      {#if canTransformProduct(product)}
+                        <button class="btn secondary" onclick={() => openTransform(product)}>Umwandeln</button>
+                      {/if}
+                      <button class="btn secondary" onclick={() => openMovements(product)}>Historie</button>
+                      <button class="btn danger" onclick={() => removeProduct(product)}>Löschen</button>
+                    </div>
+                  </td>
+                </tr>
+              {/snippet}
+            </ProductGroupSection>
           </tbody>
         </table>
       </div>

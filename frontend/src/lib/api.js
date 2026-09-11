@@ -114,6 +114,35 @@ export const api = {
       return request(`/api/movements${qs ? `?${qs}` : ''}`)
     },
   },
+  backup: {
+    export: async (includeMovements = false) => {
+      const params = new URLSearchParams()
+      params.set('include_movements', includeMovements ? 'true' : 'false')
+      const response = await fetch(`/api/backup/export?${params}`)
+      const text = await response.text()
+      let data = null
+      if (text) {
+        try {
+          data = JSON.parse(text)
+        } catch {
+          data = text
+        }
+      }
+      if (!response.ok) {
+        const detail = data?.detail
+        const message = Array.isArray(detail)
+          ? detail.map((item) => item.msg || JSON.stringify(item)).join(', ')
+          : detail || response.statusText || 'Export fehlgeschlagen'
+        throw new Error(message)
+      }
+      return data
+    },
+    import: (mode, backup) =>
+      request('/api/backup/import', {
+        method: 'POST',
+        body: JSON.stringify({ mode, data: backup }),
+      }),
+  },
   sets: {
     list: () => request('/api/sets'),
     get: (id) => request(`/api/sets/${id}`),

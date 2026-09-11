@@ -1,10 +1,16 @@
+from datetime import datetime, timezone
+from typing import Literal
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from app import services
+from app import backup, services
 from app.database import get_db
 from app.models import Unit
 from app.schemas import (
+    BackupImportRequest,
+    BackupImportResult,
     BomLineCreate,
     BomLineUpdate,
     ColorCreate,
@@ -398,6 +404,30 @@ def delete_set_bom(
     db: Session = Depends(get_db),
 ) -> ProductSetRead:
     return services.delete_variant_bom_line(db, set_id, variant_id, line_id)
+
+
+@router.get("/backup/export")
+def backup_export(
+    include_movements: bool = Query(default=False),
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    payload = backup.export_backup(db, include_movements=include_movements)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    return JSONResponse(
+        content=payload,
+        headers={"Content-Disposition": f'attachment; filename="holzlinge-backup-{stamp}.json"'},
+    )
+
+
+@router.post("/backup/import", response_model=BackupImportResult)
+def backup_import(
+    payload: BackupImportRequest,
+    mode: Literal["replace", "merge"] | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> BackupImportResult:
+    """Query-Parameter `mode` hat Vorrang vor `mode` im Body; Default ist „merge“."""
+    effective_mode = mode or payload.mode or "merge"
+    return BackupImportResult(**backup.import_backup(db, payload.data, effective_mode))
 
 
 @router.post("/sets/import/shopify-inventory", response_model=ShopifyInventoryImportResult)

@@ -104,7 +104,13 @@ _Avoid_: Stilles Löschen ohne Spur; Tag „Ausschuss“ statt Standort; Ausschu
 Eigene Ansicht für Bestand von Quellprodukten (mit „Wird zu“) an MA1/MA2, inkl. Zugang zur Bewegungshistorie. Unabhängig davon, ob „Uni“ im Namen steht. Kein Ersatz für die normale Produktliste. Der Knopf Umwandeln erscheint nur, wenn der Name „Uni“ enthält.
 _Avoid_: Nur Tabellenfilter statt eigener Überblick; Tags als alleinige „bei MA“-Anzeige
 
-**Bewegung** (Bestand):
+**Datensicherung** (Export/Import):
+Vollständiger App-Stand als eine JSON-Datei zum Herunterladen und Wiederherstellen (Kataloge, Materialien, Produkte, Bestände, Sets u. a.). Bewegungs-Historie optional per Checkbox (Standard: aus). Beim Import wählt der Nutzer: **Ersetzen** (bestehende Daten werden geleert/ersetzt) oder **Zusammenführen** (Match über Name bzw. SKU/Handle/Farbe+Medium; fehlende anlegen, Stammdaten aktualisieren; Bestände je Standort beim Match **setzen**, nicht addieren) — jeweils mit Bestätigung. Kein Ersatz für Host-Backups der SQLite-Datei.
+_Avoid_: Stiller Import ohne Moduswahl; Merge über interne IDs als Normalfall; Bestände beim Merge addieren; nur Excel-CSVs als einzige Sicherung
+
+**Übersicht** (Listen):
+Die kritischen Produktlisten nutzen dieselbe Gruppierung und Filterung wie die Produkt-Hauptliste (**Produktfamilie**). Materialien in der Übersicht behalten Tag-/Farb-Filter; Material-Familien analog zu Produkten sind optional später. UI-Struktur: Listen/Ansichten als eigene Komponenten, damit das Design später austauschbar bleibt — ohne jetzt ein Design-System zu bauen.
+_Avoid_: Spezielle Produkt-Übersichtslogik abweichend von der Produktliste; monolithische App.svelte als Dauerzustand
 Eine nachvollziehbare Umbuchung oder Umwandlung, relevant vor allem mit virtuellen Standorten (MA1, MA2, In Bearbeitung, Ausschuss) und für Umwandlungen — Grundlage für den Überblick „wer hat was / was wurde daraus“.
 _Avoid_: Tag-Historie; implizite Umbuchung ohne Eintrag
 

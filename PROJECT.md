@@ -55,6 +55,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Produkt-Flag „Ist Vorlage“ + Serienanlage-UX (Vorlagen priorisiert)
 - [x] Standort Ausschuss; Quell→Ziel; Umwandeln; Bewegungs-Historie; Bei Mitarbeitern (ADR `0006`)
 - [x] Serien-Mindestbestand; Produktfamilie; Mehrfachbearbeitung (ADR `0007`)
+- [x] JSON-Datensicherung Export/Import; Übersicht mit Familienfilter; leichtes UI-Split (ADR `0008`)
 
 ### Phase 2: Bestellverwaltung & Eingangskanäle (GEPLANT)
 - [ ] Shopify-API-Integration
