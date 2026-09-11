@@ -13,7 +13,8 @@ metadata:
   version: 0.6.2
   tool_count: 92
   domains: 14
-  generated: 2026-02-08
+  generated: 2026-02-08T00:00:00.000Z
+globs: []
 ---
 
 # Proxmox MCP Tools Reference
@@ -25,6 +26,7 @@ metadata:
 This skill teaches AI agents how to use the **@bldg-7/proxmox-mcp** server, which provides 92 comprehensive tools for managing Proxmox VE infrastructure through the Model Context Protocol (MCP).
 
 **What you'll learn**:
+
 - How to connect to Proxmox VE via MCP
 - 92 tools organized into 14 functional domains
 - Permission model (basic vs elevated operations)
@@ -35,11 +37,16 @@ This skill teaches AI agents how to use the **@bldg-7/proxmox-mcp** server, whic
 
 ---
 
+
+
 ## Quick Start
+
+
 
 ### Connection Setup
 
 **Required Environment Variables**:
+
 ```bash
 PROXMOX_HOST=pve.example.com
 PROXMOX_TOKEN_NAME=mytoken
@@ -47,6 +54,7 @@ PROXMOX_TOKEN_VALUE=abc123-def456-ghi789
 ```
 
 **Optional Configuration**:
+
 ```bash
 PROXMOX_USER=root@pam          # Default: root@pam
 PROXMOX_SSL_MODE=verify         # strict|verify|insecure (default: strict)
@@ -57,6 +65,7 @@ PROXMOX_LOG_LEVEL=info          # trace|debug|info|warn|error|fatal (default: in
 ```
 
 **SSH Configuration** (for `proxmox_lxc_exec`):
+
 ```bash
 PROXMOX_SSH_ENABLED=true        # Enable SSH-based LXC exec (default: false)
 PROXMOX_SSH_HOST=pve.example.com # SSH host (falls back to PROXMOX_HOST)
@@ -67,12 +76,16 @@ PROXMOX_SSH_NODE=pve1           # Proxmox node name (required when SSH enabled)
 PROXMOX_SSH_HOST_KEY_FINGERPRINT=sha256:... # Optional host key verification
 ```
 
+
+
 ### Permission Model
 
-| Level | Operations | Env Var Required |
-|-------|-----------|------------------|
-| **Basic** | Read-only (list, get, status) | None |
-| **Elevated** 🔒 | Create, modify, delete | `PROXMOX_ALLOW_ELEVATED=true` |
+
+| Level           | Operations                    | Env Var Required              |
+| --------------- | ----------------------------- | ----------------------------- |
+| **Basic**       | Read-only (list, get, status) | None                          |
+| **Elevated** 🔒 | Create, modify, delete        | `PROXMOX_ALLOW_ELEVATED=true` |
+
 
 **92 tools total** — read operations are basic; create/modify/delete operations require elevated permissions (many tools are mixed: elevation depends on the `action`)
 
@@ -84,30 +97,38 @@ PROXMOX_SSH_HOST_KEY_FINGERPRINT=sha256:... # Optional host key verification
 
 ---
 
+
+
 ## Tool Categories
 
-| Domain | Tools | Key Operations | Reference |
-|--------|-------|----------------|-----------|
-| **Nodes** | 47 | Node status, network config, system ops, console access | [proxmox-nodes.md](references/proxmox-nodes.md) |
-| **QEMU VMs** | 26 | VM lifecycle, config, disks, network, commands | [proxmox-vm.md](references/proxmox-vm.md) |
-| **LXC Containers** | 20 | Container lifecycle, config, mount points, network, exec | [proxmox-lxc.md](references/proxmox-lxc.md) |
-| **VM/LXC Shared** | 22 | Agent, firewall, migration (works for both) | [proxmox-vm-lxc-shared.md](references/proxmox-vm-lxc-shared.md) |
-| **Snapshots & Backups** | 14 | Create/restore snapshots, backup jobs | [proxmox-snapshots-backups.md](references/proxmox-snapshots-backups.md) |
-| **Storage** | 16 | Storage config, content, file operations, node disks | [proxmox-storage.md](references/proxmox-storage.md) |
-| **Networking** | 20 | SDN (VNets, zones, controllers, subnets) | [proxmox-networking.md](references/proxmox-networking.md) |
-| **Cluster** | 54 | HA, firewall, aliases, ipsets, backup jobs, replication, config | [proxmox-cluster.md](references/proxmox-cluster.md) |
-| **Access Control** | 25 | Users, groups, roles, ACLs, domains, API tokens | [proxmox-access-control.md](references/proxmox-access-control.md) |
-| **Ceph** | 16 | Ceph OSDs, MONs, MDS, pools, filesystems | [proxmox-ceph.md](references/proxmox-ceph.md) |
-| **Pools** | 5 | Resource pool management | [proxmox-pools.md](references/proxmox-pools.md) |
-| **Certificates** | 7 | Node certificates, custom SSL, ACME ordering | [proxmox-certificates.md](references/proxmox-certificates.md) |
-| **ACME** | 8 | ACME accounts, plugins, directories | [proxmox-acme.md](references/proxmox-acme.md) |
-| **Notifications** | 5 | Notification targets, SMTP/Gotify testing | [proxmox-notifications.md](references/proxmox-notifications.md) |
+
+| Domain                  | Tools | Key Operations                                                  | Reference                                                               |
+| ----------------------- | ----- | --------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| **Nodes**               | 47    | Node status, network config, system ops, console access         | [proxmox-nodes.md](references/proxmox-nodes.md)                         |
+| **QEMU VMs**            | 26    | VM lifecycle, config, disks, network, commands                  | [proxmox-vm.md](references/proxmox-vm.md)                               |
+| **LXC Containers**      | 20    | Container lifecycle, config, mount points, network, exec        | [proxmox-lxc.md](references/proxmox-lxc.md)                             |
+| **VM/LXC Shared**       | 22    | Agent, firewall, migration (works for both)                     | [proxmox-vm-lxc-shared.md](references/proxmox-vm-lxc-shared.md)         |
+| **Snapshots & Backups** | 14    | Create/restore snapshots, backup jobs                           | [proxmox-snapshots-backups.md](references/proxmox-snapshots-backups.md) |
+| **Storage**             | 16    | Storage config, content, file operations, node disks            | [proxmox-storage.md](references/proxmox-storage.md)                     |
+| **Networking**          | 20    | SDN (VNets, zones, controllers, subnets)                        | [proxmox-networking.md](references/proxmox-networking.md)               |
+| **Cluster**             | 54    | HA, firewall, aliases, ipsets, backup jobs, replication, config | [proxmox-cluster.md](references/proxmox-cluster.md)                     |
+| **Access Control**      | 25    | Users, groups, roles, ACLs, domains, API tokens                 | [proxmox-access-control.md](references/proxmox-access-control.md)       |
+| **Ceph**                | 16    | Ceph OSDs, MONs, MDS, pools, filesystems                        | [proxmox-ceph.md](references/proxmox-ceph.md)                           |
+| **Pools**               | 5     | Resource pool management                                        | [proxmox-pools.md](references/proxmox-pools.md)                         |
+| **Certificates**        | 7     | Node certificates, custom SSL, ACME ordering                    | [proxmox-certificates.md](references/proxmox-certificates.md)           |
+| **ACME**                | 8     | ACME accounts, plugins, directories                             | [proxmox-acme.md](references/proxmox-acme.md)                           |
+| **Notifications**       | 5     | Notification targets, SMTP/Gotify testing                       | [proxmox-notifications.md](references/proxmox-notifications.md)         |
+
 
 **Total**: 92 tools
 
 ---
 
+
+
 ## Common Workflows
+
+
 
 ### 1. Create and Configure a VM
 
@@ -120,6 +141,8 @@ PROXMOX_SSH_HOST_KEY_FINGERPRINT=sha256:... # Optional host key verification
 6. proxmox_guest_status → Verify running
 ```
 
+
+
 ### 2. Clone VM for Testing
 
 ```
@@ -128,6 +151,8 @@ PROXMOX_SSH_HOST_KEY_FINGERPRINT=sha256:... # Optional host key verification
 3. proxmox_guest_clone → Create clone (full or linked)
 4. proxmox_guest_start → Start cloned VM
 ```
+
+
 
 ### 3. Backup and Restore
 
@@ -141,6 +166,8 @@ PROXMOX_SSH_HOST_KEY_FINGERPRINT=sha256:... # Optional host key verification
 2. proxmox_backup → Restore to new/existing VM
 ```
 
+
+
 ### 4. Migrate VM Between Nodes
 
 ```
@@ -150,6 +177,8 @@ PROXMOX_SSH_HOST_KEY_FINGERPRINT=sha256:... # Optional host key verification
 4. proxmox_guest_status → Verify on new node
 ```
 
+
+
 ### 5. Configure HA for Critical VMs
 
 ```
@@ -157,6 +186,8 @@ PROXMOX_SSH_HOST_KEY_FINGERPRINT=sha256:... # Optional host key verification
 2. proxmox_ha_resource → Add VM to HA
 3. proxmox_ha_resource → Monitor HA state
 ```
+
+
 
 ### 6. Monitor Cluster Health
 
@@ -166,6 +197,8 @@ PROXMOX_SSH_HOST_KEY_FINGERPRINT=sha256:... # Optional host key verification
 3. proxmox_node_task → Recent operations
 4. proxmox_ceph → Ceph cluster (if used)
 ```
+
+
 
 ### 7. Manage Storage
 
@@ -180,25 +213,34 @@ PROXMOX_SSH_HOST_KEY_FINGERPRINT=sha256:... # Optional host key verification
 
 ---
 
+
+
 ## Troubleshooting Quick Reference
 
+
+
 ### 1. Connection Refused
+
 **Symptom**: `ECONNREFUSED` or timeout  
 **Fix**: Verify `PROXMOX_HOST`, check port 8006, firewall rules
 
 ### 2. Authentication Failed
+
 **Symptom**: `401 Unauthorized`  
 **Fix**: Verify token name/value, ensure token has permissions in Proxmox
 
 ### 3. SSL Certificate Errors
+
 **Symptom**: `UNABLE_TO_VERIFY_LEAF_SIGNATURE`  
 **Fix**: Use `PROXMOX_SSL_MODE=verify` for self-signed certs
 
 ### 4. Permission Denied
+
 **Symptom**: `🚫 Permission Denied`  
 **Fix**: Set `PROXMOX_ALLOW_ELEVATED=true` for create/modify/delete operations
 
 ### 5. VM Not Found (500 instead of 404)
+
 **Symptom**: API returns 500 error for missing VM  
 **Fix**: This is a Proxmox API quirk - treat 500 as "not found" in some contexts
 
@@ -206,11 +248,14 @@ PROXMOX_SSH_HOST_KEY_FINGERPRINT=sha256:... # Optional host key verification
 
 ---
 
+
+
 ## Tool Response Format
 
 All tools return structured MCP responses:
 
 **Success**:
+
 ```json
 {
   "content": [{"type": "text", "text": "✅ Operation successful\n\n• Details..."}],
@@ -219,6 +264,7 @@ All tools return structured MCP responses:
 ```
 
 **Error**:
+
 ```json
 {
   "content": [{"type": "text", "text": "❌ Error: Reason..."}],
@@ -227,6 +273,7 @@ All tools return structured MCP responses:
 ```
 
 **Permission Denied**:
+
 ```json
 {
   "content": [{"type": "text", "text": "🚫 Permission Denied: Set PROXMOX_ALLOW_ELEVATED=true"}],
@@ -236,7 +283,11 @@ All tools return structured MCP responses:
 
 ---
 
+
+
 ## References
+
+
 
 ### Domain-Specific Documentation
 
@@ -255,12 +306,16 @@ All tools return structured MCP responses:
 - **[proxmox-acme.md](references/proxmox-acme.md)** - ACME account and plugin management (8 tools)
 - **[proxmox-notifications.md](references/proxmox-notifications.md)** - Notification targets (5 tools)
 
+
+
 ### Operational Guides
 
 - **[proxmox-workflows.md](references/proxmox-workflows.md)** - Common operational patterns
 - **[proxmox-troubleshooting.md](references/proxmox-troubleshooting.md)** - API quirks and solutions
 
 ---
+
+
 
 ## Usage Tips
 
@@ -272,6 +327,8 @@ All tools return structured MCP responses:
 6. **SSL mode for self-signed**: Most Proxmox installations use self-signed certs - use `verify` mode
 
 ---
+
+
 
 ## License
 
