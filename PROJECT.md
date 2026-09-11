@@ -56,6 +56,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Standort Ausschuss; Quell→Ziel; Umwandeln; Bewegungs-Historie; Bei Mitarbeitern (ADR `0006`)
 - [x] Serien-Mindestbestand; Produktfamilie; Mehrfachbearbeitung (ADR `0007`)
 - [x] JSON-Datensicherung Export/Import; Übersicht mit Familienfilter; leichtes UI-Split (ADR `0008`)
+- [x] Materialfamilie; Übersicht Produkte zuerst + Ignorieren; Set-Zuordnung über Katalogfarbe (ADR `0009`)
 
 ### Phase 2: Bestellverwaltung & Eingangskanäle (GEPLANT)
 - [ ] Shopify-API-Integration

@@ -588,10 +588,12 @@ select {
   cursor: pointer;
 }
 
+.chip:hover {
+  background: var(--surface, #fff);
+}
+
 .tag-check.tag-muted {
   opacity: 0.45;
-}
-  background: var(--surface, #fff);
 }
 
 .quick-color {
