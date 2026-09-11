@@ -701,6 +701,11 @@ select {
   color: inherit;
 }
 
+.catalog-cell-static {
+  display: block;
+  color: var(--muted);
+}
+
 .catalog-cell:hover {
   border-color: var(--line);
   background: var(--bg-elevated);

@@ -48,6 +48,14 @@ class TagRead(BaseModel):
 
     id: int
     name: str
+    is_system: bool = False
+
+    @model_validator(mode="after")
+    def mark_system_incomplete_tags(self) -> "TagRead":
+        from app.incomplete_tags import is_system_incomplete_tag
+
+        self.is_system = is_system_incomplete_tag(self.name)
+        return self
 
 
 class ColorCreate(BaseModel):

@@ -627,6 +627,9 @@
     form.tagIds = [...form.tagIds, id]
     if (!kind) return
 
+    const tagMeta = allTags.find((t) => t.id === id)
+    if (tagMeta?.is_system) return
+
     const family = String(form.family || '').trim()
     const editingId =
       kind === 'material'
@@ -642,7 +645,7 @@
       (row) => !(row.tags || []).some((t) => t.id === id),
     )
     if (!siblings.length) return
-    const tagName = allTags.find((t) => t.id === id)?.name || 'Tag'
+    const tagName = tagMeta?.name || 'Tag'
     if (
       !confirm(
         `Tag „${tagName}“ auch ${siblings.length} weiteren ${kind === 'material' ? 'Materialien' : 'Produkten'} der Familie „${family}“ geben?`,
@@ -1208,6 +1211,10 @@
   }
 
   function beginCatalogEdit(kind, id, field, current) {
+    if (kind === 'tag') {
+      const tag = allTags.find((t) => t.id === id)
+      if (tag?.is_system) return
+    }
     const key = catalogCellKey(kind, id, field)
     if (catalogEdit?.key === key) return
     const value = String(current ?? '')
@@ -2998,20 +3005,26 @@
               {#each displayedCatalogTags as t}
                 <tr>
                   <td>
-                    <input
-                      class="catalog-cell"
-                      type="text"
-                      value={catalogCellValue('tag', t.id, 'name', t.name)}
-                      disabled={saving && catalogSavingKey === catalogCellKey('tag', t.id, 'name')}
-                      onfocus={() => beginCatalogEdit('tag', t.id, 'name', t.name)}
-                      oninput={(e) => setCatalogEditValue('tag', t.id, 'name', e.currentTarget.value)}
-                      onblur={commitCatalogEdit}
-                      onkeydown={onCatalogEditKeydown}
-                      aria-label={`Tag ${t.name}`}
-                    />
+                    {#if t.is_system}
+                      <span class="catalog-cell catalog-cell-static" title="System-Tag (Unvollständigkeit)">{t.name}</span>
+                    {:else}
+                      <input
+                        class="catalog-cell"
+                        type="text"
+                        value={catalogCellValue('tag', t.id, 'name', t.name)}
+                        disabled={saving && catalogSavingKey === catalogCellKey('tag', t.id, 'name')}
+                        onfocus={() => beginCatalogEdit('tag', t.id, 'name', t.name)}
+                        oninput={(e) => setCatalogEditValue('tag', t.id, 'name', e.currentTarget.value)}
+                        onblur={commitCatalogEdit}
+                        onkeydown={onCatalogEditKeydown}
+                        aria-label={`Tag ${t.name}`}
+                      />
+                    {/if}
                   </td>
                   <td class="col-actions">
-                    <button type="button" class="btn-icon danger" title="Löschen" aria-label="Tag löschen" disabled={saving} onclick={() => deleteCatalogTag(t)}>✕</button>
+                    {#if !t.is_system}
+                      <button type="button" class="btn-icon danger" title="Löschen" aria-label="Tag löschen" disabled={saving} onclick={() => deleteCatalogTag(t)}>✕</button>
+                    {/if}
                   </td>
                 </tr>
               {:else}

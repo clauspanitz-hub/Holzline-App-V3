@@ -177,6 +177,11 @@ def init_db() -> None:
         migrate_material_family(engine)
         migrate_overview_ignored(engine)
         seed_admin_user(db)
+        from app.services import backfill_incomplete_tags, ensure_system_incomplete_tags
+
+        newly = ensure_system_incomplete_tags(db)
+        if newly:
+            backfill_incomplete_tags(db, newly)
     finally:
         db.close()
 

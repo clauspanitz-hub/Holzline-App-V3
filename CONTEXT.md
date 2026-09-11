@@ -37,8 +37,8 @@ Einzelkerzen sind **Material**. Ein **Kerzenset** (z. B. 10 kleine Kerzen + 1 Le
 _Avoid_: Kerzenfarbe → Einzelkerzen-Material als Normalfall im Geburtstagsring-Set; Kerzenset ohne Stückliste
 
 **Ziffer / Ziffernset**:
-Einzelne Ziffern sind **Produkte**. Ein **Ziffernset** (typisch 11 Ziffern) ist ebenfalls ein **Produkt** mit Stückliste aus diesen Ziffern-Produkten, farbgebunden über Medium **PLA**. Die Shopify-Option **Zahlenfarbe** (o. ä.) zeigt in der Options-Zuordnung auf das **Ziffernset-Produkt** der jeweiligen Farbe — dieses wird dem Ring-Set zugeordnet, nicht die Einzelziffern.
-_Avoid_: Zahlenfarbe → einzelne Ziffern als Normalfall in der Set-Zuordnung; Einzelziffern als Material
+Einzelne Ziffern sind **Produkte**. Kanonischer Name: `Ziffern Einzeln - {0–9} - {Farbe}` (Medium **PLA** steckt in der Farbe, nicht im Namen). Alle Einzelziffern gehören zur Produktfamilie **`Ziffern`**. Ein **Ziffernset** (typisch 11 Ziffern: 0–9 plus ggf. Extra) ist ebenfalls ein **Produkt** mit Stückliste aus diesen Ziffern-Produkten, farbgebunden über Medium **PLA**. Die Shopify-Option **Zahlenfarbe** (o. ä.) zeigt in der Options-Zuordnung auf das **Ziffernset-Produkt** der jeweiligen Farbe — dieses wird dem Ring-Set zugeordnet, nicht die Einzelziffern.
+_Avoid_: Zahlenfarbe → einzelne Ziffern als Normalfall in der Set-Zuordnung; Einzelziffern als Material; Name ohne zweiten Bindestrich vor der Farbe (`… - 1 Beige`); Familie pro Ziffer statt `Ziffern`
 
 **Stückliste**:
 Die Zuordnung, welche Positionen in welcher Menge für eine Einheit benötigt werden. Produkt-Stückliste: Materialien fürs Fertigen. Set-/Varianten-Stückliste: Materialien und/oder Produkte zum Zusammenstellen.
@@ -74,7 +74,11 @@ _Avoid_: Verfügbarer Set-Bestand (Sets haben keinen Bestand)
 
 **Tag**:
 Ein Label zur Gruppierung und Filterung von Materialien und Produkten (mehrere möglich). Einträge kommen aus einem pflegbaren Tag-Katalog; Zuordnung am Artikel. Unabhängig von Farbe/Medium (Art/Option). Beim Setzen an einem Artikel Nachfrage: Tag auch der **gleichen Produkt- bzw. Materialfamilie** geben? Auswahl-UI analog Medium/Farbe (Serienanlage): bereits vorhandene/zutreffende Tags **ausgegraut**.
-_Avoid_: Kategorie als einziges Pflichtfeld; Farboption als Tag; stilles Taggen aller Artikel ohne Nachfrage; „alle“ = gesamte Produkt-/Materialliste ohne Familienbezug
+_Avoid_: Kategorie als einziges Pflichtfeld; Farboption als Tag; stilles Taggen aller Artikel ohne Nachfrage (außer System-Tags für Unvollständigkeit); „alle“ = gesamte Produkt-/Materialliste ohne Familienbezug
+
+**Unvollständigkeit** (Stammdaten):
+Fehlende Pflicht-Infos an Material oder Produkt: Material **Mindestbestand** / **Einkaufspreis** (=0); Produkt **Mindestbestand** / **Stückliste**. Die App setzt dazu automatisch die System-Tags `fehlt Mindestbestand`, `fehlt Stückliste`, `fehlt Einkaufspreis` (kataloggeschützt). Manuelles Entfernen eines solchen Tags = diese Warnung ignorieren, bis das Feld wieder vollständig und danach erneut unvollständig wird. Das rote „!“ in der Liste zeigt nur Felder, deren `fehlt …`-Tag noch gesetzt ist.
+_Avoid_: Unvollständigkeit nur als unsichtbare Berechnung ohne Filter; Katalog-Umbenennen/Löschen der `fehlt …`-Tags; Familien-Propagierung für System-Tags
 
 **Farbe**:
 Ein benannter Farbeintrag im Katalog (z. B. Rot, Salbeigrün), jeweils mit einem Medium. Material und Produkt können je eine Farbe haben. In der UI: Medium zuerst, dann Farbe/Option.
@@ -89,8 +93,8 @@ Gleichzeitiges Setzen ausgewählter Felder für mehrere Materialien oder Produkt
 _Avoid_: Massen-Umbenennung; Massen-Farbänderung; Bestand/Stückliste ohne Warn-Dialog; Mehrfach-Bestand als Delta; Mehrfach-Stückliste als komplettes Ersetzen aller Zeilen
 
 **Produktfamilie**:
-Optionale Bezeichnung, unter der zusammengehörige Produkte gruppiert werden (z. B. „Ziffern Einzeln - 2“). Bei der Serienanlage wird sie automatisch auf den **Basisnamen** gesetzt; am Produkt jederzeit änderbar. In der UI: Filter nach Familie und einklappbare Gruppenköpfe (ohne Familie = „Ohne Familie“). Beim Einführen: einmaliger Vorschlag Familie = Name ohne angehängten Farbnamen (nur wenn Farbe gesetzt und Name so endet), Bestätigung nötig. Unabhängig von Farbe/Tag; nicht der Produktname selbst.
-_Avoid_: Nur implizite Gruppierung über Namensähnlichkeit ohne Feld; Familie = Tag; stille automatische Befüllung ohne Nachfrage
+Optionale Bezeichnung, unter der zusammengehörige Produkte gruppiert werden (z. B. alle Einzelziffern unter **`Ziffern`**). Bei der Serienanlage wird sie automatisch auf den **Basisnamen** gesetzt; am Produkt jederzeit änderbar (z. B. nach Serienanlage von `Ziffern Einzeln - 2 -` auf `Ziffern` korrigieren). In der UI: Filter nach Familie und einklappbare Gruppenköpfe (ohne Familie = „Ohne Familie“). Beim Einführen: einmaliger Vorschlag Familie = Name ohne angehängten Farbnamen (nur wenn Farbe gesetzt und Name so endet), Bestätigung nötig. Unabhängig von Farbe/Tag; nicht der Produktname selbst.
+_Avoid_: Nur implizite Gruppierung über Namensähnlichkeit ohne Feld; Familie = Tag; stille automatische Befüllung ohne Nachfrage; Familie = Ziffern-Serien-Basisname belassen wenn kanonisch `Ziffern` gemeint ist
 
 **Materialfamilie**:
 Optionale Bezeichnung, unter der zusammengehörige Materialien gruppiert werden — analog zur **Produktfamilie**, aber ein eigenes Feld (nicht dieselbe Liste wie bei Produkten). In der UI: Filter nach Familie und einklappbare Gruppenköpfe (ohne Familie = „Ohne Familie“). Unabhängig von Farbe/Tag/Medium.

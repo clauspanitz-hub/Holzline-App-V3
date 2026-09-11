@@ -19,7 +19,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 ### Phase 1 (Basis)
 - **materials:** `id`, `name` (unique), `unit`, `purchase_quantity`, `purchase_price`, `cost_per_unit` (= Preis/Einkaufsmenge), optional `min_stock`/`color`/`tags`/`family` (Materialfamilie), Audit `created_at`/`updated_at`/`created_by`/`updated_by` — Bestand nur in `material_stocks`
 - **products:** `id`, `name` (unique), `sku` (optional unique), optional `min_stock`/`color`/`tags`/`family` (Produktfamilie), `is_template`, Audit wie Materialien — kein Gesamtbestand mehr an der Zeile
-- **Unvollständig (UI):** Material: Mindestbestand, Einkaufspreis=0; Produkt: Mindestbestand, Stückliste
+- **Unvollständig (UI):** Material: Mindestbestand, Einkaufspreis=0; Produkt: Mindestbestand, Stückliste — sichtbar als „!“ und als System-Tags `fehlt …` (ADR `0011`)
 - **product_materials:** Produkt-Stückliste (Material → Fertigen)
 - **Materialherstellkosten:** live aus Produkt-Stückliste
 
@@ -57,6 +57,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Serien-Mindestbestand; Produktfamilie; Mehrfachbearbeitung (ADR `0007`)
 - [x] JSON-Datensicherung Export/Import; Übersicht mit Familienfilter; leichtes UI-Split (ADR `0008`)
 - [x] Materialfamilie; Übersicht Produkte zuerst + Ignorieren; Set-Zuordnung über Katalogfarbe (ADR `0009`)
+- [x] Unvollständigkeit → System-Tags `fehlt …` + „!“ nur bei gesetztem Tag (ADR `0011`)
 
 ### Phase 2: Bestellverwaltung & Eingangskanäle (GEPLANT)
 - [x] Benutzer mit Rechten (App-Login Admin/Mitarbeiter, ADR `0010`) — Teilumsetzung Auth

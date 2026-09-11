@@ -192,6 +192,102 @@ def resolve_tags(db: Session, tag_ids: list[int]) -> list[Tag]:
     return [by_id[tid] for tid in unique_ids]
 
 
+def ensure_system_incomplete_tags(db: Session) -> list[str]:
+    """Create missing system fehlt-tags. Returns names of newly created tags."""
+    from app.incomplete_tags import SYSTEM_INCOMPLETE_TAG_NAMES
+
+    newly: list[str] = []
+    for name in sorted(SYSTEM_INCOMPLETE_TAG_NAMES):
+        exists = db.scalars(select(Tag).where(Tag.name == name).limit(1)).first()
+        if exists is None:
+            db.add(Tag(name=name))
+            newly.append(name)
+    if newly:
+        db.commit()
+    return newly
+
+
+def _system_incomplete_tag_map(db: Session) -> dict[str, Tag]:
+    from app.incomplete_tags import SYSTEM_INCOMPLETE_TAG_NAMES
+
+    rows = db.scalars(select(Tag).where(Tag.name.in_(SYSTEM_INCOMPLETE_TAG_NAMES))).all()
+    by_name = {t.name: t for t in rows}
+    for name in SYSTEM_INCOMPLETE_TAG_NAMES:
+        if name not in by_name:
+            tag = Tag(name=name)
+            db.add(tag)
+            db.flush()
+            by_name[name] = tag
+    return by_name
+
+
+def sync_incomplete_tags(
+    db: Session,
+    entity: Material | Product,
+    *,
+    before_missing: list[str],
+) -> None:
+    """Update fehlt-tags from incomplete-field transitions. Caller commits.
+
+    - Fields now complete → remove corresponding tag.
+    - Fields newly incomplete (in after but not before) → add tag.
+    - Still incomplete and tag was manually removed → leave absent.
+    """
+    from app.incomplete_tags import TAG_BY_FIELD
+
+    if isinstance(entity, Material):
+        after_missing = material_incomplete_fields_raw(entity)
+    else:
+        after_missing = product_incomplete_fields_raw(entity)
+
+    after_set = set(after_missing)
+    before_set = set(before_missing)
+    by_name = _system_incomplete_tag_map(db)
+
+    kept: list[Tag] = []
+    for tag in list(entity.tags):
+        field = next((f for f, n in TAG_BY_FIELD.items() if n == tag.name), None)
+        if field is not None and field not in after_set:
+            continue
+        kept.append(tag)
+    entity.tags = kept
+    current_names = {t.name for t in entity.tags}
+
+    for field in after_set - before_set:
+        tag_name = TAG_BY_FIELD[field]
+        if tag_name not in current_names:
+            entity.tags = [*entity.tags, by_name[tag_name]]
+            current_names.add(tag_name)
+
+
+def backfill_incomplete_tags(db: Session, newly_created_tag_names: list[str]) -> None:
+    """One-shot: assign fehlt-tags for fields whose system tags were just created."""
+    from app.incomplete_tags import TAG_BY_FIELD
+
+    if not newly_created_tag_names:
+        return
+    new_names = set(newly_created_tag_names)
+
+    materials = db.scalars(select(Material).options(selectinload(Material.tags))).all()
+    for material in materials:
+        after = material_incomplete_fields_raw(material)
+        before = [f for f in after if TAG_BY_FIELD[f] not in new_names]
+        sync_incomplete_tags(db, material, before_missing=before)
+
+    products = db.scalars(
+        select(Product).options(
+            selectinload(Product.tags),
+            selectinload(Product.materials),
+        )
+    ).all()
+    for product in products:
+        after = product_incomplete_fields_raw(product)
+        before = [f for f in after if TAG_BY_FIELD[f] not in new_names]
+        sync_incomplete_tags(db, product, before_missing=before)
+
+    db.commit()
+
+
 def get_medium(db: Session, medium_id: int) -> ColorMedium:
     medium = db.get(ColorMedium, medium_id)
     if not medium:
@@ -354,7 +450,14 @@ def list_tags(db: Session) -> list[TagRead]:
 
 
 def create_tag(db: Session, payload: TagCreate) -> TagRead:
+    from app.incomplete_tags import is_system_incomplete_tag
+
     name = payload.name.strip()
+    if is_system_incomplete_tag(name):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tag „{name}“ ist ein System-Tag und wird automatisch verwaltet",
+        )
     tag = Tag(name=name)
     db.add(tag)
     try:
@@ -367,10 +470,17 @@ def create_tag(db: Session, payload: TagCreate) -> TagRead:
 
 
 def update_tag(db: Session, tag_id: int, payload: TagUpdate) -> TagRead:
+    from app.incomplete_tags import is_system_incomplete_tag
+
     tag = db.get(Tag, tag_id)
     if not tag:
         raise HTTPException(status_code=404, detail="Tag nicht gefunden")
-    tag.name = payload.name.strip()
+    if is_system_incomplete_tag(tag.name):
+        raise HTTPException(status_code=400, detail=f"System-Tag „{tag.name}“ kann nicht umbenannt werden")
+    new_name = payload.name.strip()
+    if is_system_incomplete_tag(new_name):
+        raise HTTPException(status_code=400, detail=f"Name „{new_name}“ ist für System-Tags reserviert")
+    tag.name = new_name
     try:
         db.commit()
     except IntegrityError as exc:
@@ -382,9 +492,13 @@ def update_tag(db: Session, tag_id: int, payload: TagUpdate) -> TagRead:
 
 def delete_tag(db: Session, tag_id: int) -> None:
     """Removes tag; M:N links cascade-deleted."""
+    from app.incomplete_tags import is_system_incomplete_tag
+
     tag = db.get(Tag, tag_id)
     if not tag:
         raise HTTPException(status_code=404, detail="Tag nicht gefunden")
+    if is_system_incomplete_tag(tag.name):
+        raise HTTPException(status_code=400, detail=f"System-Tag „{tag.name}“ kann nicht gelöscht werden")
     db.delete(tag)
     db.commit()
 
@@ -609,7 +723,7 @@ def bom_line_read(line: ProductMaterial) -> BomLineRead:
     )
 
 
-def material_incomplete_fields(material: Material) -> list[str]:
+def material_incomplete_fields_raw(material: Material) -> list[str]:
     missing: list[str] = []
     if material.min_stock is None:
         missing.append("Mindestbestand")
@@ -618,13 +732,31 @@ def material_incomplete_fields(material: Material) -> list[str]:
     return missing
 
 
-def product_incomplete_fields(product: Product) -> list[str]:
+def product_incomplete_fields_raw(product: Product) -> list[str]:
     missing: list[str] = []
     if product.min_stock is None:
         missing.append("Mindestbestand")
     if not product.materials:
         missing.append("Stückliste")
     return missing
+
+
+def material_incomplete_fields(material: Material) -> list[str]:
+    from app.incomplete_tags import visible_incomplete_fields
+
+    return visible_incomplete_fields(
+        material_incomplete_fields_raw(material),
+        {t.name for t in material.tags},
+    )
+
+
+def product_incomplete_fields(product: Product) -> list[str]:
+    from app.incomplete_tags import visible_incomplete_fields
+
+    return visible_incomplete_fields(
+        product_incomplete_fields_raw(product),
+        {t.name for t in product.tags},
+    )
 
 
 def material_read(material: Material) -> MaterialRead:
@@ -754,6 +886,7 @@ def create_material(db: Session, payload: MaterialCreate) -> MaterialRead:
                 quantity=_q(payload.stock_quantity),
             )
         )
+        sync_incomplete_tags(db, material, before_missing=[])
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -840,6 +973,9 @@ def create_materials_from_colors(db: Session, payload: MaterialsFromColorsReques
         created_ids.append(material.id)
         taken.add(color_id)
 
+    for mid in created_ids:
+        material = _load_material(db, mid)
+        sync_incomplete_tags(db, material, before_missing=[])
     db.commit()
     created = [material_read(_load_material(db, mid)) for mid in created_ids]
     return MaterialsFromColorsResult(created=created, skipped=skipped, warnings=warnings)
@@ -847,6 +983,7 @@ def create_materials_from_colors(db: Session, payload: MaterialsFromColorsReques
 
 def update_material(db: Session, material_id: int, payload: MaterialUpdate) -> MaterialRead:
     material = _load_material(db, material_id)
+    before_missing = material_incomplete_fields_raw(material)
     data = payload.model_dump(exclude_unset=True)
     tag_ids = data.pop("tag_ids", None)
     if "name" in data and data["name"] is not None:
@@ -867,6 +1004,7 @@ def update_material(db: Session, material_id: int, payload: MaterialUpdate) -> M
     if tag_ids is not None:
         material.tags = resolve_tags(db, tag_ids)
     material.cost_per_unit = _unit_cost(Decimal(material.purchase_price), Decimal(material.purchase_quantity))
+    sync_incomplete_tags(db, material, before_missing=before_missing)
     _stamp_update(material)
     try:
         db.commit()
@@ -1006,6 +1144,7 @@ def create_product(db: Session, payload: ProductCreate) -> ProductRead:
                 quantity=_q(payload.stock_quantity),
             )
         )
+        sync_incomplete_tags(db, product, before_missing=[])
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -1131,6 +1270,9 @@ def create_products_from_colors(db: Session, payload: ProductsFromColorsRequest)
         created_ids.append(product.id)
         used_names.add(name)
 
+    for pid in created_ids:
+        product = _load_product(db, pid)
+        sync_incomplete_tags(db, product, before_missing=[])
     db.commit()
     created = [product_read(_load_product(db, pid)) for pid in created_ids]
     return ProductsFromColorsResult(created=created, skipped=skipped, warnings=warnings)
@@ -1138,6 +1280,7 @@ def create_products_from_colors(db: Session, payload: ProductsFromColorsRequest)
 
 def update_product(db: Session, product_id: int, payload: ProductUpdate) -> ProductRead:
     product = _load_product(db, product_id)
+    before_missing = product_incomplete_fields_raw(product)
     data = payload.model_dump(exclude_unset=True)
     tag_ids = data.pop("tag_ids", None)
     if "name" in data and data["name"] is not None:
@@ -1155,6 +1298,7 @@ def update_product(db: Session, product_id: int, payload: ProductUpdate) -> Prod
         setattr(product, key, value)
     if tag_ids is not None:
         product.tags = resolve_tags(db, tag_ids)
+    sync_incomplete_tags(db, product, before_missing=before_missing)
     _stamp_update(product)
     try:
         db.commit()
@@ -1177,6 +1321,7 @@ def bulk_update_materials(db: Session, payload: "MaterialBulkUpdate") -> list[Ma
     result_ids: list[int] = []
     for mid in payload.ids:
         material = _load_material(db, mid)
+        before_missing = material_incomplete_fields_raw(material)
         if payload.clear_min_stock:
             material.min_stock = None
         elif payload.min_stock is not None:
@@ -1187,6 +1332,7 @@ def bulk_update_materials(db: Session, payload: "MaterialBulkUpdate") -> list[Ma
             material.family = family
         if tags is not None:
             material.tags = list(tags)
+        sync_incomplete_tags(db, material, before_missing=before_missing)
         _stamp_update(material)
         result_ids.append(material.id)
     db.commit()
@@ -1203,6 +1349,7 @@ def bulk_update_products(db: Session, payload: "ProductBulkUpdate") -> list[Prod
     result_ids: list[int] = []
     for pid in payload.ids:
         product = _load_product(db, pid)
+        before_missing = product_incomplete_fields_raw(product)
         if payload.clear_min_stock:
             product.min_stock = None
         elif payload.min_stock is not None:
@@ -1215,6 +1362,7 @@ def bulk_update_products(db: Session, payload: "ProductBulkUpdate") -> list[Prod
             product.is_template = bool(payload.is_template)
         if tags is not None:
             product.tags = list(tags)
+        sync_incomplete_tags(db, product, before_missing=before_missing)
         _stamp_update(product)
         result_ids.append(product.id)
     db.commit()
@@ -1387,6 +1535,7 @@ def transform_product(
 
 def add_bom_line(db: Session, product_id: int, payload: BomLineCreate) -> ProductRead:
     product = _load_product(db, product_id)
+    before_missing = product_incomplete_fields_raw(product)
     _load_material(db, payload.material_id)
     line = ProductMaterial(
         product_id=product.id,
@@ -1394,6 +1543,10 @@ def add_bom_line(db: Session, product_id: int, payload: BomLineCreate) -> Produc
         quantity_required=_q(payload.quantity_required),
     )
     db.add(line)
+    db.flush()
+    db.expire(product, ["materials"])
+    product = _load_product(db, product_id)
+    sync_incomplete_tags(db, product, before_missing=before_missing)
     _stamp_update(product)
     try:
         db.commit()
@@ -1419,10 +1572,16 @@ def update_bom_line(db: Session, product_id: int, line_id: int, payload: BomLine
 
 def delete_bom_line(db: Session, product_id: int, line_id: int) -> ProductRead:
     product = _load_product(db, product_id)
+    before_missing = product_incomplete_fields_raw(product)
     line = next((item for item in product.materials if item.id == line_id), None)
     if not line:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stücklistenzeile nicht gefunden")
     db.delete(line)
+    db.flush()
+    # Refresh materials collection after delete for incomplete check
+    db.expire(product, ["materials"])
+    product = _load_product(db, product_id)
+    sync_incomplete_tags(db, product, before_missing=before_missing)
     _stamp_update(product)
     db.commit()
     return product_read(_load_product(db, product.id))
