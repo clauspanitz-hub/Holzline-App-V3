@@ -1,0 +1,13 @@
+---
+description: Bei Commit immer alle zugehörigen Änderungen stagen und pushen
+alwaysApply: true
+---
+
+# Commit + Push
+
+Wenn der Nutzer einen Commit verlangt (oder eine Commit-and-Push-Aktion):
+
+1. **Alle zugehörigen Änderungen mitnehmen** — Code, Tests, `CONTEXT.md`, ADRs, `PROJECT.md` und UI aus derselben Aufgabe. Keine halben Commits, bei denen Doku/Regelwerk zurückbleibt.
+2. **Unrelated weglassen** — nur Dateien der aktuellen Arbeit; Secrets/`.env` nie.
+3. **Danach pushen** — nach erfolgreichem Commit immer `git push` auf den Tracking-Remote der aktuellen Branch (`origin`), außer der Nutzer sagt ausdrücklich „nur committen, nicht pushen“.
+4. **Kurz melden** — Commit-Hash und dass gepusht wurde (oder warum der Push scheiterte).
