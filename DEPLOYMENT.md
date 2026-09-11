@@ -1,33 +1,170 @@
 # Deployment-Leitfaden (Proxmox LXC)
 
-## Voraussetzungen im Proxmox-Host
-- Ein unprivileged oder privileged Debian/Ubuntu-LXC-Container.
-- Docker & Docker Compose installiert (`curl -fsSL https://get.docker.com | sh`).
-- Portweiterleitung / Caddy Reverse Proxy eingerichtet.
+Ziel: Holzlinge Inventar in einem **Debian/Ubuntu-LXC** mit **Docker Compose**, erreichbar unter `http://<LXC-IP>:8000`.
 
-## Startbefehle
+---
+
+## A) Was ich (Cursor) steuern kann — und was nicht
+
+**Ohne Proxmox-MCP:** Ich kann nur Anleitungen geben; du klickst/tippst im Proxmox-UI bzw. per SSH.
+
+**Mit Proxmox-MCP:** Ich kann LXC anlegen, starten, Docker vorbereiten und (mit Host-SSH) Befehle im Container ausführen.
+
+Benötigt:
+
+1. MCP **`cursor-proxmox-mcp`** (PyPI) — empfohlen  
+2. Optional: Skill-Wissen `npx skills add bldg-7/proxmox-mcp@proxmox-mcp-tools` (nur Doku/Workflows, **kein** API-Zugriff)
+
+---
+
+## B) MCP einrichten (einmalig — damit ich übernehmen kann)
+
+### B1. Proxmox API-Token
+
+1. Proxmox-UI → **Datacenter → Permissions → API Tokens → Add**
+2. User z. B. `root@pam` oder besser eigener User `mcp@pve`
+3. Token-ID z. B. `cursor`
+4. **Privilege Separation: Yes** belassen und dem Token passende Rechte geben (mind. VM/LXC anlegen/starten, Storage lesen; für Docker-LXC oft `PVEVMAdmin` + Datastore)
+5. Token-Secret **sofort notieren** (nur einmal sichtbar)
+
+### B2. `uv` installieren (Windows)
+
+```powershell
+winget install astral-sh.uv
+```
+
+Cursor danach neu starten.
+
+### B3. Config-Datei (ohne Repo — Secrets lokal!)
+
+Datei z. B. `C:\Users\<DU>\proxmox-config\config.json`:
+
+```json
+{
+  "proxmox": {
+    "host": "192.168.x.x",
+    "port": 8006,
+    "verify_ssl": false,
+    "service": "PVE"
+  },
+  "auth": {
+    "user": "root@pam",
+    "token_name": "cursor",
+    "token_value": "HIER-TOKEN-SECRET"
+  },
+  "logging": {
+    "level": "INFO",
+    "verbose": false,
+    "tool_calls": true
+  }
+}
+```
+
+### B4. Cursor MCP (`%USERPROFILE%\.cursor\mcp.json`)
+
+Eintrag ergänzen (Pfad anpassen):
+
+```json
+{
+  "mcpServers": {
+    "proxmox": {
+      "command": "uvx",
+      "args": ["cursor-proxmox-mcp"],
+      "env": {
+        "PROXMOX_MCP_CONFIG": "C:/Users/DU/proxmox-config/config.json"
+      }
+    }
+  }
+}
+```
+
+Dann in Cursor: **Settings → MCP → proxmox** neu laden / Cursor neu starten.  
+Wenn Tools erscheinen: Schreib mir „MCP ist live“ + gewünschte LXC-IP/Hostname — dann übernehme ich Provisioning.
+
+**Optional Host-SSH** (für `pct`-Befehle / Deploy in den LXC): siehe [SETUP.md des MCP](https://github.com/hackmods/cursor-proxmox-mcp/blob/main/SETUP.md) Abschnitt *SSH for LXC exec*.
+
+---
+
+## C) Manuelle Schritt-für-Schritt-Anleitung (ohne MCP)
+
+### C1. LXC anlegen (Proxmox-UI)
+
+| Feld | Empfehlung |
+|------|------------|
+| CT ID | freie ID (z. B. `120`) |
+| Hostname | `holzlinge-inventar` |
+| Template | Debian 12 oder Ubuntu 24.04 |
+| Disk | ≥ 8 GB |
+| CPU | 2 |
+| RAM | 2048 MB |
+| Swap | 512 MB |
+| Netz | Bridge `vmbr0`, DHCP oder feste IP |
+| Features | **nesting=1** (wichtig für Docker) |
+| Unprivileged | Ja (üblich); bei Docker-Problemen ggf. `keyctl` / nesting prüfen |
+
+Container **starten**.
+
+### C2. In den LXC (Konsole oder SSH als root)
+
 ```bash
-# Repository / Ordner klonen bzw. öffnen
+apt update && apt upgrade -y
+apt install -y curl git ca-certificates
+
+# Docker
+curl -fsSL https://get.docker.com | sh
+systemctl enable --now docker
+docker compose version
+```
+
+### C3. App deployen
+
+```bash
+mkdir -p /opt
+git clone https://github.com/clauspanitz-hub/Holzline-App-V3.git /opt/holzlinge-inventar
 cd /opt/holzlinge-inventar
 
-# Container bauen und starten
+# Kein docker-compose.override.yml im Prod nötig (sonst Port 8001)
+# Falls Override lokal mitkommt und stört:
+# rm -f docker-compose.override.yml
+
 docker compose up -d --build
+docker compose ps
+docker compose logs -f --tail=50 app
+```
 
-# Logs
+### C4. Prüfen
+
+- App: `http://<LXC-IP>:8000`
+- API-Docs: `http://<LXC-IP>:8000/docs`
+- Daten: Volume `holzlinge_data` → `/data/holzlinge.db` im Container
+
+### C5. Updates später
+
+```bash
+cd /opt/holzlinge-inventar
+git pull
+docker compose up -d --build
+```
+
+### C6. Optional: Reverse Proxy / HTTPS
+
+Auf dem Host oder einem Proxy-LXC (Caddy/Nginx) Hostname auf `<LXC-IP>:8000` legen. Firewall nur LAN oder gezielt freigeben.
+
+---
+
+## D) Startbefehle (Referenz)
+
+```bash
+cd /opt/holzlinge-inventar
+docker compose up -d --build
 docker compose logs -f app
-
-# Stoppen
 docker compose down
 ```
 
-## Zugriff
-- App: `http://<LXC-IP>:8000`
-- API-Docs: `http://<LXC-IP>:8000/docs`
-- SQLite-Daten liegen im Docker-Volume `holzlinge_data` unter `/data/holzlinge.db`.
+Lokal kann `docker-compose.override.yml` den Host-Port auf `8001` legen (Dev).
 
-Lokal kann `docker-compose.override.yml` den Host-Port auf `8001` legen (vermeidet Konflikte mit dem Dev-Backend auf `8000`).
+## E) Lokale Entwicklung (ohne Docker)
 
-## Lokale Entwicklung (ohne Docker)
 ```bash
 # Backend
 cd backend
