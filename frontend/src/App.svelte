@@ -101,10 +101,64 @@
     component_id: '',
     quantity_required: '1',
   })
-  /** Option-Name → Medium-ID für Set-Zuordnung über Katalogfarbe */
-  let setOptionMedia = $state({})
-  let setMapColorId = $state('')
-  let setMissingTemplateId = $state('')
+  /** Pro Options-Name: Medium, Typ, Vorlage, Basisname */
+  let setOptionConfig = $state({})
+  /** Zeilen-Overrides: `${option}::${value}` → { colorId, componentId, skip } */
+  let setRowOverrides = $state({})
+
+  function emptySetOptionConfig() {
+    return { mediumId: '', kind: 'product', templateId: '', baseName: '' }
+  }
+
+  function getSetOptionConfig(optionName) {
+    return setOptionConfig[optionName] || emptySetOptionConfig()
+  }
+
+  function patchSetOptionConfig(optionName, patch) {
+    if (!optionName) return
+    setOptionConfig = {
+      ...setOptionConfig,
+      [optionName]: { ...getSetOptionConfig(optionName), ...patch },
+    }
+  }
+
+  function setBatchRowKey(optionName, value) {
+    return `${optionName}::${value}`
+  }
+
+  function matchColorsForShopifyValue(mediumId, value) {
+    const pool = colorsForMedium(mediumId)
+    const v = String(value || '')
+      .trim()
+      .toLowerCase()
+    if (!v) return []
+    const exact = pool.filter((c) => String(c.name).trim().toLowerCase() === v)
+    if (exact.length) return exact
+    return pool.filter((c) => {
+      const n = String(c.name).trim().toLowerCase()
+      return n.includes(v) || v.includes(n)
+    })
+  }
+
+  function resolveSetComponents(kind, colorId, templateId, baseName) {
+    if (!colorId) return []
+    const cid = Number(colorId)
+    let rows = (kind === 'material' ? materials : products).filter((r) => r.color_id === cid)
+    const template = templateId ? products.find((p) => p.id === Number(templateId)) : null
+    const family = String(template?.family || baseName || '').trim()
+    if (family && kind === 'product') {
+      const famRows = rows.filter(
+        (p) =>
+          productFamilyKey(p) === family ||
+          String(p.name).toLowerCase().startsWith(family.toLowerCase()),
+      )
+      if (famRows.length) rows = famRows
+    } else if (baseName && rows.length > 1) {
+      const pref = rows.filter((r) => String(r.name).toLowerCase().startsWith(String(baseName).toLowerCase()))
+      if (pref.length) rows = pref
+    }
+    return rows
+  }
 
   let inlineMaterialForm = $state(null)
 
@@ -1011,93 +1065,12 @@
   async function loadOptionSuggestions(value) {
     if (!value) {
       colorSuggestions = []
-      setMapColorId = ''
       return
     }
     try {
       colorSuggestions = await api.suggestions.byOptionValue(value)
     } catch {
       colorSuggestions = []
-    }
-    syncSetMapColorFromOption()
-  }
-
-  function setOptionMedium(optionName, mediumId) {
-    if (!optionName) return
-    setOptionMedia = { ...setOptionMedia, [optionName]: mediumId ? String(mediumId) : '' }
-    syncSetMapColorFromOption()
-  }
-
-  function syncSetMapColorFromOption() {
-    const mid = setOptionMedia[mappingForm.option_name] || ''
-    const value = String(mappingForm.option_value || '').trim().toLowerCase()
-    if (!mid || !value) {
-      setMapColorId = ''
-      return
-    }
-    const match = colorsForMedium(mid).find((c) => String(c.name).trim().toLowerCase() === value)
-    setMapColorId = match ? String(match.id) : ''
-    if (match && mappingForm.kind === 'product') {
-      const matches = products.filter((p) => p.color_id === match.id)
-      if (matches.length === 1) mappingForm.component_id = String(matches[0].id)
-    }
-  }
-
-  function componentsForSetMapping() {
-    const colorId = setMapColorId ? Number(setMapColorId) : null
-    if (mappingForm.kind === 'product') {
-      const rows = colorId ? products.filter((p) => p.color_id === colorId) : products
-      return rows
-    }
-    const rows = colorId ? materials.filter((m) => m.color_id === colorId) : materials
-    return rows
-  }
-
-  async function createMissingProductsForSetColor() {
-    const colorId = Number(setMapColorId)
-    const mid = Number(setOptionMedia[mappingForm.option_name])
-    if (!colorId || !mid) {
-      showFlash('error', 'Zuerst Medium und Katalogfarbe wählen.')
-      return
-    }
-    const color = colors.find((c) => c.id === colorId)
-    if (!color) return
-    const templateId = setMissingTemplateId ? Number(setMissingTemplateId) : null
-    const template = templateId ? products.find((p) => p.id === templateId) : null
-    let base = template?.family || template?.name || mappingForm.option_name.replace(/farbe$/i, '').trim() || 'Produkt'
-    if (template?.color?.name && base.toLowerCase().endsWith(String(template.color.name).toLowerCase())) {
-      base = base.slice(0, base.length - template.color.name.length).trim() || base
-    }
-    if (
-      !confirm(
-        `Produkt „${base} ${color.name}“ anlegen${template ? ` (Vorlage: ${template.name})` : ''}?`,
-      )
-    ) {
-      return
-    }
-    saving = true
-    try {
-      const result = await api.products.fromColors({
-        color_ids: [colorId],
-        base_name: base,
-        template_product_id: templateId,
-        location_id: locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || null,
-      })
-      await refresh({ silent: true })
-      const created = result.created?.[0]
-      if (created) {
-        mappingForm.kind = 'product'
-        mappingForm.component_id = String(created.id)
-        showFlash('ok', `Produkt „${created.name}“ angelegt.`)
-      } else {
-        showFlash('warn', result.warnings?.join(' ') || 'Kein neues Produkt angelegt (vielleicht schon vorhanden).')
-        const existing = products.find((p) => p.color_id === colorId && p.name.toLowerCase().includes(color.name.toLowerCase()))
-        if (existing) mappingForm.component_id = String(existing.id)
-      }
-    } catch (error) {
-      showFlash('error', error.message)
-    } finally {
-      saving = false
     }
   }
 
@@ -1767,8 +1740,7 @@
     setModal = full
     const names = [...new Set(full.variants.flatMap((v) => [v.option1_name, v.option2_name, v.option3_name].filter(Boolean)))]
     mappingForm.option_name = names[0] || ''
-    setMapColorId = ''
-    setMissingTemplateId = ''
+    setRowOverrides = {}
     setStep = step != null ? step : 1
   }
 
@@ -1921,6 +1893,134 @@
     )
     return optionValues.filter((v) => !mapped.has(v))
   })
+
+  const setBatchRows = $derived.by(() => {
+    const option = mappingForm.option_name
+    const cfg = getSetOptionConfig(option)
+    if (!setModal || !option || !cfg.mediumId) return []
+    return optionValues.map((value) => {
+      const key = setBatchRowKey(option, value)
+      const ov = setRowOverrides[key] || {}
+      const already = setModal.option_mappings.some(
+        (m) => m.option_name === option && m.option_value === value,
+      )
+      const candidates = matchColorsForShopifyValue(cfg.mediumId, value)
+      let colorId = ov.colorId != null && ov.colorId !== undefined ? String(ov.colorId) : ''
+      let status = 'ok'
+      if (ov.skip) {
+        status = 'skip'
+      } else if (!colorId) {
+        if (candidates.length === 1) colorId = String(candidates[0].id)
+        else if (candidates.length === 0) status = 'missing_color'
+        else status = 'ambiguous_color'
+      }
+      const comps =
+        colorId && !ov.skip
+          ? resolveSetComponents(cfg.kind, colorId, cfg.templateId, cfg.baseName)
+          : []
+      let componentId = ov.componentId != null && ov.componentId !== undefined ? String(ov.componentId) : ''
+      if (!ov.skip && colorId && status === 'ok') {
+        if (!componentId) {
+          if (comps.length === 1) componentId = String(comps[0].id)
+          else if (comps.length === 0) status = 'missing_article'
+          else status = 'ambiguous_article'
+        }
+      }
+      return {
+        key,
+        value,
+        colorId,
+        candidates,
+        comps,
+        componentId,
+        status,
+        already,
+        kind: cfg.kind,
+      }
+    })
+  })
+
+  const setBatchReadyCount = $derived(
+    setBatchRows.filter((r) => !r.already && r.componentId && r.status !== 'skip').length,
+  )
+
+  function patchSetRow(option, value, patch) {
+    const key = setBatchRowKey(option, value)
+    setRowOverrides = { ...setRowOverrides, [key]: { ...(setRowOverrides[key] || {}), ...patch } }
+  }
+
+  async function saveBatchMappings() {
+    const option = mappingForm.option_name
+    const toSave = setBatchRows.filter((r) => !r.already && r.componentId && r.status !== 'skip')
+    if (!toSave.length) {
+      showFlash('error', 'Keine speicherbaren Zeilen — Farben/Artikel klären.')
+      return
+    }
+    saving = true
+    try {
+      let saved = 0
+      for (const row of toSave) {
+        const body = {
+          option_name: option.trim(),
+          option_value: row.value.trim(),
+          quantity_required: '1',
+          material_id: row.kind === 'material' ? Number(row.componentId) : null,
+          product_id: row.kind === 'product' ? Number(row.componentId) : null,
+        }
+        setModal = await api.sets.addMapping(setModal.id, body)
+        saved += 1
+      }
+      await refresh({ silent: true })
+      showFlash('ok', `${saved} Zuordnung(en) gespeichert.`)
+      markSaved()
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function createMissingBatchArticles() {
+    const option = mappingForm.option_name
+    const cfg = getSetOptionConfig(option)
+    if (cfg.kind !== 'product') {
+      showFlash('error', 'Nachlegen derzeit nur für Produkte (Serienanlage).')
+      return
+    }
+    const missing = setBatchRows.filter((r) => !r.already && r.colorId && r.status === 'missing_article')
+    if (!missing.length) {
+      showFlash('error', 'Keine fehlenden Produkte mit geklärter Farbe.')
+      return
+    }
+    const templateId = cfg.templateId ? Number(cfg.templateId) : null
+    const template = templateId ? products.find((p) => p.id === templateId) : null
+    let base =
+      cfg.baseName.trim() ||
+      template?.family ||
+      (template?.name ? String(template.name) : '') ||
+      option.replace(/farbe$/i, '').trim() ||
+      'Produkt'
+    if (template?.color?.name && base.toLowerCase().endsWith(String(template.color.name).toLowerCase())) {
+      base = base.slice(0, base.length - template.color.name.length).trim() || base
+    }
+    if (!confirm(`${missing.length} fehlende Produkte für „${base}“ anlegen?`)) return
+    saving = true
+    try {
+      const result = await api.products.fromColors({
+        color_ids: missing.map((r) => Number(r.colorId)),
+        base_name: base,
+        template_product_id: templateId,
+        location_id: locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || null,
+      })
+      await refresh({ silent: true })
+      showFlash('ok', `${result.created?.length || 0} Produkt(e) angelegt.`)
+      if (result.warnings?.length) showFlash('warn', result.warnings.slice(0, 3).join(' · '))
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
 
   const buildableVariants = $derived(
     setModal ? setModal.variants.filter((v) => v.buildable_quantity > 0) : [],
@@ -3188,7 +3288,7 @@
 
 {#if setModal}
   <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (setModal = null)}>
-    <div class="modal" role="dialog" aria-modal="true" style="width:min(720px,100%)">
+    <div class="modal" role="dialog" aria-modal="true" style="width:min(960px,100%)">
       <h3>{setModal.name}</h3>
       <p class="empty" style="margin-top:0">{setModal.variant_count} Varianten aus Shopify</p>
 
@@ -3250,8 +3350,8 @@
       {:else if setStep === 2}
         <div class="bom-block">
           <p class="empty" style="margin-top:0">
-            Beispiel: Option <strong>Ringfarbe</strong> Wert <strong>Salbeigrün</strong> → Produkt <strong>Ring Salbeigrün</strong>, Menge 1.
-            Danach „Auf alle Varianten anwenden“.
+            Pro Options-Name: Medium + Vorlage/Familie. Darunter alle Shopify-Werte — Katalogfarbe matchen
+            (bei Unklarheit Dropdown), Artikel folgt aus Farbe. Menge immer 1.
           </p>
 
           <h4>Gespeicherte Zuordnungen</h4>
@@ -3266,117 +3366,169 @@
               <button class="btn danger" onclick={() => removeMapping(mapping)}>Entfernen</button>
             </div>
           {:else}
-            <p class="empty">Noch keine Zuordnung — unten die erste anlegen.</p>
+            <p class="empty">Noch keine Zuordnung — unten die erste Option zuordnen.</p>
           {/each}
 
-          <h4 style="margin-top:1rem">Neue Zuordnung</h4>
-          <p class="empty" style="margin-top:0">
-            Zuerst <strong>Medium</strong> je Options-Name (z. B. Ringfarbe → Lack), dann Shopify-Wert der
-            <strong>Katalogfarbe</strong> zuordnen. Fehlende Produkte kannst du hier nachlegen.
-          </p>
+          <h4 style="margin-top:1rem">Option zuordnen</h4>
           <div class="form-grid">
-            <label>Welche Option?
-              <select
-                bind:value={mappingForm.option_name}
-                onchange={() => {
-                  mappingForm.option_value = ''
-                  setMapColorId = ''
-                  colorSuggestions = []
-                }}
-              >
+            <label>Options-Name
+              <select bind:value={mappingForm.option_name}>
                 {#each optionNames as n}<option value={n}>{n}</option>{/each}
               </select>
             </label>
-            <label>Medium für diese Option
+            <label>Medium
               <select
-                value={setOptionMedia[mappingForm.option_name] || ''}
-                onchange={(e) => setOptionMedium(mappingForm.option_name, e.currentTarget.value)}
+                value={getSetOptionConfig(mappingForm.option_name).mediumId}
+                onchange={(e) => patchSetOptionConfig(mappingForm.option_name, { mediumId: e.currentTarget.value })}
               >
-                <option value="">wählen…</option>
+                <option value="">wählen… (z. B. Lack / PLA)</option>
                 {#each media as m}<option value={m.id}>{m.name}</option>{/each}
               </select>
             </label>
-            <label>Welcher Wert? {#if unmappedOptionValues.length}<span class="empty">({unmappedOptionValues.length} noch offen)</span>{/if}
+            <label>Artikel-Typ
               <select
-                bind:value={mappingForm.option_value}
-                onchange={() => loadOptionSuggestions(mappingForm.option_value)}
+                value={getSetOptionConfig(mappingForm.option_name).kind}
+                onchange={(e) => patchSetOptionConfig(mappingForm.option_name, { kind: e.currentTarget.value })}
               >
-                <option value="">wählen…</option>
-                {#each optionValues as v}
-                  <option value={v}>{v}{unmappedOptionValues.includes(v) ? '' : ' (schon zugeordnet)'}</option>
-                {/each}
+                <option value="product">Produkt (Ring / Kerzenset / Ziffernset)</option>
+                <option value="material">Material</option>
               </select>
             </label>
-            {#if setOptionMedia[mappingForm.option_name]}
-              <label>Katalogfarbe
+            {#if getSetOptionConfig(mappingForm.option_name).kind === 'product'}
+              <label>Vorlage
                 <select
-                  bind:value={setMapColorId}
-                  onchange={() => {
-                    const cid = Number(setMapColorId)
-                    if (!cid) return
-                    const matches = mappingForm.kind === 'product'
-                      ? products.filter((p) => p.color_id === cid)
-                      : materials.filter((m) => m.color_id === cid)
-                    if (matches.length === 1) mappingForm.component_id = String(matches[0].id)
+                  value={getSetOptionConfig(mappingForm.option_name).templateId}
+                  onchange={(e) => {
+                    const tid = e.currentTarget.value
+                    const t = products.find((p) => p.id === Number(tid))
+                    patchSetOptionConfig(mappingForm.option_name, {
+                      templateId: tid,
+                      baseName: t?.family || getSetOptionConfig(mappingForm.option_name).baseName,
+                    })
                   }}
                 >
-                  <option value="">wählen / Match…</option>
-                  {#each colorsForMedium(setOptionMedia[mappingForm.option_name]) as c}
-                    <option value={c.id}>{c.name}</option>
-                  {/each}
-                </select>
-              </label>
-            {/if}
-            {#if colorSuggestions.length && setStep === 2}
-              <div class="suggest-block" style="grid-column:1/-1">
-                <p class="empty" style="margin:0 0 .35rem">Vorschläge zur Option „{mappingForm.option_value}“:</p>
-                <div class="suggest-chips">
-                  {#each colorSuggestions as s}
-                    <button type="button" class="chip" onclick={() => applySuggestion(s)}>
-                      {s.kind === 'product' ? 'Produkt' : 'Material'}: {s.name} · {s.color_label}
-                    </button>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-            <label>Lagerartikel-Typ
-              <select bind:value={mappingForm.kind} onchange={() => (mappingForm.component_id = '')}>
-                <option value="product">Produkt (z. B. Ring)</option>
-                <option value="material">Material (z. B. Kerzen)</option>
-              </select>
-            </label>
-            <label>Welcher Lagerartikel?
-              <select bind:value={mappingForm.component_id}>
-                <option value="">wählen…</option>
-                {#each componentsForSetMapping() as item}
-                  <option value={item.id}>{item.name}</option>
-                {/each}
-              </select>
-            </label>
-            {#if mappingForm.kind === 'product' && setMapColorId && !componentsForSetMapping().length}
-              <label>Vorlage für Nachlegen
-                <select bind:value={setMissingTemplateId}>
-                  <option value="">ohne / nur Basisname</option>
+                  <option value="">ohne</option>
                   {#each productsForBomTemplate as p}
                     <option value={p.id}>{p.is_template ? `Vorlage: ${p.name}` : p.name}</option>
                   {/each}
                 </select>
               </label>
-              <button type="button" class="btn secondary" disabled={saving} onclick={createMissingProductsForSetColor}>
-                Fehlendes Produkt anlegen…
-              </button>
+              <label>Basisname / Familie
+                <input
+                  list="product-family-suggestions"
+                  value={getSetOptionConfig(mappingForm.option_name).baseName}
+                  oninput={(e) => patchSetOptionConfig(mappingForm.option_name, { baseName: e.currentTarget.value })}
+                  placeholder="z. B. Geburtstagsring - Uni"
+                />
+              </label>
             {/if}
-            <label>Menge pro Set
-              <input type="number" step="0.001" min="0.001" bind:value={mappingForm.quantity_required} />
-            </label>
-            <button
-              class="btn secondary"
-              disabled={saving || !mappingForm.option_value || !mappingForm.component_id}
-              onclick={addMapping}
-            >
-              Zuordnung speichern
-            </button>
           </div>
+
+          {#if getSetOptionConfig(mappingForm.option_name).mediumId}
+            <div class="table-wrap" style="margin-top:1rem">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Shopify-Wert</th>
+                    <th>Katalogfarbe</th>
+                    <th>Lagerartikel</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each setBatchRows as row (row.key)}
+                    <tr class:neg={row.status.startsWith('ambiguous') || row.status.startsWith('missing')}>
+                      <td>
+                        {row.value}
+                        {#if row.already}<div class="empty">schon zugeordnet</div>{/if}
+                      </td>
+                      <td>
+                        {#if row.already}
+                          —
+                        {:else if row.status === 'skip'}
+                          <span class="empty">übersprungen</span>
+                        {:else}
+                          <select
+                            value={row.colorId}
+                            onchange={(e) =>
+                              patchSetRow(mappingForm.option_name, row.value, {
+                                colorId: e.currentTarget.value,
+                                componentId: '',
+                                skip: false,
+                              })}
+                          >
+                            <option value="">{row.status === 'ambiguous_color' ? 'klären…' : row.status === 'missing_color' ? 'wählen…' : 'Match…'}</option>
+                            {#each (row.candidates.length ? row.candidates : colorsForMedium(getSetOptionConfig(mappingForm.option_name).mediumId)) as c}
+                              <option value={c.id}>{c.name}</option>
+                            {/each}
+                          </select>
+                        {/if}
+                      </td>
+                      <td>
+                        {#if row.already}
+                          —
+                        {:else if row.status === 'skip'}
+                          —
+                        {:else}
+                          <select
+                            value={row.componentId}
+                            onchange={(e) =>
+                              patchSetRow(mappingForm.option_name, row.value, {
+                                componentId: e.currentTarget.value,
+                                colorId: row.colorId,
+                                skip: false,
+                              })}
+                          >
+                            <option value="">{row.comps.length > 1 ? 'wählen…' : '—'}</option>
+                            {#each (row.comps.length ? row.comps : resolveSetComponents(row.kind, row.colorId, getSetOptionConfig(mappingForm.option_name).templateId, getSetOptionConfig(mappingForm.option_name).baseName)) as item}
+                              <option value={item.id}>{item.name}</option>
+                            {/each}
+                          </select>
+                        {/if}
+                      </td>
+                      <td>
+                        {#if row.already}
+                          <span class="empty">ok</span>
+                        {:else if row.status === 'ok' && row.componentId}
+                          bereit
+                        {:else if row.status === 'ambiguous_color'}
+                          Farbe unklar
+                        {:else if row.status === 'missing_color'}
+                          keine Farbe
+                        {:else if row.status === 'ambiguous_article'}
+                          Artikel unklar
+                        {:else if row.status === 'missing_article'}
+                          Artikel fehlt
+                        {:else if row.status === 'skip'}
+                          —
+                        {:else}
+                          {row.status}
+                        {/if}
+                        {#if !row.already}
+                          <button
+                            type="button"
+                            class="btn secondary"
+                            style="margin-left:.35rem"
+                            onclick={() => patchSetRow(mappingForm.option_name, row.value, { skip: true, colorId: '', componentId: '' })}
+                          >Skip</button>
+                        {/if}
+                      </td>
+                    </tr>
+                  {:else}
+                    <tr><td colspan="4" class="empty">Medium wählen, dann erscheinen die Shopify-Werte.</td></tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+            <div class="row-actions" style="margin-top:.75rem">
+              <button type="button" class="btn" disabled={saving || !setBatchReadyCount} onclick={saveBatchMappings}>
+                {setBatchReadyCount} Zuordnung(en) speichern
+              </button>
+              <button type="button" class="btn secondary" disabled={saving} onclick={createMissingBatchArticles}>
+                Fehlende Produkte nachlegen…
+              </button>
+            </div>
+          {/if}
 
           <div class="modal-actions" style="margin-top:1rem">
             <button type="button" class="btn secondary" onclick={() => (setStep = 1)}>Zurück</button>
