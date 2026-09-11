@@ -72,6 +72,18 @@ button {
   max-width: 40rem;
 }
 
+.auth-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.login-panel {
+  max-width: 24rem;
+}
+
 .tabs {
   display: flex;
   gap: 0.5rem;

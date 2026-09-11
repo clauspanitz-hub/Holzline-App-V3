@@ -1,24 +1,36 @@
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import backup, services
+from app.auth import (
+    AdminUser,
+    CurrentUser,
+    SESSION_COOKIE,
+    create_session,
+    delete_session_by_token,
+    hash_password,
+    verify_password,
+)
 from app.database import get_db
-from app.models import Unit
+from app.models import Unit, User, UserRole
 from app.schemas import (
     BackupImportRequest,
     BackupImportResult,
     BomLineCreate,
     BomLineUpdate,
+    ChangePasswordRequest,
     ColorCreate,
     ColorMatchSuggestion,
     ColorRead,
     ColorUpdate,
     ColorWriteResult,
     LocationRead,
+    LoginRequest,
     ManufactureRequest,
     ManufactureResult,
     MaterialBulkUpdate,
@@ -52,6 +64,9 @@ from app.schemas import (
     TransferRequest,
     TransformRequest,
     UnitInfo,
+    UserCreate,
+    UserRead,
+    UserUpdate,
 )
 
 router = APIRouter(prefix="/api")
@@ -292,9 +307,10 @@ def transfer_product(
 def transform_product(
     product_id: int,
     payload: TransformRequest,
+    user: CurrentUser,
     db: Session = Depends(get_db),
 ) -> ProductRead:
-    return services.transform_product(db, product_id, payload)
+    return services.transform_product(db, product_id, payload, actor=user.username)
 
 
 @router.get("/movements", response_model=list[StockMovementRead])
@@ -441,3 +457,113 @@ async def import_shopify_inventory(
     except UnicodeDecodeError as exc:
         raise HTTPException(status_code=400, detail="CSV muss UTF-8 sein") from exc
     return services.import_shopify_inventory_csv(db, content)
+
+
+def _user_read(user: User) -> UserRead:
+    return UserRead(
+        id=user.id,
+        username=user.username,
+        role=user.role.value if hasattr(user.role, "value") else str(user.role),
+        is_active=user.is_active,
+        created_at=user.created_at,
+        updated_at=user.updated_at,
+    )
+
+
+@router.post("/auth/login", response_model=UserRead)
+def auth_login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)) -> UserRead:
+    from app.config import settings as app_settings
+
+    user = db.scalars(select(User).where(User.username == payload.username.strip())).first()
+    if not user or not user.is_active or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Benutzername oder Passwort falsch")
+    token = create_session(db, user)
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        max_age=app_settings.session_idle_hours * 3600,
+        path="/",
+    )
+    return _user_read(user)
+
+
+@router.post("/auth/logout", status_code=204)
+def auth_logout(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> None:
+    token = request.cookies.get(SESSION_COOKIE)
+    delete_session_by_token(db, token)
+    response.delete_cookie(SESSION_COOKIE, path="/")
+
+
+@router.get("/auth/me", response_model=UserRead)
+def auth_me(user: CurrentUser) -> UserRead:
+    return _user_read(user)
+
+
+@router.post("/auth/change-password", status_code=204)
+def auth_change_password(
+    payload: ChangePasswordRequest,
+    user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> None:
+    row = db.get(User, user.id)
+    if not row or not verify_password(payload.current_password, row.password_hash):
+        raise HTTPException(status_code=400, detail="Aktuelles Passwort falsch")
+    row.password_hash = hash_password(payload.new_password)
+    row.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+
+@router.get("/users", response_model=list[UserRead])
+def list_users(admin: AdminUser, db: Session = Depends(get_db)) -> list[UserRead]:
+    rows = db.scalars(select(User).order_by(User.username)).all()
+    return [_user_read(u) for u in rows]
+
+
+@router.post("/users", response_model=UserRead, status_code=201)
+def create_user(payload: UserCreate, admin: AdminUser, db: Session = Depends(get_db)) -> UserRead:
+    name = payload.username.strip()
+    if db.scalars(select(User).where(User.username == name)).first():
+        raise HTTPException(status_code=400, detail="Benutzername bereits vergeben")
+    user = User(
+        username=name,
+        password_hash=hash_password(payload.password),
+        role=UserRole(payload.role),
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return _user_read(user)
+
+
+@router.patch("/users/{user_id}", response_model=UserRead)
+def update_user(
+    user_id: int,
+    payload: UserUpdate,
+    admin: AdminUser,
+    db: Session = Depends(get_db),
+) -> UserRead:
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
+    if payload.role is not None:
+        user.role = UserRole(payload.role)
+    if payload.is_active is not None:
+        if user.id == admin.id and not payload.is_active:
+            raise HTTPException(status_code=400, detail="Eigenen Account nicht deaktivieren")
+        user.is_active = payload.is_active
+        if not user.is_active:
+            for sess in list(user.sessions):
+                db.delete(sess)
+    if payload.password:
+        user.password_hash = hash_password(payload.password)
+    user.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(user)
+    return _user_read(user)

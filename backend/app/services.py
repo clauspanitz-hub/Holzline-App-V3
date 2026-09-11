@@ -433,6 +433,7 @@ def _record_movement(
     material_id: int | None = None,
     to_product_id: int | None = None,
     note: str | None = None,
+    created_by: str | None = None,
 ) -> None:
     db.add(
         StockMovement(
@@ -444,6 +445,7 @@ def _record_movement(
             to_location_id=to_location_id,
             quantity=quantity,
             note=(note.strip() if note and note.strip() else None),
+            created_by=created_by,
         )
     )
 
@@ -1338,7 +1340,13 @@ def transfer_product(db: Session, product_id: int, payload: TransferRequest) -> 
     return product_read(_load_product(db, product_id))
 
 
-def transform_product(db: Session, product_id: int, payload: TransformRequest) -> ProductRead:
+def transform_product(
+    db: Session,
+    product_id: int,
+    payload: TransformRequest,
+    *,
+    actor: str | None = None,
+) -> ProductRead:
     source = _load_product(db, product_id)
     if not product_name_allows_transform(source.name):
         raise HTTPException(
@@ -1367,6 +1375,7 @@ def transform_product(db: Session, product_id: int, payload: TransformRequest) -
         product_id=source.id,
         to_product_id=source.transform_target_id,
         note=payload.note,
+        created_by=actor,
     )
     _stamp_update(source)
     target = db.get(Product, source.transform_target_id)

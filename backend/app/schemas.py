@@ -427,6 +427,39 @@ class BackupImportRequest(BaseModel):
     mode: Literal["replace", "merge"] | None = None
 
 
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=80)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=6, max_length=200)
+
+
+class UserCreate(BaseModel):
+    username: str = Field(min_length=1, max_length=80)
+    password: str = Field(min_length=6, max_length=200)
+    role: Literal["admin", "mitarbeiter"] = "mitarbeiter"
+
+
+class UserUpdate(BaseModel):
+    role: Literal["admin", "mitarbeiter"] | None = None
+    is_active: bool | None = None
+    password: str | None = Field(default=None, min_length=6, max_length=200)
+
+
+class UserRead(BaseModel):
+    id: int
+    username: str
+    role: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class BackupImportResult(BaseModel):
     mode: Literal["replace", "merge"]
     created: dict[str, int] = {}

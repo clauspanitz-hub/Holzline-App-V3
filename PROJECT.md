@@ -59,10 +59,10 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Materialfamilie; Übersicht Produkte zuerst + Ignorieren; Set-Zuordnung über Katalogfarbe (ADR `0009`)
 
 ### Phase 2: Bestellverwaltung & Eingangskanäle (GEPLANT)
+- [x] Benutzer mit Rechten (App-Login Admin/Mitarbeiter, ADR `0010`) — Teilumsetzung Auth
 - [ ] Shopify-API-Integration
 - [ ] Etsy-CSV-Import
 - [ ] Manuelle Schnellerfassung / Zusammenstellen bei Bestellung
-- [ ] Benutzer mit Rechten
 
 ### Phase 3: Optimierung & Einkauf (GEPLANT — vorgemerkt aus Grill)
 - [ ] Todo-Liste (offene Bestellungen/Todos) + Einkaufsliste aus fehlenden Materialien
@@ -70,8 +70,9 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Mindestbestand je Material/Produkt → Warnungen in Übersicht (vorgezogen in 1.5)
 
 ## 5. Geschäftsregeln (gültig)
-- Keine Reservierungs-/Verschnittlogik; keine Auth in 1.5.
-- Sets haben keinen Lagerbestand; Zusammenstellen bei Bestellung = Phase 2.
+- Keine Reservierungs-/Verschnittlogik.
+- **Auth (Phase 2):** Pflicht-Login; Rollen Admin und Mitarbeiter (ADR `0010`).
+- Sets haben keinen Lagerbestand; Zusammenstellen bei Bestellung = Phase 2 (Bestellungen).
 - Fertigen erhöht Produktbestand an einem gewählten Standort, Materialabbuchung an gewähltem/selben Standort (Start: ein Standort pro Buchung).
 - Baubare Sets aus Summe der Standorte ohne Ausschuss (ADR `0003`, `0006`).
 - Umwandlung: Bestand Quellprodukt → Zielprodukt am selben Standort, ohne Materialabbuchung (ADR `0006`).

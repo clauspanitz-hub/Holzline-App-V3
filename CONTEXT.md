@@ -140,3 +140,7 @@ _Avoid_: Filter als dominante linke Spalte; Filter verstecken hinter Icon als ei
 Eine nachvollziehbare Umbuchung oder Umwandlung, relevant vor allem mit virtuellen Standorten (MA1, MA2, In Bearbeitung, Ausschuss) und für Umwandlungen — Grundlage für den Überblick „wer hat was / was wurde daraus“.
 _Avoid_: Tag-Historie; implizite Umbuchung ohne Eintrag
 
+**Benutzer** / **Login**:
+Zugang zur App nur nach Anmeldung (Benutzername + Passwort). Session-Cookie, Idle ca. 12 h. Erster **Admin** per ENV beim Start (`ADMIN_USER` / `ADMIN_PASSWORD`), weitere Benutzer in der Admin-UI. Rollen: **Admin** (volle App) und **Mitarbeiter** (nur Bereich **Bei Mitarbeitern**, Umwandeln Uni→Vintage). Eigenes Passwort änderbar; Admin kann Passwörter setzen und Benutzer deaktivieren.
+_Avoid_: Anonymer LAN-Zugriff; Rechte nur über Proxy-Basic-Auth; OAuth als Pflicht für die Manufaktur
+

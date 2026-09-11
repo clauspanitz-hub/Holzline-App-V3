@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.database import init_db
+from app.middleware_auth import AuthMiddleware
 from app.routers import router
 
 app = FastAPI(title="Holzlinge Inventar", version="1.0.0")
@@ -17,6 +18,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(AuthMiddleware)
 
 app.include_router(router)
 

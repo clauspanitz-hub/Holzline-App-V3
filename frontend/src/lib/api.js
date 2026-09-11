@@ -3,7 +3,7 @@ async function request(path, options = {}) {
   if (options.body && !(options.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json'
   }
-  const response = await fetch(path, { ...options, headers })
+  const response = await fetch(path, { ...options, headers, credentials: 'include' })
 
   if (response.status === 204) return null
 
@@ -18,16 +18,30 @@ async function request(path, options = {}) {
   }
 
   if (!response.ok) {
-    const detail = data?.detail
-    const message = Array.isArray(detail)
-      ? detail.map((item) => item.msg || JSON.stringify(item)).join(', ')
-      : detail || response.statusText || 'Anfrage fehlgeschlagen'
-    throw new Error(message)
+    const err = new Error(
+      Array.isArray(data?.detail)
+        ? data.detail.map((item) => item.msg || JSON.stringify(item)).join(', ')
+        : data?.detail || response.statusText || 'Anfrage fehlgeschlagen',
+    )
+    err.status = response.status
+    throw err
   }
   return data
 }
 
 export const api = {
+  auth: {
+    me: () => request('/api/auth/me'),
+    login: (body) => request('/api/auth/login', { method: 'POST', body: JSON.stringify(body) }),
+    logout: () => request('/api/auth/logout', { method: 'POST' }),
+    changePassword: (body) =>
+      request('/api/auth/change-password', { method: 'POST', body: JSON.stringify(body) }),
+  },
+  users: {
+    list: () => request('/api/users'),
+    create: (body) => request('/api/users', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) => request(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  },
   units: () => request('/api/units'),
   media: {
     list: () => request('/api/media'),

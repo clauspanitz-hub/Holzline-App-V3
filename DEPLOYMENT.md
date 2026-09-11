@@ -146,9 +146,23 @@ git pull
 docker compose up -d --build
 ```
 
-### C6. Optional: Reverse Proxy / HTTPS
+### C6. Auth (Pflicht-Login)
 
-Auf dem Host oder einem Proxy-LXC (Caddy/Nginx) Hostname auf `<LXC-IP>:8000` legen. Firewall nur LAN oder gezielt freigeben.
+Beim ersten Start mit **leeren** Benutzern wird ein Admin aus ENV geseedet (nur wenn noch kein User existiert):
+
+```yaml
+environment:
+  DATABASE_URL: sqlite:////data/holzlinge.db
+  ADMIN_USER: admin
+  ADMIN_PASSWORD: "sicheres-passwort"
+  SESSION_IDLE_HOURS: "12"
+```
+
+Nach dem Seed: Login in der App, weitere Benutzer unter Tab **Benutzer**. `ADMIN_PASSWORD` danach aus Compose entfernen oder belassen (wird ignoriert, sobald User existieren).
+
+### C7. Optional: Reverse Proxy / HTTPS
+
+Auf dem Host oder einem Proxy-LXC (Caddy/Nginx) Hostname auf `<LXC-IP>:8000` legen. Firewall nur LAN oder gezielt freigeben. App-Auth ersetzt Basic-Auth für Rechte; TLS bleibt am Proxy.
 
 ---
 

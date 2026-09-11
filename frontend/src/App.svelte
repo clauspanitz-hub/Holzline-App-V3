@@ -13,6 +13,13 @@
   import BackupPanel from './lib/components/BackupPanel.svelte'
 
   let tab = $state('overview')
+  let authUser = $state(null)
+  let authChecked = $state(false)
+  let loginForm = $state({ username: '', password: '' })
+  let passwordModal = $state(false)
+  let passwordForm = $state({ current_password: '', new_password: '', confirm: '' })
+  let users = $state([])
+  let userForm = $state({ username: '', password: '', role: 'mitarbeiter' })
   let materials = $state([])
   let products = $state([])
   let sets = $state([])
@@ -661,8 +668,27 @@
   }
 
   async function refresh({ silent = false } = {}) {
+    if (!authUser) return
     if (!silent) loading = true
     try {
+      if (authUser.role === 'mitarbeiter') {
+        const [p, u, l, med, c] = await Promise.all([
+          api.products.list(),
+          api.units(),
+          api.locations(),
+          api.media.list(),
+          api.colors.list(),
+        ])
+        products = p
+        units = u
+        locations = l
+        media = med
+        colors = c
+        materials = []
+        sets = []
+        allTags = []
+        return
+      }
       const filter = {
         tag: filterTag || undefined,
         color_id: filterColorId || undefined,
@@ -697,14 +723,120 @@
       }
       if (!materialForm.location_id && l[0]) materialForm.location_id = String(l.find((x) => x.name === 'Hamburg')?.id || l[0].id)
       if (!productForm.location_id && l[0]) productForm.location_id = String(l.find((x) => x.name === 'Hamburg')?.id || l[0].id)
+      if (tab === 'users') await loadUsers()
     } catch (error) {
+      if (error.status === 401) {
+        authUser = null
+        return
+      }
       showFlash('error', error.message)
     } finally {
       if (!silent) loading = false
     }
   }
 
-  onMount(refresh)
+  async function bootstrapAuth() {
+    loading = true
+    try {
+      authUser = await api.auth.me()
+      if (authUser.role === 'mitarbeiter') tab = 'staff'
+      await refresh({ silent: true })
+    } catch (error) {
+      authUser = null
+      if (error.status !== 401) showFlash('error', error.message)
+    } finally {
+      authChecked = true
+      loading = false
+    }
+  }
+
+  async function doLogin() {
+    saving = true
+    try {
+      authUser = await api.auth.login({
+        username: loginForm.username.trim(),
+        password: loginForm.password,
+      })
+      loginForm = { username: '', password: '' }
+      if (authUser.role === 'mitarbeiter') tab = 'staff'
+      else tab = 'overview'
+      await refresh({ silent: true })
+      showFlash('ok', `Angemeldet als ${authUser.username}`)
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function doLogout() {
+    try {
+      await api.auth.logout()
+    } catch {
+      /* ignore */
+    }
+    authUser = null
+    tab = 'overview'
+  }
+
+  async function loadUsers() {
+    users = await api.users.list()
+  }
+
+  async function createUserAccount() {
+    if (!userForm.username.trim() || !userForm.password) return
+    saving = true
+    try {
+      await api.users.create({
+        username: userForm.username.trim(),
+        password: userForm.password,
+        role: userForm.role,
+      })
+      userForm = { username: '', password: '', role: 'mitarbeiter' }
+      await loadUsers()
+      showFlash('ok', 'Benutzer angelegt.')
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function patchUser(id, body) {
+    saving = true
+    try {
+      await api.users.update(id, body)
+      await loadUsers()
+      showFlash('ok', 'Benutzer aktualisiert.')
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function submitPasswordChange() {
+    if (passwordForm.new_password !== passwordForm.confirm) {
+      showFlash('error', 'Neues Passwort stimmt nicht überein.')
+      return
+    }
+    saving = true
+    try {
+      await api.auth.changePassword({
+        current_password: passwordForm.current_password,
+        new_password: passwordForm.new_password,
+      })
+      passwordModal = false
+      passwordForm = { current_password: '', new_password: '', confirm: '' }
+      showFlash('ok', 'Passwort geändert.')
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  onMount(bootstrapAuth)
 
   const LOCATION_ORDER = ['Hamburg', 'Dahlenburg', 'In Bearbeitung', 'MA1', 'MA2', 'Ausschuss']
   const MATERIAL_LOCATION_ORDER = ['Hamburg', 'Dahlenburg']
@@ -2031,25 +2163,117 @@
   <header class="brand">
     <h1>Holzlinge</h1>
     <p>Inventar, Standorte, Stücklisten und baubare Sets.</p>
+    {#if authUser}
+      <div class="auth-bar">
+        <span class="empty">{authUser.username} ({authUser.role === 'admin' ? 'Admin' : 'Mitarbeiter'})</span>
+        <button type="button" class="btn secondary" onclick={() => (passwordModal = true)}>Passwort</button>
+        <button type="button" class="btn secondary" onclick={doLogout}>Abmelden</button>
+      </div>
+    {/if}
   </header>
 
   {#if flash}
     <div class={`flash ${flash.type}`}>{flash.message}</div>
   {/if}
 
+  {#if !authChecked || (loading && !authUser)}
+    <div class="panel"><p class="empty">Lade…</p></div>
+  {:else if !authUser}
+    <section class="panel login-panel">
+      <h2>Anmelden</h2>
+      <form class="form-grid" onsubmit={(e) => { e.preventDefault(); doLogin() }}>
+        <label>Benutzername
+          <input bind:value={loginForm.username} autocomplete="username" required />
+        </label>
+        <label>Passwort
+          <input type="password" bind:value={loginForm.password} autocomplete="current-password" required />
+        </label>
+        <div class="row-actions">
+          <button class="btn" type="submit" disabled={saving}>Anmelden</button>
+        </div>
+      </form>
+    </section>
+  {:else}
   <nav class="tabs" aria-label="Hauptnavigation">
-    <button class="tab" class:active={tab === 'overview'} onclick={() => (tab = 'overview')}>Übersicht</button>
-    <button class="tab" class:active={tab === 'materials'} onclick={() => (tab = 'materials')}>Materialien</button>
-    <button class="tab" class:active={tab === 'products'} onclick={() => (tab = 'products')}>Produkte</button>
-    <button class="tab" class:active={tab === 'staff'} onclick={() => (tab = 'staff')}>
-      Bei Mitarbeitern{#if staffQueueProducts.length} ({staffQueueProducts.length}){/if}
-    </button>
-    <button class="tab" class:active={tab === 'catalogs'} onclick={() => (tab = 'catalogs')}>Kataloge</button>
-    <button class="tab" class:active={tab === 'sets'} onclick={() => (tab = 'sets')}>Sets</button>
+    {#if authUser.role === 'admin'}
+      <button class="tab" class:active={tab === 'overview'} onclick={() => (tab = 'overview')}>Übersicht</button>
+      <button class="tab" class:active={tab === 'materials'} onclick={() => (tab = 'materials')}>Materialien</button>
+      <button class="tab" class:active={tab === 'products'} onclick={() => (tab = 'products')}>Produkte</button>
+      <button class="tab" class:active={tab === 'staff'} onclick={() => (tab = 'staff')}>
+        Bei Mitarbeitern{#if staffQueueProducts.length} ({staffQueueProducts.length}){/if}
+      </button>
+      <button class="tab" class:active={tab === 'catalogs'} onclick={() => (tab = 'catalogs')}>Kataloge</button>
+      <button class="tab" class:active={tab === 'sets'} onclick={() => (tab = 'sets')}>Sets</button>
+      <button class="tab" class:active={tab === 'users'} onclick={() => { tab = 'users'; loadUsers() }}>Benutzer</button>
+    {:else}
+      <button class="tab" class:active={tab === 'staff'} onclick={() => (tab = 'staff')}>
+        Bei Mitarbeitern{#if staffQueueProducts.length} ({staffQueueProducts.length}){/if}
+      </button>
+    {/if}
   </nav>
 
   {#if loading}
     <div class="panel"><p class="empty">Lade…</p></div>
+  {:else if tab === 'users' && authUser.role === 'admin'}
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Benutzer</h2>
+      </div>
+      <h3>Neu anlegen</h3>
+      <form class="form-grid" onsubmit={(e) => { e.preventDefault(); createUserAccount() }}>
+        <label>Benutzername<input bind:value={userForm.username} required /></label>
+        <label>Passwort<input type="password" bind:value={userForm.password} required minlength="6" /></label>
+        <label>Rolle
+          <select bind:value={userForm.role}>
+            <option value="mitarbeiter">Mitarbeiter</option>
+            <option value="admin">Admin</option>
+          </select>
+        </label>
+        <div class="row-actions"><button class="btn" type="submit" disabled={saving}>Anlegen</button></div>
+      </form>
+      <div class="table-wrap" style="margin-top:1rem">
+        <table>
+          <thead>
+            <tr><th>Name</th><th>Rolle</th><th>Status</th><th></th></tr>
+          </thead>
+          <tbody>
+            {#each users as u}
+              <tr>
+                <td>{u.username}</td>
+                <td>
+                  <select
+                    value={u.role}
+                    onchange={(e) => patchUser(u.id, { role: e.currentTarget.value })}
+                    disabled={saving}
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="mitarbeiter">Mitarbeiter</option>
+                  </select>
+                </td>
+                <td>{u.is_active ? 'aktiv' : 'deaktiviert'}</td>
+                <td class="row-actions">
+                  <button
+                    type="button"
+                    class="btn secondary"
+                    disabled={saving}
+                    onclick={() => {
+                      const pw = prompt(`Neues Passwort für ${u.username} (min. 6 Zeichen):`)
+                      if (pw && pw.length >= 6) patchUser(u.id, { password: pw })
+                    }}
+                  >Passwort setzen</button>
+                  <button
+                    type="button"
+                    class="btn secondary"
+                    disabled={saving || u.id === authUser.id}
+                    onclick={() => patchUser(u.id, { is_active: !u.is_active })}
+                  >{u.is_active ? 'Deaktivieren' : 'Aktivieren'}</button>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    </section>
   {:else if tab === 'overview'}
     <section class="panel">
       <div class="panel-header">
@@ -2869,7 +3093,31 @@
       </div>
     </section>
   {/if}
+  {/if}
 </div>
+
+{#if passwordModal}
+  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (passwordModal = false)}>
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Passwort ändern</h3>
+      <form class="form-grid" onsubmit={(e) => { e.preventDefault(); submitPasswordChange() }}>
+        <label>Aktuelles Passwort
+          <input type="password" bind:value={passwordForm.current_password} required autocomplete="current-password" />
+        </label>
+        <label>Neues Passwort
+          <input type="password" bind:value={passwordForm.new_password} required minlength="6" autocomplete="new-password" />
+        </label>
+        <label>Neues Passwort wiederholen
+          <input type="password" bind:value={passwordForm.confirm} required minlength="6" autocomplete="new-password" />
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn secondary" onclick={() => (passwordModal = false)}>Abbrechen</button>
+          <button class="btn" disabled={saving}>Speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}
 
 {#if materialModal}
   <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (materialModal = null)}>

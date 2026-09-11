@@ -176,8 +176,30 @@ def init_db() -> None:
         migrate_product_family(engine)
         migrate_material_family(engine)
         migrate_overview_ignored(engine)
+        seed_admin_user(db)
     finally:
         db.close()
+
+
+def seed_admin_user(db: Session) -> None:
+    """Create first admin from ADMIN_USER / ADMIN_PASSWORD if no users exist."""
+    from app.auth import hash_password
+    from app.config import settings
+    from app.models import User, UserRole
+
+    if db.scalars(select(User).limit(1)).first():
+        return
+    if not settings.admin_user or not settings.admin_password:
+        return
+    db.add(
+        User(
+            username=settings.admin_user.strip(),
+            password_hash=hash_password(settings.admin_password),
+            role=UserRole.ADMIN,
+            is_active=True,
+        )
+    )
+    db.commit()
 
 
 def migrate_audit_timestamps(engine) -> None:

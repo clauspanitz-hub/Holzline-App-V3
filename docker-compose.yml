@@ -6,6 +6,9 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: sqlite:////data/holzlinge.db
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      SESSION_IDLE_HOURS: ${SESSION_IDLE_HOURS:-12}
     volumes:
       - holzlinge_data:/data
     restart: unless-stopped
