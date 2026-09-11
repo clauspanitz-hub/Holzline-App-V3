@@ -471,18 +471,26 @@ def _user_read(user: User) -> UserRead:
 
 
 @router.post("/auth/login", response_model=UserRead)
-def auth_login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)) -> UserRead:
+def auth_login(
+    payload: LoginRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+) -> UserRead:
     from app.config import settings as app_settings
 
     user = db.scalars(select(User).where(User.username == payload.username.strip())).first()
     if not user or not user.is_active or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Benutzername oder Passwort falsch")
     token = create_session(db, user)
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    secure = request.url.scheme == "https" or forwarded == "https"
     response.set_cookie(
         key=SESSION_COOKIE,
         value=token,
         httponly=True,
         samesite="lax",
+        secure=secure,
         max_age=app_settings.session_idle_hours * 3600,
         path="/",
     )
@@ -497,7 +505,9 @@ def auth_logout(
 ) -> None:
     token = request.cookies.get(SESSION_COOKIE)
     delete_session_by_token(db, token)
-    response.delete_cookie(SESSION_COOKIE, path="/")
+    forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    secure = request.url.scheme == "https" or forwarded == "https"
+    response.delete_cookie(SESSION_COOKIE, path="/", secure=secure, samesite="lax")
 
 
 @router.get("/auth/me", response_model=UserRead)

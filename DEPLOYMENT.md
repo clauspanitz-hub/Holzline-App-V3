@@ -160,9 +160,21 @@ environment:
 
 Nach dem Seed: Login in der App, weitere Benutzer unter Tab **Benutzer**. `ADMIN_PASSWORD` danach aus Compose entfernen oder belassen (wird ignoriert, sobald User existieren).
 
-### C7. Optional: Reverse Proxy / HTTPS
+### C7. Externer Zugang (MyFRITZ + Caddy HTTPS)
 
-Auf dem Host oder einem Proxy-LXC (Caddy/Nginx) Hostname auf `<LXC-IP>:8000` legen. Firewall nur LAN oder gezielt freigeben. App-Auth ersetzt Basic-Auth für Rechte; TLS bleibt am Proxy.
+Auf dem Proxmox-Host läuft Caddy. Holzlinge:
+
+- **URL:** `https://2hbv2m9qsbil1c81.myfritz.net:9443`
+- **Proxy:** Host-Caddy `:9443` → CT 131 `192.168.178.20:8000`
+- **Auth:** nur App-Login (kein Caddy Basic-Auth mehr)
+
+**FRITZ!Box Portfreigabe** (einmalig, sonst nur aus dem LAN erreichbar):
+
+1. FRITZ!Box → Internet → Freigaben → Portfreigaben → Gerät = **Proxmox-Host** (`192.168.178.58`)
+2. Neu: TCP **9443** → **9443** (IPv4; optional IPv6)
+3. Speichern, von Mobilfunk/Hotspot testen (nicht nur WLAN)
+
+Im LAN ohne Portfreigabe: gleiche URL funktioniert, wenn DNS auf die FRITZ! zeigt; alternativ weiter `http://192.168.178.20:8000`.
 
 ---
 
