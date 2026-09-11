@@ -104,6 +104,7 @@ class Material(Base):
     cost_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False, default=Decimal("0"))
     min_stock: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     family: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    overview_ignored: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     color_id: Mapped[int | None] = mapped_column(ForeignKey("colors.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -125,6 +126,7 @@ class Product(Base):
     min_stock: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     family: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    overview_ignored: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     color_id: Mapped[int | None] = mapped_column(ForeignKey("colors.id", ondelete="SET NULL"), nullable=True)
     transform_target_id: Mapped[int | None] = mapped_column(
         ForeignKey("products.id", ondelete="SET NULL"),

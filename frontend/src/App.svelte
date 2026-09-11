@@ -18,8 +18,9 @@
   let allTags = $state([])
   let filterTag = $state('')
   let filterColorId = $state('')
-  let filterFamily = $state('')
-  let filterMaterialFamily = $state('')
+  let overviewProductsOpen = $state(true)
+  let overviewMaterialsOpen = $state(true)
+  let overviewIgnoredOpen = $state(false)
   let colorSuggestions = $state([])
   let loading = $state(true)
   let flash = $state(null)
@@ -367,9 +368,18 @@
     return group.rows.length > 0 && group.rows.every((row) => selected.includes(row.id))
   }
 
-  function openBulkEdit(kind) {
-    bulkEditForm = emptyBulkEditForm()
-    bulkEditModal = { kind }
+  async function setOverviewIgnored(kind, item, ignored) {
+    saving = true
+    try {
+      if (kind === 'material') await api.materials.update(item.id, { overview_ignored: ignored })
+      else await api.products.update(item.id, { overview_ignored: ignored })
+      await refresh()
+      showFlash('ok', ignored ? 'Aus Übersicht ausgeblendet.' : 'Wieder in Übersicht.')
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
   }
 
   async function submitBulkEdit() {
@@ -545,8 +555,18 @@
     return false
   }
 
-  const criticalMaterials = $derived(materials.filter(isCritical))
-  const criticalProducts = $derived(products.filter(isCritical))
+  const criticalMaterials = $derived(
+    materials.filter((item) => isCritical(item) && !item.overview_ignored),
+  )
+  const criticalProducts = $derived(
+    products.filter((item) => isCritical(item) && !item.overview_ignored),
+  )
+  const ignoredCriticalMaterials = $derived(
+    materials.filter((item) => isCritical(item) && item.overview_ignored),
+  )
+  const ignoredCriticalProducts = $derived(
+    products.filter((item) => isCritical(item) && item.overview_ignored),
+  )
   const negativeMaterials = $derived(materials.filter((item) => item.is_negative))
   const negativeProducts = $derived(products.filter((item) => item.is_negative))
   const hasProductTemplates = $derived(products.some((p) => p.is_template))
@@ -621,14 +641,18 @@
     return (row) => row.label
   }
 
-  const displayedOverviewMaterials = $derived(
-    prepareRows(
-      criticalMaterials,
+  const displayedOverviewMaterials = $derived.by(() => {
+    const familyFiltered = filterMaterialFamily
+      ? criticalMaterials.filter((m) => productFamilyKey(m) === filterMaterialFamily)
+      : criticalMaterials
+    return prepareRows(
+      familyFiltered,
       listUi.overviewMaterials,
       (m) => stockRowSearchText(m, materialLocations),
       stockSortGetter(listUi.overviewMaterials.sortKey),
-    ),
-  )
+    )
+  })
+  const overviewMaterialGroups = $derived(groupProductsByFamily(displayedOverviewMaterials))
   const familyFilteredOverviewProducts = $derived(
     filterFamily
       ? criticalProducts.filter((p) => productFamilyKey(p) === filterFamily)
@@ -1721,126 +1745,174 @@
         </div>
       {/if}
       <p class="empty">
-        Nur Artikel mit Gesamt ≤ 0 oder unter Mindestbestand.
-        Standorte: {orderedLocations.map((l) => l.name).join(' · ')}
+        Zuerst kritische Produkte, darunter kritische Materialien (Gesamt ≤ 0 oder unter Mindestbestand).
+        Einzelne Einträge können dauerhaft ausgeblendet werden.
       </p>
-      <h3 style="margin:0 0 .5rem;font-size:1rem">Materialien</h3>
-      <div class="filter-bar form-grid">
-        <label class="list-search">Suche
-          <input type="search" placeholder="Name, Standort, Meta…" bind:value={listUi.overviewMaterials.q} />
-        </label>
-      </div>
-      <div class="table-wrap stock-table-wrap">
-        <table class="stock-table">
-          <thead>
-            <tr>
-              <th>
-                <button type="button" class="th-sort" onclick={() => toggleListSort('overviewMaterials', 'name')}>
-                  Name{sortMark(listUi.overviewMaterials.sortKey, 'name', listUi.overviewMaterials.sortDir)}
-                </button>
-              </th>
-              {#each materialLocations as loc}
-                <th class="num">
-                  <button type="button" class="th-sort" onclick={() => toggleListSort('overviewMaterials', `stock:${loc.id}`)}>
-                    {loc.name}{sortMark(listUi.overviewMaterials.sortKey, `stock:${loc.id}`, listUi.overviewMaterials.sortDir)}
+
+      <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewProductsOpen = !overviewProductsOpen)}>
+        {overviewProductsOpen ? '▼' : '▶'} Produkte
+        <span class="empty">({criticalProducts.length})</span>
+      </button>
+      {#if overviewProductsOpen}
+        <div class="filter-bar form-grid filter-bar-end">
+          <FamilyFilter families={productFamilies} bind:value={filterFamily} />
+          <label class="list-search">Suche
+            <input type="search" placeholder="Name, Standort, Meta…" bind:value={listUi.overviewProducts.q} />
+          </label>
+        </div>
+        <div class="table-wrap stock-table-wrap">
+          <table class="stock-table">
+            <thead>
+              <tr>
+                <th>
+                  <button type="button" class="th-sort" onclick={() => toggleListSort('overviewProducts', 'name')}>
+                    Name{sortMark(listUi.overviewProducts.sortKey, 'name', listUi.overviewProducts.sortDir)}
                   </button>
                 </th>
-              {/each}
-              <th class="num">
-                <button type="button" class="th-sort" onclick={() => toggleListSort('overviewMaterials', 'total')}>
-                  Gesamt{sortMark(listUi.overviewMaterials.sortKey, 'total', listUi.overviewMaterials.sortDir)}
-                </button>
-              </th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each displayedOverviewMaterials as material}
-              <tr class="row-click" onclick={() => openEditMaterial(material)}>
-                <td>
-                  {material.name}
-                  {#if formatMinStock(material)}
-                    <div class="min-stock-hint">Min. {formatMinStock(material)} {material.unit}</div>
-                  {/if}
-                </td>
-                {#each materialLocations as loc}
-                  <td class="num" class:neg={stockAt(material, loc.id) < 0}>{formatQty(stockAt(material, loc.id))}</td>
+                {#each orderedLocations as loc}
+                  <th class="num">
+                    <button type="button" class="th-sort" onclick={() => toggleListSort('overviewProducts', `stock:${loc.id}`)}>
+                      {loc.name}{sortMark(listUi.overviewProducts.sortKey, `stock:${loc.id}`, listUi.overviewProducts.sortDir)}
+                    </button>
+                  </th>
                 {/each}
-                <td class="num" class:neg={Number(material.stock_total) <= 0 || material.is_negative}>
-                  {formatQty(material.stock_total)} {material.unit}
-                </td>
-                <td onclick={(e) => e.stopPropagation()}>
-                  <button class="btn secondary" onclick={() => openEditMaterial(material)}>Bearbeiten</button>
-                </td>
-              </tr>
-            {:else}
-              <tr><td colspan={materialLocations.length + 3} class="empty">Keine kritischen Materialien.</td></tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-      <h3 style="margin:1.25rem 0 .5rem;font-size:1rem">Produkte</h3>
-      <div class="filter-bar form-grid">
-        <FamilyFilter families={productFamilies} bind:value={filterFamily} />
-        <label class="list-search">Suche
-          <input type="search" placeholder="Name, Standort, Meta…" bind:value={listUi.overviewProducts.q} />
-        </label>
-      </div>
-      <div class="table-wrap stock-table-wrap">
-        <table class="stock-table">
-          <thead>
-            <tr>
-              <th>
-                <button type="button" class="th-sort" onclick={() => toggleListSort('overviewProducts', 'name')}>
-                  Name{sortMark(listUi.overviewProducts.sortKey, 'name', listUi.overviewProducts.sortDir)}
-                </button>
-              </th>
-              {#each orderedLocations as loc}
                 <th class="num">
-                  <button type="button" class="th-sort" onclick={() => toggleListSort('overviewProducts', `stock:${loc.id}`)}>
-                    {loc.name}{sortMark(listUi.overviewProducts.sortKey, `stock:${loc.id}`, listUi.overviewProducts.sortDir)}
+                  <button type="button" class="th-sort" onclick={() => toggleListSort('overviewProducts', 'total')}>
+                    Gesamt{sortMark(listUi.overviewProducts.sortKey, 'total', listUi.overviewProducts.sortDir)}
                   </button>
                 </th>
-              {/each}
-              <th class="num">
-                <button type="button" class="th-sort" onclick={() => toggleListSort('overviewProducts', 'total')}>
-                  Gesamt{sortMark(listUi.overviewProducts.sortKey, 'total', listUi.overviewProducts.sortDir)}
-                </button>
-              </th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <ProductGroupSection
-              groups={overviewProductGroups}
-              {collapsedFamilies}
-              colSpan={orderedLocations.length + 3}
-              emptyMessage="Keine kritischen Produkte."
-              onToggleCollapse={toggleFamilyCollapse}
-            >
-              {#snippet row({ product })}
-                <tr class="row-click" onclick={() => openEditProduct(product)}>
-                  <td>
-                    {product.name}
-                    {#if formatMinStock(product)}
-                      <div class="min-stock-hint">Min. {formatMinStock(product)}</div>
-                    {/if}
-                  </td>
-                  {#each orderedLocations as loc}
-                    <td class="num" class:neg={stockAt(product, loc.id) < 0}>{formatQty(stockAt(product, loc.id))}</td>
-                  {/each}
-                  <td class="num" class:neg={Number(product.stock_total) <= 0 || product.is_negative}>
-                    {formatQty(product.stock_total)}
-                  </td>
-                  <td onclick={(e) => e.stopPropagation()}>
-                    <button class="btn secondary" onclick={() => openEditProduct(product)}>Bearbeiten</button>
-                  </td>
-                </tr>
-              {/snippet}
-            </ProductGroupSection>
-          </tbody>
-        </table>
-      </div>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <ProductGroupSection
+                groups={overviewProductGroups}
+                {collapsedFamilies}
+                colSpan={orderedLocations.length + 3}
+                emptyMessage="Keine kritischen Produkte."
+                onToggleCollapse={toggleFamilyCollapse}
+              >
+                {#snippet row({ product })}
+                  <tr class="row-click" onclick={() => openEditProduct(product)}>
+                    <td>
+                      {product.name}
+                      {#if formatMinStock(product)}
+                        <div class="min-stock-hint">Min. {formatMinStock(product)}</div>
+                      {/if}
+                    </td>
+                    {#each orderedLocations as loc}
+                      <td class="num" class:neg={stockAt(product, loc.id) < 0}>{formatQty(stockAt(product, loc.id))}</td>
+                    {/each}
+                    <td class="num" class:neg={Number(product.stock_total) <= 0 || product.is_negative}>
+                      {formatQty(product.stock_total)}
+                    </td>
+                    <td onclick={(e) => e.stopPropagation()}>
+                      <div class="row-actions">
+                        <button class="btn secondary" onclick={() => openEditProduct(product)}>Bearbeiten</button>
+                        <button class="btn secondary" disabled={saving} onclick={() => setOverviewIgnored('product', product, true)}>Ignorieren</button>
+                      </div>
+                    </td>
+                  </tr>
+                {/snippet}
+              </ProductGroupSection>
+            </tbody>
+          </table>
+        </div>
+      {/if}
+
+      <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewMaterialsOpen = !overviewMaterialsOpen)}>
+        {overviewMaterialsOpen ? '▼' : '▶'} Materialien
+        <span class="empty">({criticalMaterials.length})</span>
+      </button>
+      {#if overviewMaterialsOpen}
+        <div class="filter-bar form-grid filter-bar-end">
+          <FamilyFilter families={materialFamilies} bind:value={filterMaterialFamily} />
+          <label class="list-search">Suche
+            <input type="search" placeholder="Name, Standort, Meta…" bind:value={listUi.overviewMaterials.q} />
+          </label>
+        </div>
+        <div class="table-wrap stock-table-wrap">
+          <table class="stock-table">
+            <thead>
+              <tr>
+                <th>
+                  <button type="button" class="th-sort" onclick={() => toggleListSort('overviewMaterials', 'name')}>
+                    Name{sortMark(listUi.overviewMaterials.sortKey, 'name', listUi.overviewMaterials.sortDir)}
+                  </button>
+                </th>
+                {#each materialLocations as loc}
+                  <th class="num">
+                    <button type="button" class="th-sort" onclick={() => toggleListSort('overviewMaterials', `stock:${loc.id}`)}>
+                      {loc.name}{sortMark(listUi.overviewMaterials.sortKey, `stock:${loc.id}`, listUi.overviewMaterials.sortDir)}
+                    </button>
+                  </th>
+                {/each}
+                <th class="num">
+                  <button type="button" class="th-sort" onclick={() => toggleListSort('overviewMaterials', 'total')}>
+                    Gesamt{sortMark(listUi.overviewMaterials.sortKey, 'total', listUi.overviewMaterials.sortDir)}
+                  </button>
+                </th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <ProductGroupSection
+                groups={overviewMaterialGroups}
+                {collapsedFamilies}
+                colSpan={materialLocations.length + 3}
+                emptyMessage="Keine kritischen Materialien."
+                onToggleCollapse={toggleFamilyCollapse}
+              >
+                {#snippet row({ item: material })}
+                  <tr class="row-click" onclick={() => openEditMaterial(material)}>
+                    <td>
+                      {material.name}
+                      {#if formatMinStock(material)}
+                        <div class="min-stock-hint">Min. {formatMinStock(material)} {material.unit}</div>
+                      {/if}
+                    </td>
+                    {#each materialLocations as loc}
+                      <td class="num" class:neg={stockAt(material, loc.id) < 0}>{formatQty(stockAt(material, loc.id))}</td>
+                    {/each}
+                    <td class="num" class:neg={Number(material.stock_total) <= 0 || material.is_negative}>
+                      {formatQty(material.stock_total)} {material.unit}
+                    </td>
+                    <td onclick={(e) => e.stopPropagation()}>
+                      <div class="row-actions">
+                        <button class="btn secondary" onclick={() => openEditMaterial(material)}>Bearbeiten</button>
+                        <button class="btn secondary" disabled={saving} onclick={() => setOverviewIgnored('material', material, true)}>Ignorieren</button>
+                      </div>
+                    </td>
+                  </tr>
+                {/snippet}
+              </ProductGroupSection>
+            </tbody>
+          </table>
+        </div>
+      {/if}
+
+      {#if ignoredCriticalProducts.length || ignoredCriticalMaterials.length}
+        <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewIgnoredOpen = !overviewIgnoredOpen)}>
+          {overviewIgnoredOpen ? '▼' : '▶'} Ignorierte Engpässe
+          <span class="empty">({ignoredCriticalProducts.length + ignoredCriticalMaterials.length})</span>
+        </button>
+        {#if overviewIgnoredOpen}
+          <ul class="plain-list">
+            {#each ignoredCriticalProducts as product}
+              <li class="bom-line">
+                <div>Produkt <strong>{product.name}</strong></div>
+                <button class="btn secondary" disabled={saving} onclick={() => setOverviewIgnored('product', product, false)}>Wieder anzeigen</button>
+              </li>
+            {/each}
+            {#each ignoredCriticalMaterials as material}
+              <li class="bom-line">
+                <div>Material <strong>{material.name}</strong></div>
+                <button class="btn secondary" disabled={saving} onclick={() => setOverviewIgnored('material', material, false)}>Wieder anzeigen</button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+      {/if}
     </section>
     <BackupPanel onFlash={showFlash} onImported={refresh} />
   {:else if tab === 'materials'}

@@ -175,6 +175,7 @@ def init_db() -> None:
         migrate_transform_target(engine)
         migrate_product_family(engine)
         migrate_material_family(engine)
+        migrate_overview_ignored(engine)
     finally:
         db.close()
 
@@ -265,6 +266,20 @@ def migrate_material_family(engine) -> None:
         cols = {c["name"] for c in insp.get_columns("materials")}
         if "family" not in cols:
             conn.execute(text("ALTER TABLE materials ADD COLUMN family VARCHAR(200)"))
+
+
+def migrate_overview_ignored(engine) -> None:
+    """Flag to hide critical items from Übersicht until manually restored."""
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in ("materials", "products"):
+            if table not in insp.get_table_names():
+                continue
+            cols = {c["name"] for c in insp.get_columns(table)}
+            if "overview_ignored" not in cols:
+                conn.execute(
+                    text(f"ALTER TABLE {table} ADD COLUMN overview_ignored BOOLEAN NOT NULL DEFAULT 0")
+                )
 
 
 def migrate_tags_colors(engine) -> None:

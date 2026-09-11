@@ -127,6 +127,7 @@ class MaterialUpdate(BaseModel):
     family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     tag_ids: list[int] | None = None
+    overview_ignored: bool | None = None
 
     @field_validator("family")
     @classmethod
@@ -148,6 +149,7 @@ class MaterialRead(BaseModel):
     cost_per_unit: UnitCost
     min_stock: Quantity | None = None
     family: str | None = None
+    overview_ignored: bool = False
     color_id: int | None = None
     color: ColorRead | None = None
     tags: list[TagRead] = []
@@ -226,6 +228,7 @@ class ProductUpdate(BaseModel):
     color_id: int | None = None
     transform_target_id: int | None = None
     tag_ids: list[int] | None = None
+    overview_ignored: bool | None = None
 
     @field_validator("sku")
     @classmethod
@@ -253,6 +256,7 @@ class ProductRead(BaseModel):
     min_stock: Quantity | None = None
     is_template: bool = False
     family: str | None = None
+    overview_ignored: bool = False
     color_id: int | None = None
     color: ColorRead | None = None
     transform_target_id: int | None = None

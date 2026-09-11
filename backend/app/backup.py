@@ -188,6 +188,7 @@ def _export_material(material: Material) -> dict[str, Any]:
         "cost_per_unit": _num(material.cost_per_unit),
         "min_stock": _num(material.min_stock),
         "family": material.family,
+        "overview_ignored": bool(getattr(material, "overview_ignored", False)),
         "color": _color_ref(material.color),
         "tags": sorted(tag.name for tag in material.tags),
         "stocks": [
@@ -208,6 +209,7 @@ def _export_product(product: Product) -> dict[str, Any]:
         "min_stock": _num(product.min_stock),
         "is_template": product.is_template,
         "family": product.family,
+        "overview_ignored": bool(getattr(product, "overview_ignored", False)),
         "color": _color_ref(product.color),
         "transform_target": product.transform_target.name if product.transform_target else None,
         "tags": sorted(tag.name for tag in product.tags),
@@ -594,6 +596,7 @@ def _import_materials(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
         min_stock = _dec_field(entry, "min_stock", context=context)
         material.min_stock = services._q(min_stock) if min_stock is not None else None
         material.family = _opt_str(entry, "family")
+        material.overview_ignored = bool(entry.get("overview_ignored") or False)
         color = ctx.resolve_color(entry.get("color"), context=context)
         material.color_id = color.id if color else None
         material.tags = ctx.resolve_tags(entry.get("tags"), context=context)
@@ -669,6 +672,7 @@ def _import_products(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
         product.min_stock = services._q(min_stock) if min_stock is not None else None
         product.is_template = _bool_field(entry, "is_template")
         product.family = _opt_str(entry, "family")
+        product.overview_ignored = _bool_field(entry, "overview_ignored")
         color = ctx.resolve_color(entry.get("color"), context=context)
         product.color_id = color.id if color else None
         product.tags = ctx.resolve_tags(entry.get("tags"), context=context)

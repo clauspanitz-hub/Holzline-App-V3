@@ -523,6 +523,15 @@ select {
   width: min(100%, 16rem);
 }
 
+.overview-section-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 1rem 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
 .list-search {
   min-width: min(100%, 16rem);
 }
