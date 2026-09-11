@@ -511,6 +511,18 @@ select {
   margin-bottom: 0.75rem;
 }
 
+.filter-bar-end {
+  justify-items: end;
+}
+
+.filter-bar-end > * {
+  width: min(100%, 14rem);
+}
+
+.filter-bar-end .list-search {
+  width: min(100%, 16rem);
+}
+
 .list-search {
   min-width: min(100%, 16rem);
 }

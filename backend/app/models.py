@@ -103,6 +103,7 @@ class Material(Base):
     purchase_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=Decimal("0"))
     cost_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False, default=Decimal("0"))
     min_stock: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    family: Mapped[str | None] = mapped_column(String(200), nullable=True)
     color_id: Mapped[int | None] = mapped_column(ForeignKey("colors.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)

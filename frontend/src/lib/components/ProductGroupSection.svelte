@@ -1,13 +1,13 @@
 <script>
   /**
-   * Einklappbare Familien-Gruppen für Produkt-Tabellen.
+   * Einklappbare Familien-Gruppen für Produkt-/Material-Tabellen.
    * Zeileninhalt kommt per Snippet aus der Eltern-Komponente.
    */
   let {
     groups = [],
     collapsedFamilies = {},
     colSpan = 5,
-    emptyMessage = 'Keine Produkte.',
+    emptyMessage = 'Keine Einträge.',
     showFamilySelect = false,
     isFamilySelected = () => false,
     onToggleCollapse = () => {},
@@ -34,8 +34,8 @@
     </td>
   </tr>
   {#if !collapsedFamilies[group.key]}
-    {#each group.rows as product (product.id)}
-      {@render row({ product, group })}
+    {#each group.rows as item (item.id)}
+      {@render row({ item, product: item, group })}
     {/each}
   {/if}
 {:else}

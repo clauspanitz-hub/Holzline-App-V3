@@ -174,6 +174,7 @@ def init_db() -> None:
         migrate_audit_timestamps(engine)
         migrate_transform_target(engine)
         migrate_product_family(engine)
+        migrate_material_family(engine)
     finally:
         db.close()
 
@@ -253,6 +254,17 @@ def migrate_product_family(engine) -> None:
         cols = {c["name"] for c in insp.get_columns("products")}
         if "family" not in cols:
             conn.execute(text("ALTER TABLE products ADD COLUMN family VARCHAR(200)"))
+
+
+def migrate_material_family(engine) -> None:
+    """Add materials.family for Materialfamilie grouping."""
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        if "materials" not in insp.get_table_names():
+            return
+        cols = {c["name"] for c in insp.get_columns("materials")}
+        if "family" not in cols:
+            conn.execute(text("ALTER TABLE materials ADD COLUMN family VARCHAR(200)"))
 
 
 def migrate_tags_colors(engine) -> None:

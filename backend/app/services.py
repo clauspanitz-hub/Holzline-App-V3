@@ -635,6 +635,7 @@ def material_read(material: Material) -> MaterialRead:
         purchase_price=material.purchase_price,
         cost_per_unit=material.cost_per_unit,
         min_stock=material.min_stock,
+        family=material.family,
         color_id=material.color_id,
         color=color_read(material.color),
         tags=[TagRead.model_validate(t) for t in material.tags],
@@ -735,6 +736,7 @@ def create_material(db: Session, payload: MaterialCreate) -> MaterialRead:
         purchase_price=purchase_price,
         cost_per_unit=_unit_cost(purchase_price, purchase_quantity),
         min_stock=_q(payload.min_stock) if payload.min_stock is not None else None,
+        family=(payload.family.strip() if payload.family else None),
         color_id=color.id if color else None,
     )
     material.tags = resolve_tags(db, payload.tag_ids)
@@ -851,6 +853,8 @@ def update_material(db: Session, material_id: int, payload: MaterialUpdate) -> M
         data["purchase_price"] = _m(data["purchase_price"])
     if "min_stock" in data:
         data["min_stock"] = _q(data["min_stock"]) if data["min_stock"] is not None else None
+    if "family" in data and data["family"] is not None:
+        data["family"] = data["family"].strip() or None
     if "color_id" in data:
         color = get_color(db, data["color_id"])
         data["color_id"] = color.id if color else None
@@ -1165,6 +1169,7 @@ def bulk_update_materials(db: Session, payload: "MaterialBulkUpdate") -> list[Ma
     if not isinstance(payload, MaterialBulkUpdate):
         payload = MaterialBulkUpdate.model_validate(payload)
     tags = resolve_tags(db, payload.tag_ids) if payload.tag_ids is not None else None
+    family = payload.family.strip() if payload.family else None
     result_ids: list[int] = []
     for mid in payload.ids:
         material = _load_material(db, mid)
@@ -1172,6 +1177,10 @@ def bulk_update_materials(db: Session, payload: "MaterialBulkUpdate") -> list[Ma
             material.min_stock = None
         elif payload.min_stock is not None:
             material.min_stock = _q(payload.min_stock)
+        if payload.clear_family:
+            material.family = None
+        elif payload.family is not None:
+            material.family = family
         if tags is not None:
             material.tags = list(tags)
         _stamp_update(material)

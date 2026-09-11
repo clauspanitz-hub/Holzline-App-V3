@@ -19,6 +19,7 @@
   let filterTag = $state('')
   let filterColorId = $state('')
   let filterFamily = $state('')
+  let filterMaterialFamily = $state('')
   let colorSuggestions = $state([])
   let loading = $state(true)
   let flash = $state(null)
@@ -105,6 +106,7 @@
       purchase_quantity: '1',
       purchase_price: '0',
       min_stock: '',
+      family: '',
       location_id: '',
       medium_id: '',
       color_id: '',
@@ -346,16 +348,23 @@
     else selectedMaterialIds = [...new Set([...selectedMaterialIds, ...ids])]
   }
 
-  /** Alle Produkte einer Familien-Gruppe an-/abwählen. */
-  function toggleFamilySelection(group) {
-    const ids = group.rows.map((p) => p.id)
+  /** Alle Artikel einer Familien-Gruppe an-/abwählen (Produkt- oder Materialliste). */
+  function toggleFamilySelection(group, kind = 'product') {
+    const ids = group.rows.map((row) => row.id)
+    if (kind === 'material') {
+      const allSelected = ids.length > 0 && ids.every((id) => selectedMaterialIds.includes(id))
+      if (allSelected) selectedMaterialIds = selectedMaterialIds.filter((id) => !ids.includes(id))
+      else selectedMaterialIds = [...new Set([...selectedMaterialIds, ...ids])]
+      return
+    }
     const allSelected = ids.length > 0 && ids.every((id) => selectedProductIds.includes(id))
     if (allSelected) selectedProductIds = selectedProductIds.filter((id) => !ids.includes(id))
     else selectedProductIds = [...new Set([...selectedProductIds, ...ids])]
   }
 
-  function isFamilySelected(group) {
-    return group.rows.length > 0 && group.rows.every((p) => selectedProductIds.includes(p.id))
+  function isFamilySelected(group, kind = 'product') {
+    const selected = kind === 'material' ? selectedMaterialIds : selectedProductIds
+    return group.rows.length > 0 && group.rows.every((row) => selected.includes(row.id))
   }
 
   function openBulkEdit(kind) {
@@ -375,9 +384,9 @@
       if (min != null) body.min_stock = min
     }
     if (bulkEditForm.setTags) body.tag_ids = bulkEditForm.tagIds
+    if (bulkEditForm.clear_family) body.clear_family = true
+    else if (bulkEditForm.family.trim()) body.family = bulkEditForm.family.trim()
     if (kind === 'product') {
-      if (bulkEditForm.clear_family) body.clear_family = true
-      else if (bulkEditForm.family.trim()) body.family = bulkEditForm.family.trim()
       if (bulkEditForm.is_template === 'yes') body.is_template = true
       else if (bulkEditForm.is_template === 'no') body.is_template = false
     }
@@ -634,14 +643,19 @@
     ),
   )
   const overviewProductGroups = $derived(groupProductsByFamily(displayedOverviewProducts))
-  const displayedMaterials = $derived(
-    prepareRows(
-      materials,
+  const displayedMaterials = $derived.by(() => {
+    const familyFiltered = filterMaterialFamily
+      ? materials.filter((m) => productFamilyKey(m) === filterMaterialFamily)
+      : materials
+    return prepareRows(
+      familyFiltered,
       listUi.materials,
       (m) => stockRowSearchText(m, materialLocations),
       stockSortGetter(listUi.materials.sortKey),
-    ),
-  )
+    )
+  })
+  const materialFamilies = $derived(collectProductFamilies(materials))
+  const materialGroups = $derived(groupProductsByFamily(displayedMaterials))
   const familyFilteredProducts = $derived(
     filterFamily ? products.filter((p) => productFamilyKey(p) === filterFamily) : products,
   )
@@ -735,6 +749,7 @@
         purchase_quantity: String(template.purchase_quantity ?? 1),
         purchase_price: String(template.purchase_price ?? template.cost_per_unit ?? 0),
         min_stock: template.min_stock != null ? String(template.min_stock) : '',
+        family: template.family || '',
         stock_quantity: '0',
         medium_id: mid,
         color_id: template.color_id ? String(template.color_id) : '',
@@ -754,6 +769,7 @@
       purchase_quantity: String(material.purchase_quantity ?? 1),
       purchase_price: String(material.purchase_price ?? material.cost_per_unit ?? 0),
       min_stock: material.min_stock != null ? String(material.min_stock) : '',
+      family: material.family || '',
       location_id: '',
       medium_id: mid,
       color_id: material.color_id ? String(material.color_id) : '',
@@ -1137,6 +1153,7 @@
           purchase_quantity: materialForm.purchase_quantity,
           purchase_price: materialForm.purchase_price,
           min_stock: parseOptionalQty(materialForm.min_stock),
+          family: materialForm.family.trim() || null,
           stock_quantity: materialForm.stock_quantity,
           location_id: Number(materialForm.location_id),
           ...colorPayload,
@@ -1149,6 +1166,7 @@
           purchase_quantity: materialForm.purchase_quantity,
           purchase_price: materialForm.purchase_price,
           min_stock: parseOptionalQty(materialForm.min_stock),
+          family: materialForm.family.trim() || null,
           ...colorPayload,
         })
         showFlash('ok', 'Material gespeichert.')
@@ -1834,7 +1852,7 @@
           <button class="btn" onclick={openCreateMaterial}>Neu</button>
         </div>
       </div>
-      <div class="filter-bar form-grid">
+      <div class="filter-bar form-grid filter-bar-end">
         <label>Filter Tag
           <select bind:value={filterTag} onchange={refresh}>
             <option value="">alle</option>
@@ -1847,6 +1865,7 @@
             {#each colors as c}<option value={c.id}>{c.label}</option>{/each}
           </select>
         </label>
+        <FamilyFilter families={materialFamilies} bind:value={filterMaterialFamily} />
         <label class="list-search">Suche
           <input type="search" placeholder="Name, Standort, Farbe, Tags…" bind:value={listUi.materials.q} />
         </label>
@@ -1899,51 +1918,61 @@
             </tr>
           </thead>
           <tbody>
-            {#each displayedMaterials as material}
-              <tr class="row-click" onclick={() => openEditMaterial(material)}>
-                <td class="col-select" onclick={(e) => e.stopPropagation()}>
-                  <input
-                    type="checkbox"
-                    aria-label={`Material ${material.name} wählen`}
-                    checked={selectedMaterialIds.includes(material.id)}
-                    onchange={() => toggleSelectedMaterial(material.id)}
-                  />
-                </td>
-                <td>
-                  {material.name}
-                  {#if colorTagMeta(material)}<div class="empty">{colorTagMeta(material)}</div>{/if}
-                  {#if formatMinStock(material)}
-                    <div class="min-stock-hint">Min. {formatMinStock(material)} {material.unit}</div>
-                  {/if}
-                  {#if incompleteHint(material)}
-                    <div class="incomplete-hint" title="Unvollständige Daten">
-                      <span class="incomplete-icon" aria-hidden="true">!</span>
-                      {incompleteHint(material)}
+            <ProductGroupSection
+              groups={materialGroups}
+              {collapsedFamilies}
+              colSpan={materialLocations.length + 5}
+              emptyMessage="Keine Materialien."
+              showFamilySelect={true}
+              isFamilySelected={(group) => isFamilySelected(group, 'material')}
+              onToggleCollapse={toggleFamilyCollapse}
+              onToggleFamilySelection={(group) => toggleFamilySelection(group, 'material')}
+            >
+              {#snippet row({ item: material })}
+                <tr class="row-click" onclick={() => openEditMaterial(material)}>
+                  <td class="col-select" onclick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Material ${material.name} wählen`}
+                      checked={selectedMaterialIds.includes(material.id)}
+                      onchange={() => toggleSelectedMaterial(material.id)}
+                    />
+                  </td>
+                  <td>
+                    {material.name}
+                    {#if productFamilyKey(material)}<div class="empty">{productFamilyKey(material)}</div>{/if}
+                    {#if colorTagMeta(material)}<div class="empty">{colorTagMeta(material)}</div>{/if}
+                    {#if formatMinStock(material)}
+                      <div class="min-stock-hint">Min. {formatMinStock(material)} {material.unit}</div>
+                    {/if}
+                    {#if incompleteHint(material)}
+                      <div class="incomplete-hint" title="Unvollständige Daten">
+                        <span class="incomplete-icon" aria-hidden="true">!</span>
+                        {incompleteHint(material)}
+                      </div>
+                    {/if}
+                  </td>
+                  {#each materialLocations as loc}
+                    <td class="num" class:neg={stockAt(material, loc.id) < 0}>{formatQty(stockAt(material, loc.id))}</td>
+                  {/each}
+                  <td class="num" class:neg={Number(material.stock_total) <= 0 || material.is_negative}>
+                    {formatQty(material.stock_total)} {material.unit}
+                  </td>
+                  <td class="meta-cell">
+                    <div>{formatDateTime(material.updated_at)}</div>
+                    <div class="empty">{formatActor(material.updated_by)}</div>
+                  </td>
+                  <td onclick={(e) => e.stopPropagation()}>
+                    <div class="row-actions">
+                      <button class="btn secondary" onclick={() => openEditMaterial(material)}>Bearbeiten</button>
+                      <button class="btn secondary" onclick={() => openCreateMaterial(material)}>Vorlage</button>
+                      <button class="btn secondary" onclick={() => openTransfer('material', material)}>Umbuchen</button>
+                      <button class="btn danger" onclick={() => removeMaterial(material)}>Löschen</button>
                     </div>
-                  {/if}
-                </td>
-                {#each materialLocations as loc}
-                  <td class="num" class:neg={stockAt(material, loc.id) < 0}>{formatQty(stockAt(material, loc.id))}</td>
-                {/each}
-                <td class="num" class:neg={Number(material.stock_total) <= 0 || material.is_negative}>
-                  {formatQty(material.stock_total)} {material.unit}
-                </td>
-                <td class="meta-cell">
-                  <div>{formatDateTime(material.updated_at)}</div>
-                  <div class="empty">{formatActor(material.updated_by)}</div>
-                </td>
-                <td onclick={(e) => e.stopPropagation()}>
-                  <div class="row-actions">
-                    <button class="btn secondary" onclick={() => openEditMaterial(material)}>Bearbeiten</button>
-                    <button class="btn secondary" onclick={() => openCreateMaterial(material)}>Vorlage</button>
-                    <button class="btn secondary" onclick={() => openTransfer('material', material)}>Umbuchen</button>
-                    <button class="btn danger" onclick={() => removeMaterial(material)}>Löschen</button>
-                  </div>
-                </td>
-              </tr>
-            {:else}
-              <tr><td colspan={materialLocations.length + 5} class="empty">Keine Materialien.</td></tr>
-            {/each}
+                  </td>
+                </tr>
+              {/snippet}
+            </ProductGroupSection>
           </tbody>
         </table>
       </div>
@@ -2474,6 +2503,12 @@
         <label>Mindestbestand (optional)
           <input type="number" step="0.001" min="0" bind:value={materialForm.min_stock} placeholder="leer = keiner" />
         </label>
+        <label>Materialfamilie
+          <input list="material-family-suggestions" bind:value={materialForm.family} placeholder="optional" />
+        </label>
+        <datalist id="material-family-suggestions">
+          {#each materialFamilies as f}<option value={f}></option>{/each}
+        </datalist>
         <label>Medium
           <select
             bind:value={materialForm.medium_id}
@@ -3261,8 +3296,8 @@
           <input type="checkbox" bind:checked={bulkEditForm.clear_min_stock} />
           Mindestbestand leeren
         </label>
-        {#if bulkEditModal.kind === 'product'}
-          <label>Produktfamilie
+        {#if bulkEditModal.kind === 'product' || bulkEditModal.kind === 'material'}
+          <label>{bulkEditModal.kind === 'material' ? 'Materialfamilie' : 'Produktfamilie'}
             <input
               bind:value={bulkEditForm.family}
               placeholder="leer = nicht ändern"
@@ -3273,6 +3308,8 @@
             <input type="checkbox" bind:checked={bulkEditForm.clear_family} />
             Familie leeren
           </label>
+        {/if}
+        {#if bulkEditModal.kind === 'product'}
           <label>Ist Vorlage
             <select bind:value={bulkEditForm.is_template}>
               <option value="">nicht ändern</option>

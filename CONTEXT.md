@@ -28,6 +28,10 @@ _Avoid_: Produkt (für Sets), Bundle als Lagerartikel, fertiges Set auf Lager
 Eine konkrete Set-Konfiguration in Shopify (z. B. Ringfarbe × Kerzenfarbe × Zahlenfarbe), abbildbar als Stückliste aus Produkten.
 _Avoid_: Lager-SKU für das Set selbst
 
+**Options-Zuordnung** (Set):
+Verknüpfung eines Shopify-Optionswerts mit Lagerinhalt. Ablauf: pro Options-**Name** einmal das **Medium** festlegen, dann Optionswert → **Katalogfarbe** (innerhalb dieses Mediums); danach Vorschlag der Produkte/Materialien mit dieser Farbe. Fehlt ein Artikel: im Assistenten **Vorlage**/Basisname wählen und fehlende Farben wie bei der **Serienanlage** anlegen (Liste bestätigen). Gespeichert wird die Zuordnung Option → Lagerartikel (+ Menge) für die Varianten-Stückliste.
+_Avoid_: Nur Freitext-Matching ohne Katalogfarbe; stilles automatisches Anlegen ohne Bestätigung; Medium bei jedem Optionswert neu wählen; nur Verweis nach draußen ohne Nachlege-Hilfe im Assistenten
+
 **Stückliste**:
 Die Zuordnung, welche Positionen in welcher Menge für eine Einheit benötigt werden. Produkt-Stückliste: Materialien fürs Fertigen. Set-/Varianten-Stückliste: Materialien und/oder Produkte zum Zusammenstellen.
 _Avoid_: Recipe, BOM, Rezept, Bill of Materials (in der UI)
@@ -61,8 +65,8 @@ Eine Set-Variante, deren zusammenstellbare Stückzahl sich aus dem über alle St
 _Avoid_: Verfügbarer Set-Bestand (Sets haben keinen Bestand)
 
 **Tag**:
-Ein Label zur Gruppierung und Filterung von Materialien und Produkten (mehrere möglich). Einträge kommen aus einem pflegbaren Tag-Katalog; Zuordnung am Artikel. Unabhängig von Farbe/Medium (Art/Option).
-_Avoid_: Kategorie als einziges Pflichtfeld; Farboption als Tag
+Ein Label zur Gruppierung und Filterung von Materialien und Produkten (mehrere möglich). Einträge kommen aus einem pflegbaren Tag-Katalog; Zuordnung am Artikel. Unabhängig von Farbe/Medium (Art/Option). Beim Setzen an einem Artikel Nachfrage: Tag auch der **gleichen Produkt- bzw. Materialfamilie** geben? Auswahl-UI analog Medium/Farbe (Serienanlage): bereits vorhandene/zutreffende Tags **ausgegraut**.
+_Avoid_: Kategorie als einziges Pflichtfeld; Farboption als Tag; stilles Taggen aller Artikel ohne Nachfrage; „alle“ = gesamte Produkt-/Materialliste ohne Familienbezug
 
 **Farbe**:
 Ein benannter Farbeintrag im Katalog (z. B. Rot, Salbeigrün), jeweils mit einem Medium. Material und Produkt können je eine Farbe haben. In der UI: Medium zuerst, dann Farbe/Option.
@@ -73,16 +77,20 @@ Die Art der Farbgebung aus einem pflegbaren Katalog (Start: Lack, PLA). Am Artik
 _Avoid_: Materialart, Farbtyp; UI-Label „Art“ (veraltet); „Art“ als eigenes Domänenobjekt neben Medium
 
 **Mehrfachbearbeitung**:
-Gleichzeitiges Setzen ausgewählter Felder für mehrere Materialien oder Produkte. Erlaubt: Mindestbestand, Tags; bei Produkten zusätzlich Produktfamilie und Ist-Vorlage. Nicht per Mehrfach: Name, Farbe, Stückliste, Bestand. Auswahl: Checkboxen in der Tabelle und/oder „ganze Produktfamilie“.
-_Avoid_: Massen-Umbenennung; Massen-Stücklistenänderung
+Gleichzeitiges Setzen ausgewählter Felder für mehrere Materialien oder Produkte. Erlaubt ohne Extra-Warnung: Mindestbestand, Tags; bei Produkten zusätzlich Produktfamilie und Ist-Vorlage; bei Materialien zusätzlich Materialfamilie. Mit **warnender Nachfrage** vor dem Speichern außerdem: **Bestand** (gleicher Absolutwert an einem gewählten Standort — typisch zum initialen Bereinigen der kritischen Liste) und **Stückliste** (eine Zeile hinzufügen oder ändern; übrige Zeilen bleiben). Nicht per Mehrfach: Name, Farbe. Auswahl: Checkboxen in der Tabelle und/oder „ganze Produkt-/Materialfamilie“.
+_Avoid_: Massen-Umbenennung; Massen-Farbänderung; Bestand/Stückliste ohne Warn-Dialog; Mehrfach-Bestand als Delta; Mehrfach-Stückliste als komplettes Ersetzen aller Zeilen
 
 **Produktfamilie**:
 Optionale Bezeichnung, unter der zusammengehörige Produkte gruppiert werden (z. B. „Ziffern Einzeln - 2“). Bei der Serienanlage wird sie automatisch auf den **Basisnamen** gesetzt; am Produkt jederzeit änderbar. In der UI: Filter nach Familie und einklappbare Gruppenköpfe (ohne Familie = „Ohne Familie“). Beim Einführen: einmaliger Vorschlag Familie = Name ohne angehängten Farbnamen (nur wenn Farbe gesetzt und Name so endet), Bestätigung nötig. Unabhängig von Farbe/Tag; nicht der Produktname selbst.
 _Avoid_: Nur implizite Gruppierung über Namensähnlichkeit ohne Feld; Familie = Tag; stille automatische Befüllung ohne Nachfrage
 
+**Materialfamilie**:
+Optionale Bezeichnung, unter der zusammengehörige Materialien gruppiert werden — analog zur **Produktfamilie**, aber ein eigenes Feld (nicht dieselbe Liste wie bei Produkten). In der UI: Filter nach Familie und einklappbare Gruppenköpfe (ohne Familie = „Ohne Familie“). Unabhängig von Farbe/Tag/Medium.
+_Avoid_: Gemeinsame Familien-Liste mit Produkten; Familie = Tag; nur Gruppierung über Medium/Farbe ohne Feld
+
 **Vorlage** (Produkt):
-Ein Produkt, das als Muster für die Serienanlage dient (Stückliste/Tags), markiert durch ein explizites Flag „Ist Vorlage“. Die Serienanlage kopiert davon und setzt je gewählter Farbe ein neues Produkt.
-_Avoid_: Template als UI-Fremdwort; nur „ohne Farbe“ als implizite Vorlage
+Ein Produkt, das als Muster für die Serienanlage dient (Stückliste/Tags), markiert durch ein explizites Flag „Ist Vorlage“. Die Serienanlage kopiert davon und setzt je gewählter Farbe ein neues Produkt. Das Flag „Ist Vorlage“ ist nur im **Bearbeiten**-Dialog setzbar, nicht beim Neu-Anlegen.
+_Avoid_: Template als UI-Fremdwort; nur „ohne Farbe“ als implizite Vorlage; Vorlage-Schalter im Neu-Anlegen-Dialog
 
 **Serienanlage** (aus Farben):
 Auf Knopfdruck Materialien oder Produkte aus gewählten Katalogfarben erzeugen (Auswahl + gemeinsame Defaults). Serien-Materialname = Medium + Farbe; manuell angelegte Materialien frei benennbar. Produktname = Basis + Farbe. Produkt-Serienanlage nutzt optional eine **Vorlage**. Produkt-Mindestbestand: Dialogwert überschreibt, sonst Wert der Vorlage (sonst leer). Material-Serienanlage: optionaler Mindestbestand im Dialog für alle neuen. Materialien: bereits belegte Farben (gleicher color_id) sind nicht wählbar. Produkte: „schon vorhanden“ gilt für den konkreten Namen Basis+Farbe, nicht für die Farbe allein. Katalog-Umbenennung (Medium/Farbe) benennt Artikel um, die noch den alten Seriennamen tragen.
@@ -109,8 +117,18 @@ Vollständiger App-Stand als eine JSON-Datei zum Herunterladen und Wiederherstel
 _Avoid_: Stiller Import ohne Moduswahl; Merge über interne IDs als Normalfall; Bestände beim Merge addieren; nur Excel-CSVs als einzige Sicherung
 
 **Übersicht** (Listen):
-Die kritischen Produktlisten nutzen dieselbe Gruppierung und Filterung wie die Produkt-Hauptliste (**Produktfamilie**). Materialien in der Übersicht behalten Tag-/Farb-Filter; Material-Familien analog zu Produkten sind optional später. UI-Struktur: Listen/Ansichten als eigene Komponenten, damit das Design später austauschbar bleibt — ohne jetzt ein Design-System zu bauen.
-_Avoid_: Spezielle Produkt-Übersichtslogik abweichend von der Produktliste; monolithische App.svelte als Dauerzustand
+Zuerst kritische **Produkte**, darunter kritische **Materialien** (Gesamt ≤ 0 oder unter Mindestbestand). Beide Blöcke ausklappbar und nach **Produktfamilie** bzw. **Materialfamilie** gruppiert. Einzelne kritische Einträge können **ignoriert** werden: sie bleiben dauerhaft aus der Warnliste, bis man sie manuell wieder einblendet. UI-Struktur: Listen/Ansichten als eigene Komponenten, ohne Design-System.
+_Avoid_: Übersicht als komplette Material-/Produktverwaltung; Ignorieren nur bis zur nächsten Buchung; befristetes Ausblenden ohne manuelles Wiedereinblenden
+
+**Speichern-Feedback**:
+Nach erfolgreichem Speichern erscheint ein kurzer, selbst verschwindender Hinweis (Toast) und der Speichern-Button zeigt kurz „✓ Gespeichert“. Kein blockierender Dialog nur wegen Erfolg.
+_Avoid_: Alert/Modal nur für „Gespeichert“; Feedback, das Wegklicken erzwingt
+
+**Filter-Leiste**:
+Filter auf den Listen-Seiten stehen oben, rechtsbündig und mit kompakteren Controls — gleiches Verhalten wie bisher, weniger Platzverbrauch. Keine eigene dauerhafte rechte Sidebar und kein nur-per-Icon ausgeklapptes Filterpanel als Pflicht.
+_Avoid_: Filter als dominante linke Spalte; Filter verstecken hinter Icon als einzigem Zugang ohne klare Erkennbarkeit
+
+**Bewegungs-Historie**:
 Eine nachvollziehbare Umbuchung oder Umwandlung, relevant vor allem mit virtuellen Standorten (MA1, MA2, In Bearbeitung, Ausschuss) und für Umwandlungen — Grundlage für den Überblick „wer hat was / was wurde daraus“.
 _Avoid_: Tag-Historie; implizite Umbuchung ohne Eintrag
 

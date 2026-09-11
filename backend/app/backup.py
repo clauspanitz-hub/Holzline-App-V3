@@ -187,6 +187,7 @@ def _export_material(material: Material) -> dict[str, Any]:
         "purchase_price": _num(material.purchase_price),
         "cost_per_unit": _num(material.cost_per_unit),
         "min_stock": _num(material.min_stock),
+        "family": material.family,
         "color": _color_ref(material.color),
         "tags": sorted(tag.name for tag in material.tags),
         "stocks": [
@@ -592,6 +593,7 @@ def _import_materials(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
         material.cost_per_unit = services._unit_cost(purchase_price, purchase_quantity)
         min_stock = _dec_field(entry, "min_stock", context=context)
         material.min_stock = services._q(min_stock) if min_stock is not None else None
+        material.family = _opt_str(entry, "family")
         color = ctx.resolve_color(entry.get("color"), context=context)
         material.color_id = color.id if color else None
         material.tags = ctx.resolve_tags(entry.get("tags"), context=context)

@@ -100,8 +100,17 @@ class MaterialBase(BaseModel):
     purchase_quantity: Quantity = Field(default=Decimal("1"), gt=0)
     purchase_price: Money = Decimal("0")
     min_stock: Quantity | None = None
+    family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     tag_ids: list[int] = []
+
+    @field_validator("family")
+    @classmethod
+    def empty_family_to_none(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
 
 class MaterialCreate(MaterialBase):
@@ -115,8 +124,17 @@ class MaterialUpdate(BaseModel):
     purchase_quantity: Quantity | None = Field(default=None, gt=0)
     purchase_price: Money | None = None
     min_stock: Quantity | None = None
+    family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     tag_ids: list[int] | None = None
+
+    @field_validator("family")
+    @classmethod
+    def empty_family_to_none(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
 
 
 class MaterialRead(BaseModel):
@@ -129,6 +147,7 @@ class MaterialRead(BaseModel):
     purchase_price: Money
     cost_per_unit: UnitCost
     min_stock: Quantity | None = None
+    family: str | None = None
     color_id: int | None = None
     color: ColorRead | None = None
     tags: list[TagRead] = []
@@ -463,6 +482,8 @@ class MaterialBulkUpdate(BaseModel):
     min_stock: Quantity | None = None
     clear_min_stock: bool = False
     tag_ids: list[int] | None = None
+    family: str | None = Field(default=None, max_length=200)
+    clear_family: bool = False
 
 
 class ProductBulkUpdate(BaseModel):
