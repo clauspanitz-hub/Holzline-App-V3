@@ -77,7 +77,7 @@ Ein Produkt, das als Muster für die Serienanlage dient (Stückliste/Tags), mark
 _Avoid_: Template als UI-Fremdwort; nur „ohne Farbe“ als implizite Vorlage
 
 **Serienanlage** (aus Farben):
-Auf Knopfdruck Materialien oder Produkte aus gewählten Katalogfarben erzeugen (Auswahl + gemeinsame Defaults). Serien-Materialname = Medium + Farbe; manuell angelegte Materialien frei benennbar. Produktname = Basis + Farbe. Produkt-Serienanlage nutzt optional eine **Vorlage**. Bereits belegte Farben sind nicht wählbar. Katalog-Umbenennung (Medium/Farbe) benennt Artikel um, die noch den alten Seriennamen tragen.
+Auf Knopfdruck Materialien oder Produkte aus gewählten Katalogfarben erzeugen (Auswahl + gemeinsame Defaults). Serien-Materialname = Medium + Farbe; manuell angelegte Materialien frei benennbar. Produktname = Basis + Farbe. Produkt-Serienanlage nutzt optional eine **Vorlage**. Materialien: bereits belegte Farben (gleicher color_id) sind nicht wählbar. Produkte: „schon vorhanden“ gilt für den konkreten Namen Basis+Farbe, nicht für die Farbe allein. Katalog-Umbenennung (Medium/Farbe) benennt Artikel um, die noch den alten Seriennamen tragen.
 _Avoid_: Automatisches Anlegen ohne Nachfrage; Serien-Material nur Farbname
 
 **Umwandlung**:

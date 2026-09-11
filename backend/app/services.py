@@ -1034,12 +1034,12 @@ def create_products_from_colors(db: Session, payload: ProductsFromColorsRequest)
     from app.schemas import BulkSkipInfo
 
     base = payload.base_name.strip()
-    taken = _colors_with_product(db)
     created_ids: list[int] = []
     skipped: list[BulkSkipInfo] = []
     warnings: list[str] = []
     location = get_location(db, payload.location_id) if payload.location_id else default_location(db)
     tags = resolve_tags(db, payload.tag_ids)
+    used_names: set[str] = set()
 
     template_lines: list[ProductMaterial] = []
     if payload.template_product_id is not None:
@@ -1055,15 +1055,14 @@ def create_products_from_colors(db: Session, payload: ProductsFromColorsRequest)
         if not color:
             skipped.append(BulkSkipInfo(color_id=color_id, color_name="?", reason="Farbe nicht gefunden"))
             continue
-        if color_id in taken:
-            skipped.append(
-                BulkSkipInfo(color_id=color_id, color_name=color.name, reason="bereits als Produkt vorhanden")
-            )
-            continue
         name = f"{base} {color.name}".strip()
-        if db.scalars(select(Product.id).where(Product.name == name).limit(1)).first():
+        if name in used_names or db.scalars(select(Product.id).where(Product.name == name).limit(1)).first():
             skipped.append(
-                BulkSkipInfo(color_id=color_id, color_name=color.name, reason=f"Produktname „{name}“ bereits vergeben")
+                BulkSkipInfo(
+                    color_id=color_id,
+                    color_name=color.name,
+                    reason=f"Produktname „{name}“ bereits vergeben",
+                )
             )
             continue
 
@@ -1111,7 +1110,7 @@ def create_products_from_colors(db: Session, payload: ProductsFromColorsRequest)
             )
 
         created_ids.append(product.id)
-        taken.add(color_id)
+        used_names.add(name)
 
     db.commit()
     created = [product_read(_load_product(db, pid)) for pid in created_ids]

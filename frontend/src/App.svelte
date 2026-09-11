@@ -169,8 +169,14 @@
     return new Set(materials.filter((m) => m.color_id).map((m) => m.color_id))
   }
 
-  function colorIdsWithProduct() {
-    return new Set(products.filter((p) => p.color_id).map((p) => p.color_id))
+  function bulkProductName(baseName, color) {
+    return `${String(baseName || '').trim()} ${color.name}`.trim()
+  }
+
+  function isBulkProductColorTaken(baseName, color) {
+    const name = bulkProductName(baseName, color)
+    if (!name) return false
+    return products.some((p) => p.name === name)
   }
 
   function openBulkMaterials(mediumId = null) {
@@ -192,13 +198,13 @@
 
   function openBulkProducts({ mediumId = null, baseName = '', templateProductId = '' } = {}) {
     const mid = mediumId != null ? Number(mediumId) : null
-    const taken = colorIdsWithProduct()
+    const base = baseName || ''
     const pool = mid ? colorsForMedium(mid) : colors
-    const available = pool.filter((c) => !taken.has(c.id)).map((c) => c.id)
+    const available = pool.filter((c) => !isBulkProductColorTaken(base, c)).map((c) => c.id)
     bulkForm = {
       ...bulkForm,
       colorIds: available,
-      base_name: baseName || '',
+      base_name: base,
       template_product_id: templateProductId ? String(templateProductId) : '',
       location_id: String(locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || ''),
     }
@@ -1093,9 +1099,10 @@
           if (colorName && base.toLowerCase().endsWith(colorName.toLowerCase())) {
             base = base.slice(0, base.length - colorName.length).trim()
           }
-          const taken = colorIdsWithProduct()
           const more = colorsForMedium(mid).filter(
-            (c) => !taken.has(c.id) && c.id !== Number(productForm.color_id),
+            (c) =>
+              c.id !== Number(productForm.color_id) &&
+              !isBulkProductColorTaken(base || productForm.name.trim(), c),
           )
           if (
             more.length &&
@@ -2901,7 +2908,20 @@
       </p>
       <div class="form-grid">
         <label>Basisname
-          <input bind:value={bulkForm.base_name} placeholder="z. B. Ring" required />
+          <input
+            bind:value={bulkForm.base_name}
+            placeholder="z. B. Ring"
+            required
+            oninput={() => {
+              const pool = bulkProductModal.mediumId
+                ? colorsForMedium(bulkProductModal.mediumId)
+                : colors
+              const available = pool
+                .filter((c) => !isBulkProductColorTaken(bulkForm.base_name, c))
+                .map((c) => c.id)
+              bulkForm.colorIds = available
+            }}
+          />
         </label>
         <label>Medium-Filter
           <select
@@ -2936,7 +2956,7 @@
       <fieldset class="tag-picker" style="margin-top:.75rem">
         <legend>Farben</legend>
         {#each (bulkProductModal.mediumId ? colorsForMedium(bulkProductModal.mediumId) : colors) as c}
-          {@const taken = colorIdsWithProduct().has(c.id)}
+          {@const taken = isBulkProductColorTaken(bulkForm.base_name, c)}
           <label class="tag-check" class:empty={taken}>
             <input
               type="checkbox"
