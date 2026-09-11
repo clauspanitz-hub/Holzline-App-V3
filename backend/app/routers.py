@@ -553,6 +553,11 @@ def update_user(
     if not user:
         raise HTTPException(status_code=404, detail="Benutzer nicht gefunden")
     if payload.role is not None:
+        if user.id == admin.id and payload.role != UserRole.ADMIN.value:
+            raise HTTPException(
+                status_code=400,
+                detail="Eigene Rolle nicht ändern — sonst sperrst du dich aus",
+            )
         user.role = UserRole(payload.role)
     if payload.is_active is not None:
         if user.id == admin.id and not payload.is_active:

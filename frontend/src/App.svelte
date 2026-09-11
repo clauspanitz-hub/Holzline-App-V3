@@ -805,11 +805,16 @@
   async function patchUser(id, body) {
     saving = true
     try {
-      await api.users.update(id, body)
+      const updated = await api.users.update(id, body)
       await loadUsers()
+      if (authUser && updated.id === authUser.id) {
+        authUser = updated
+        if (authUser.role === 'mitarbeiter') tab = 'staff'
+      }
       showFlash('ok', 'Benutzer aktualisiert.')
     } catch (error) {
       showFlash('error', error.message)
+      await loadUsers()
     } finally {
       saving = false
     }
@@ -2239,16 +2244,28 @@
           <tbody>
             {#each users as u}
               <tr>
-                <td>{u.username}</td>
+                <td>{u.username}{#if u.id === authUser.id} <span class="empty">(du)</span>{/if}</td>
                 <td>
-                  <select
-                    value={u.role}
-                    onchange={(e) => patchUser(u.id, { role: e.currentTarget.value })}
-                    disabled={saving}
-                  >
-                    <option value="admin">Admin</option>
-                    <option value="mitarbeiter">Mitarbeiter</option>
-                  </select>
+                  {#if u.id === authUser.id}
+                    Admin
+                  {:else}
+                    <select
+                      value={u.role}
+                      onchange={(e) => {
+                        const role = e.currentTarget.value
+                        if (role === u.role) return
+                        if (!confirm(`Rolle von „${u.username}“ auf ${role === 'admin' ? 'Admin' : 'Mitarbeiter'} setzen?`)) {
+                          e.currentTarget.value = u.role
+                          return
+                        }
+                        patchUser(u.id, { role })
+                      }}
+                      disabled={saving}
+                    >
+                      <option value="admin">Admin</option>
+                      <option value="mitarbeiter">Mitarbeiter</option>
+                    </select>
+                  {/if}
                 </td>
                 <td>{u.is_active ? 'aktiv' : 'deaktiviert'}</td>
                 <td class="row-actions">
