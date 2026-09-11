@@ -3,6 +3,11 @@
   import { api, formatMoney, formatQty, formatUnitCost, formatDateTime, formatActor } from './lib/api.js'
   import { filterRows, sortRows, nextSortState, sortMark, prepareRows } from './lib/tableUtils.js'
   import { productFamilyKey, collectProductFamilies, groupProductsByFamily } from './lib/productFamily.js'
+  import {
+    matchColorsForShopifyValue as matchColorsPool,
+    resolveSetComponents as resolveSetComponentsLib,
+    templateSeriesPrefix,
+  } from './lib/setOptionMatch.js'
   import FamilyFilter from './lib/components/FamilyFilter.svelte'
   import ProductGroupSection from './lib/components/ProductGroupSection.svelte'
   import BackupPanel from './lib/components/BackupPanel.svelte'
@@ -127,37 +132,13 @@
   }
 
   function matchColorsForShopifyValue(mediumId, value) {
-    const pool = colorsForMedium(mediumId)
-    const v = String(value || '')
-      .trim()
-      .toLowerCase()
-    if (!v) return []
-    const exact = pool.filter((c) => String(c.name).trim().toLowerCase() === v)
-    if (exact.length) return exact
-    return pool.filter((c) => {
-      const n = String(c.name).trim().toLowerCase()
-      return n.includes(v) || v.includes(n)
-    })
+    return matchColorsPool(colorsForMedium(mediumId), value)
   }
 
   function resolveSetComponents(kind, colorId, templateId, baseName) {
-    if (!colorId) return []
-    const cid = Number(colorId)
-    let rows = (kind === 'material' ? materials : products).filter((r) => r.color_id === cid)
     const template = templateId ? products.find((p) => p.id === Number(templateId)) : null
-    const family = String(template?.family || baseName || '').trim()
-    if (family && kind === 'product') {
-      const famRows = rows.filter(
-        (p) =>
-          productFamilyKey(p) === family ||
-          String(p.name).toLowerCase().startsWith(family.toLowerCase()),
-      )
-      if (famRows.length) rows = famRows
-    } else if (baseName && rows.length > 1) {
-      const pref = rows.filter((r) => String(r.name).toLowerCase().startsWith(String(baseName).toLowerCase()))
-      if (pref.length) rows = pref
-    }
-    return rows
+    const rows = kind === 'material' ? materials : products
+    return resolveSetComponentsLib(kind, colorId, rows, template, baseName, colors, productFamilyKey)
   }
 
   let inlineMaterialForm = $state(null)
@@ -3401,9 +3382,10 @@
                   onchange={(e) => {
                     const tid = e.currentTarget.value
                     const t = products.find((p) => p.id === Number(tid))
+                    const series = t ? templateSeriesPrefix(t, colors) : ''
                     patchSetOptionConfig(mappingForm.option_name, {
                       templateId: tid,
-                      baseName: t?.family || getSetOptionConfig(mappingForm.option_name).baseName,
+                      baseName: series || t?.family || getSetOptionConfig(mappingForm.option_name).baseName,
                     })
                   }}
                 >

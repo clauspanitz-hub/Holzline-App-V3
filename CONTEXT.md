@@ -29,8 +29,8 @@ Eine konkrete Set-Konfiguration in Shopify (z. B. Ringfarbe × Kerzenfarbe × Za
 _Avoid_: Lager-SKU für das Set selbst
 
 **Options-Zuordnung** (Set):
-Verknüpfung Shopify-Option → Lagerinhalt. Pro Options-**Name**: **Medium**, **Vorlage/Familie** (bzw. Basis), **Artikel-Typ** (Produkt oder Material). Menge in der Options-Zuordnung immer **1**. Shopify-**Werte**-Liste: Katalogfarbe matchen (Name gleich); bei 0/mehreren Treffern Zeile markieren und **Dropdown mit Kandidaten** (+ überspringen). Artikel = Serie/Familie + Farbe; fehlt → nachlegen. Typische Ketten: Ringfarbe→Ring-Produkt (Lack); Kerzenfarbe→Kerzenset-Produkt; Zahlenfarbe→Ziffernset-Produkt (PLA).
-_Avoid_: Menge ≠ 1 in der Options-Zuordnung; stilles Matchen bei Mehrdeutigkeit; Extra-Modal als einzige Klärung; Zahlen-/Kerzenfarbe → Einzelteile statt Set-Produkt
+Verknüpfung Shopify-Option → Lagerinhalt. Pro Options-**Name**: **Medium**, **Vorlage/Familie** (bzw. Basis), **Artikel-Typ** (Produkt oder Material). Menge in der Options-Zuordnung immer **1**. Shopify-**Werte**-Liste: Katalogfarbe matchen (Name, Aliase wie pink→Rosa / weiß→Weiss, Dunkel/Hell-Umordnung z. B. Dunkelblau→BlauDunkel); bei 0/mehreren Treffern Zeile markieren und **Dropdown mit Kandidaten** (+ überspringen). Artikel bevorzugt über **Vorlagen-Serie** (Vorlagenname ohne Farbe, z. B. „Geburtstagsring - Uni“), sonst Familie/Basisname + Farbe; fehlt → nachlegen. Typische Ketten: Ringfarbe→Ring-Produkt (Lack); Kerzenfarbe→Kerzenset-Produkt; Zahlenfarbe→Ziffernset-Produkt (PLA).
+_Avoid_: Menge ≠ 1 in der Options-Zuordnung; stilles Matchen bei Mehrdeutigkeit; Extra-Modal als einzige Klärung; Zahlen-/Kerzenfarbe → Einzelteile statt Set-Produkt; Familie allein wählen wenn Vorlage Uni/Vintage trennt
 
 **Kerze / Kerzenset**:
 Einzelkerzen sind **Material**. Ein **Kerzenset** (z. B. 10 kleine Kerzen + 1 Lebenslicht) ist ein **Produkt** mit Stückliste aus diesen Materialien. Die Shopify-Option **Kerzenfarbe** zeigt in der Options-Zuordnung auf das **Kerzenset-Produkt** der jeweiligen Farbe (nicht auf die Einzelkerze).
