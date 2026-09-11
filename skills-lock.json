@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "proxmox-mcp-tools": {
+      "source": "bldg-7/proxmox-mcp",
+      "sourceType": "github",
+      "skillPath": "skills/proxmox-mcp-tools/SKILL.md",
+      "computedHash": "cea1fc742987912925ebae3cfb5ea18c123e691952dae2c74867cc024a2a21c2"
+    }
+  }
+}
