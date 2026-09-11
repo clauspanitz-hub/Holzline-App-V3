@@ -18,6 +18,8 @@
   let allTags = $state([])
   let filterTag = $state('')
   let filterColorId = $state('')
+  let filterFamily = $state('')
+  let filterMaterialFamily = $state('')
   let overviewProductsOpen = $state(true)
   let overviewMaterialsOpen = $state(true)
   let overviewIgnoredOpen = $state(false)
