@@ -531,6 +531,11 @@ def _resolve_transform_target(db: Session, product_id: int, target_id: int | Non
     return target.id
 
 
+def product_name_allows_transform(name: str) -> bool:
+    """Umwandlung nur wenn der Produktname „Uni“ enthält (Groß-/Kleinschreibung egal)."""
+    return "uni" in (name or "").casefold()
+
+
 def _stock_rows_material(material: Material) -> list[StockByLocation]:
     return [
         StockByLocation(
@@ -1263,6 +1268,11 @@ def transfer_product(db: Session, product_id: int, payload: TransferRequest) -> 
 
 def transform_product(db: Session, product_id: int, payload: TransformRequest) -> ProductRead:
     source = _load_product(db, product_id)
+    if not product_name_allows_transform(source.name):
+        raise HTTPException(
+            status_code=400,
+            detail="Umwandlung nur für Produkte mit „Uni“ im Namen",
+        )
     if not source.transform_target_id:
         raise HTTPException(
             status_code=400,

@@ -903,9 +903,19 @@
     transferModal = { kind, item }
   }
 
+  function canTransformProduct(product) {
+    if (!product?.transform_target_id) return false
+    return String(product.name || '').toLowerCase().includes('uni')
+  }
+
   function openTransform(product, preferredLocationName = null) {
-    if (!product.transform_target_id) {
-      showFlash('error', 'Kein Zielprodukt verknüpft — unter Bearbeiten „Wird zu“ setzen.')
+    if (!canTransformProduct(product)) {
+      showFlash(
+        'error',
+        product?.transform_target_id
+          ? 'Umwandlung nur für Produkte mit „Uni“ im Namen.'
+          : 'Kein Zielprodukt verknüpft — unter Bearbeiten „Wird zu“ setzen.',
+      )
       return
     }
     const maLoc =
@@ -1807,7 +1817,7 @@
                     <button class="btn secondary" onclick={() => openCreateProduct(product)}>Vorlage</button>
                     <button class="btn" onclick={() => openManufacture(product)}>Fertigen</button>
                     <button class="btn secondary" onclick={() => openTransfer('product', product)}>Umbuchen</button>
-                    {#if product.transform_target_id}
+                    {#if canTransformProduct(product)}
                       <button class="btn secondary" onclick={() => openTransform(product)}>Umwandeln</button>
                     {/if}
                     <button class="btn secondary" onclick={() => openMovements(product)}>Historie</button>
@@ -1865,7 +1875,9 @@
                 <td>
                   <div class="row-actions">
                     <button class="btn secondary" onclick={() => openTransfer('product', product)}>Umbuchen</button>
-                    <button class="btn" onclick={() => openTransform(product)}>Umwandeln</button>
+                    {#if canTransformProduct(product)}
+                      <button class="btn" onclick={() => openTransform(product)}>Umwandeln</button>
+                    {/if}
                     <button class="btn secondary" onclick={() => openMovements(product)}>Historie</button>
                     <button class="btn secondary" onclick={() => openEditProduct(product)}>Bearbeiten</button>
                   </div>
