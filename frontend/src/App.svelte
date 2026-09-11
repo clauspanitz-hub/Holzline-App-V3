@@ -439,6 +439,11 @@
     return group.rows.length > 0 && group.rows.every((row) => selected.includes(row.id))
   }
 
+  function openBulkEdit(kind) {
+    bulkEditForm = emptyBulkEditForm()
+    bulkEditModal = { kind }
+  }
+
   async function setOverviewIgnored(kind, item, ignored) {
     saving = true
     try {
