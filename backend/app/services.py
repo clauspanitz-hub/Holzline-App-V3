@@ -768,11 +768,6 @@ def _colors_with_material(db: Session) -> set[int]:
     return {int(c) for c in rows if c is not None}
 
 
-def _colors_with_product(db: Session) -> set[int]:
-    rows = db.scalars(select(Product.color_id).where(Product.color_id.is_not(None)).distinct()).all()
-    return {int(c) for c in rows if c is not None}
-
-
 def _unique_material_name(db: Session, color: Color) -> tuple[str, str | None]:
     """Preferred: Medium + Farbe; numeric suffix if taken. Returns (name, warning)."""
     base = f"{color.medium.name} {color.name}".strip()
