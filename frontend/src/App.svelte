@@ -24,6 +24,9 @@
   let colorSuggestions = $state([])
   let loading = $state(true)
   let flash = $state(null)
+  let saveButtonOk = $state(false)
+  let flashClearTimer = null
+  let saveOkTimer = null
   let saving = $state(false)
 
   /** Clientseitige Suche/Sortierung je Listen-Block */
@@ -183,6 +186,20 @@
 
   function showFlash(type, message) {
     flash = { type, message }
+    if (flashClearTimer) clearTimeout(flashClearTimer)
+    if (type === 'ok' || type === 'warn') {
+      flashClearTimer = setTimeout(() => {
+        if (flash?.message === message) flash = null
+      }, 2800)
+    }
+  }
+
+  function markSaved() {
+    saveButtonOk = true
+    if (saveOkTimer) clearTimeout(saveOkTimer)
+    saveOkTimer = setTimeout(() => {
+      saveButtonOk = false
+    }, 2000)
   }
 
   function flashRenameResult(okMessage, result) {
@@ -973,6 +990,7 @@
       await refresh({ silent: true })
       selectedCatalogMediumId = created.id
       showFlash('ok', `Medium „${name}“ angelegt.`)
+      queueMicrotask(() => document.querySelector('[data-catalog-new-media]')?.focus())
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -1003,6 +1021,7 @@
       catalogNewColorDrafts = { ...catalogNewColorDrafts, [mid]: '' }
       await refresh({ silent: true })
       showFlash('ok', `Farbe „${name}“ angelegt.`)
+      queueMicrotask(() => document.querySelector(`[data-catalog-new-color="${mid}"]`)?.focus())
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -1032,6 +1051,7 @@
       catalogNewTag = ''
       await refresh({ silent: true })
       showFlash('ok', `Tag „${name}“ angelegt.`)
+      queueMicrotask(() => document.querySelector('[data-catalog-new-tag]')?.focus())
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -1183,6 +1203,7 @@
           ...colorPayload,
         })
         showFlash('ok', 'Material angelegt.')
+        markSaved()
       } else {
         await api.materials.update(materialModal.id, {
           name: materialForm.name.trim(),
@@ -1194,6 +1215,7 @@
           ...colorPayload,
         })
         showFlash('ok', 'Material gespeichert.')
+        markSaved()
       }
       materialModal = null
       await refresh()
@@ -1297,6 +1319,7 @@
           }
         }
         showFlash('ok', 'Produkt angelegt — Stückliste prüfen/ergänzen.')
+        markSaved()
         await refresh()
         const fresh = products.find((p) => p.id === created.id)
         productModal = { mode: 'edit', product: fresh || created }
@@ -1346,6 +1369,7 @@
           ...colorPayload,
         })
         showFlash('ok', 'Produkt gespeichert.')
+        markSaved()
         await refresh()
         const fresh = products.find((p) => p.id === productModal.product.id)
         if (fresh) {
@@ -2037,7 +2061,6 @@
                   <td onclick={(e) => e.stopPropagation()}>
                     <div class="row-actions">
                       <button class="btn secondary" onclick={() => openEditMaterial(material)}>Bearbeiten</button>
-                      <button class="btn secondary" onclick={() => openCreateMaterial(material)}>Vorlage</button>
                       <button class="btn secondary" onclick={() => openTransfer('material', material)}>Umbuchen</button>
                       <button class="btn danger" onclick={() => removeMaterial(material)}>Löschen</button>
                     </div>
@@ -2059,7 +2082,7 @@
           <button class="btn" onclick={openCreateProduct}>Neu</button>
         </div>
       </div>
-      <div class="filter-bar form-grid">
+      <div class="filter-bar form-grid filter-bar-end">
         <label>Filter Tag
           <select bind:value={filterTag} onchange={refresh}>
             <option value="">alle</option>
@@ -2167,7 +2190,6 @@
                   <td onclick={(e) => e.stopPropagation()}>
                     <div class="row-actions">
                       <button class="btn secondary" onclick={() => openEditProduct(product)}>Bearbeiten</button>
-                      <button class="btn secondary" onclick={() => openCreateProduct(product)}>Vorlage</button>
                       <button class="btn" onclick={() => openManufacture(product)}>Fertigen</button>
                       <button class="btn secondary" onclick={() => openTransfer('product', product)}>Umbuchen</button>
                       {#if canTransformProduct(product)}
@@ -2376,6 +2398,7 @@
                       <input
                         class="catalog-cell"
                         type="text"
+                        data-catalog-new-color={m.id}
                         bind:value={catalogNewColorDrafts[m.id]}
                         placeholder="Neue Farbe…"
                         disabled={saving && catalogSavingKey === `new:color:${m.id}`}
@@ -2401,6 +2424,7 @@
               class="catalog-cell"
               style="border-color:var(--line);background:var(--bg-soft)"
               type="text"
+              data-catalog-new-media
               bind:value={catalogNewMedia}
               placeholder="z. B. Lack, PLA, Öl…"
               disabled={saving && catalogSavingKey === 'new:media'}
@@ -2459,6 +2483,7 @@
                   <input
                     class="catalog-cell"
                     type="text"
+                    data-catalog-new-tag
                     bind:value={catalogNewTag}
                     placeholder="Neuer Tag…"
                     disabled={saving && catalogSavingKey === 'new:tag'}
@@ -2625,7 +2650,7 @@
         {/if}
         <div class="modal-actions">
           <button type="button" class="btn secondary" onclick={() => (materialModal = null)}>Abbrechen</button>
-          <button class="btn" disabled={saving}>Speichern</button>
+          <button class="btn" disabled={saving}>{saveButtonOk ? '✓ Gespeichert' : 'Speichern'}</button>
         </div>
       </form>
       {#if materialModal.mode === 'edit'}
@@ -2668,10 +2693,12 @@
         <label>Mindestbestand (optional)
           <input type="number" step="0.001" min="0" bind:value={productForm.min_stock} placeholder="leer = keiner" />
         </label>
-        <label class="tag-check">
-          <input type="checkbox" bind:checked={productForm.is_template} />
-          Ist Vorlage
-        </label>
+        {#if productModal.mode === 'edit'}
+          <label class="tag-check">
+            <input type="checkbox" bind:checked={productForm.is_template} />
+            Ist Vorlage
+          </label>
+        {/if}
         <label>Wird zu (Umwandlung)
           <select bind:value={productForm.transform_target_id}>
             <option value="">keins</option>
@@ -2727,7 +2754,7 @@
         {/if}
         <div class="modal-actions">
           <button type="button" class="btn secondary" onclick={() => (productModal = null)}>Schließen</button>
-          <button class="btn" disabled={saving}>Speichern</button>
+          <button class="btn" disabled={saving}>{saveButtonOk ? '✓ Gespeichert' : 'Speichern'}</button>
         </div>
       </form>
       {#if productModal.product}

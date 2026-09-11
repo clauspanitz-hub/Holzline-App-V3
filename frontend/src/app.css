@@ -329,10 +329,17 @@ table .row-actions .btn {
 }
 
 .flash {
-  margin-bottom: 1rem;
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 60;
+  max-width: min(24rem, calc(100vw - 2rem));
+  margin: 0;
   padding: 0.75rem 0.9rem;
   border-radius: var(--radius);
   border: 1px solid var(--line);
+  background: var(--bg);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
 .flash.error {
