@@ -61,6 +61,8 @@ from app.schemas import (
     ShopifyIgnoredHandleRead,
     ShopifyInventoryImportResult,
     ShopifyPreviewResult,
+    ImportQueueItemRead,
+    ImportQueueStatusUpdate,
     StockAdjustRequest,
     StockDeltaRequest,
     StockMovementRead,
@@ -518,6 +520,28 @@ def list_ignored_handles(db: Session = Depends(get_db)) -> list[ShopifyIgnoredHa
 @router.delete("/sets/ignored-handles/{handle}", status_code=204)
 def unignore_handle(handle: str, db: Session = Depends(get_db)) -> None:
     services.unignore_shopify_handle(db, handle)
+
+
+@router.get("/import-queue", response_model=list[ImportQueueItemRead])
+def list_import_queue(
+    status: Literal["open", "done"] | None = None,
+    db: Session = Depends(get_db),
+) -> list[ImportQueueItemRead]:
+    return services.list_import_queue(db, status=status)
+
+
+@router.patch("/import-queue/{handle}", response_model=ImportQueueItemRead)
+def update_import_queue_status(
+    handle: str,
+    payload: ImportQueueStatusUpdate,
+    db: Session = Depends(get_db),
+) -> ImportQueueItemRead:
+    return services.update_import_queue_status(db, handle, payload.status)
+
+
+@router.delete("/import-queue/{handle}", status_code=204)
+def delete_import_queue_item(handle: str, db: Session = Depends(get_db)) -> None:
+    services.delete_import_queue_item(db, handle)
 
 
 @router.post("/sets/bulk-delete", response_model=BulkDeleteResult)

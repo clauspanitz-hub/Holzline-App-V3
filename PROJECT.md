@@ -33,6 +33,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **sets:** Shopify-Set ohne eigenen Bestand; Flag `count_materials_in_buildability`
 - **set_variants:** Option1–3 Name/Value (Shopify-CSV-Assistent: Set / Serie / On-Demand / ignorieren; kein stilles Anlegen aller Varianten als Sets)
 - **shopify_ignored_handles:** dauerhaft ignorierte Shopify-Handles im Assistenten
+- **shopify_import_queue:** Import-Warteschlange (Serie/On-Demand → Serienanlage); Produkte `is_on_demand`
 - **set_bom_lines:** Varianten-Stückliste → Material **oder** Produkt + Menge
 - **option_mappings:** Regel Option+Wert → Material/Produkt+Menge; Overrides je Variante möglich
 - **Baubare Menge:** `min(floor(sum_stock/qty))` über relevante Zeilen; Summe über Standorte **ohne Ausschuss**
@@ -61,6 +62,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Materialfamilie; Übersicht Produkte zuerst + Ignorieren; Set-Zuordnung über Katalogfarbe (ADR `0009`)
 - [x] Unvollständigkeit → System-Tags `fehlt …` + „!“ nur bei gesetztem Tag (ADR `0011`)
 - [x] Produkt-Stückliste Material oder Komponenten-Produkt; Fertigen/Kosten/Serie (ADR `0012`)
+- [x] Shopify-CSV-Assistent + Ignorieren-Liste; Import-Warteschlange → Serienanlage (Medium/Farb-Match); `is_on_demand`
 
 ### Phase 2: Bestellverwaltung & Eingangskanäle (GEPLANT)
 - [x] Benutzer mit Rechten (App-Login Admin/Mitarbeiter, ADR `0010`) — Teilumsetzung Auth

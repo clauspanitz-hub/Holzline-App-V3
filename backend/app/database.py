@@ -179,6 +179,8 @@ def init_db() -> None:
         migrate_overview_ignored(engine)
         migrate_product_bom_components(engine)
         migrate_shopify_ignored_handles(engine)
+        migrate_product_is_on_demand(engine)
+        migrate_shopify_import_queue(engine)
         seed_admin_user(db)
         from app.services import backfill_incomplete_tags, ensure_system_incomplete_tags
 
@@ -336,6 +338,44 @@ def migrate_shopify_ignored_handles(engine) -> None:
                     handle VARCHAR(200) PRIMARY KEY,
                     title VARCHAR(300),
                     ignored_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+
+
+def migrate_product_is_on_demand(engine) -> None:
+    """Flag for products created from On-Demand Shopify import queue entries."""
+    insp = inspect(engine)
+    if "products" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("products")}
+    if "is_on_demand" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE products ADD COLUMN is_on_demand BOOLEAN NOT NULL DEFAULT 0"))
+
+
+def migrate_shopify_import_queue(engine) -> None:
+    """Persistent Import-Warteschlange for Serie/On-Demand handles."""
+    insp = inspect(engine)
+    if "shopify_import_queue" in insp.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE shopify_import_queue (
+                    handle VARCHAR(200) PRIMARY KEY,
+                    title VARCHAR(300) NOT NULL,
+                    kind VARCHAR(20) NOT NULL,
+                    on_demand BOOLEAN NOT NULL DEFAULT 0,
+                    status VARCHAR(20) NOT NULL DEFAULT 'open',
+                    option_axes JSON NOT NULL,
+                    option_values JSON NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    completed_at DATETIME
                 )
                 """
             )

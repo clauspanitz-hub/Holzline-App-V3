@@ -209,6 +209,7 @@ class ProductBase(BaseModel):
     color_id: int | None = None
     transform_target_id: int | None = None
     tag_ids: list[int] = []
+    is_on_demand: bool = False
 
     @field_validator("sku")
     @classmethod
@@ -237,6 +238,7 @@ class ProductUpdate(BaseModel):
     sku: str | None = Field(default=None, max_length=100)
     min_stock: Quantity | None = None
     is_template: bool | None = None
+    is_on_demand: bool | None = None
     family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     transform_target_id: int | None = None
@@ -268,6 +270,7 @@ class ProductRead(BaseModel):
     sku: str | None
     min_stock: Quantity | None = None
     is_template: bool = False
+    is_on_demand: bool = False
     family: str | None = None
     overview_ignored: bool = False
     color_id: int | None = None
@@ -473,6 +476,7 @@ class ShopifyApplyResult(BaseModel):
     sets_updated: int = 0
     variants_upserted: int = 0
     ignored_added: int = 0
+    queue_upserted: int = 0
     series_jobs: list[ShopifySeriesJob] = []
     set_ids: list[int] = []
     message: str
@@ -487,6 +491,23 @@ class ShopifyIgnoredHandleRead(BaseModel):
 class ShopifyIgnoredHandlesPut(BaseModel):
     handles: list[str] = Field(min_length=1)
     titles: dict[str, str] = {}
+
+
+class ImportQueueItemRead(BaseModel):
+    handle: str
+    title: str
+    kind: Literal["product", "material"]
+    on_demand: bool = False
+    status: Literal["open", "done"] = "open"
+    option_axes: list[str] = []
+    option_values: dict[str, list[str]] = {}
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class ImportQueueStatusUpdate(BaseModel):
+    status: Literal["open", "done"]
 
 
 class BackupImportRequest(BaseModel):
@@ -595,6 +616,7 @@ class ProductsFromColorsRequest(BaseModel):
     location_id: int | None = None
     tag_ids: list[int] = []
     stock_quantity: Quantity = Decimal("0")
+    is_on_demand: bool = False
 
 
 class ProductsFromColorsResult(BaseModel):

@@ -201,6 +201,19 @@ export const api = {
       request(`/api/sets/ignored-handles/${encodeURIComponent(handle)}`, { method: 'DELETE' }),
     bulkDelete: (body) => request('/api/sets/bulk-delete', { method: 'POST', body: JSON.stringify(body) }),
   },
+  importQueue: {
+    list: (status) => {
+      const q = status ? `?status=${encodeURIComponent(status)}` : ''
+      return request(`/api/import-queue${q}`)
+    },
+    setStatus: (handle, status) =>
+      request(`/api/import-queue/${encodeURIComponent(handle)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      }),
+    remove: (handle) =>
+      request(`/api/import-queue/${encodeURIComponent(handle)}`, { method: 'DELETE' }),
+  },
 }
 
 export function formatQty(value) {

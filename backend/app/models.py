@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    JSON,
     Numeric,
     String,
     Table,
@@ -126,6 +127,7 @@ class Product(Base):
     sku: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
     min_stock: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_on_demand: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     family: Mapped[str | None] = mapped_column(String(200), nullable=True)
     overview_ignored: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     color_id: Mapped[int | None] = mapped_column(ForeignKey("colors.id", ondelete="SET NULL"), nullable=True)
@@ -374,3 +376,20 @@ class ShopifyIgnoredHandle(Base):
     handle: Mapped[str] = mapped_column(String(200), primary_key=True)
     title: Mapped[str | None] = mapped_column(String(300), nullable=True)
     ignored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class ShopifyImportQueueItem(Base):
+    """Handles marked Serie/On-Demand in the CSV assistant, pending Serienanlage."""
+
+    __tablename__ = "shopify_import_queue"
+
+    handle: Mapped[str] = mapped_column(String(200), primary_key=True)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # product | material
+    on_demand: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")  # open | done
+    option_axes: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    option_values: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -209,6 +209,7 @@ def _export_product(product: Product) -> dict[str, Any]:
         "sku": product.sku,
         "min_stock": _num(product.min_stock),
         "is_template": product.is_template,
+        "is_on_demand": bool(getattr(product, "is_on_demand", False)),
         "family": product.family,
         "overview_ignored": bool(getattr(product, "overview_ignored", False)),
         "color": _color_ref(product.color),
@@ -680,6 +681,7 @@ def _import_products(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
         min_stock = _dec_field(entry, "min_stock", context=context)
         product.min_stock = services._q(min_stock) if min_stock is not None else None
         product.is_template = _bool_field(entry, "is_template")
+        product.is_on_demand = _bool_field(entry, "is_on_demand")
         product.family = _opt_str(entry, "family")
         product.overview_ignored = _bool_field(entry, "overview_ignored")
         color = ctx.resolve_color(entry.get("color"), context=context)

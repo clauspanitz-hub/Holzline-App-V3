@@ -66,7 +66,9 @@
   let setModal = $state(null)
   let setStep = $state(1) // 1 Überblick, 2 Zuordnen, 3 Baubarkeit
   let shopifyAssistant = $state(null) // { file, preview, actions, showIgnored }
-  let shopifySeriesQueue = $state([])
+  let importQueue = $state([])
+  let importQueueFilter = $state('open') // open | done | all
+  let queueAxisModal = $state(null) // { item, axes, colorAxis }
   let ignoredHandlesModal = $state(false)
   let ignoredHandles = $state([])
   let setCleanupModal = $state(false)
@@ -83,8 +85,8 @@
   let selectedCatalogMediumId = $state(null)
 
   /** Bulk: Materialien/Produkte aus Katalogfarben */
-  let bulkMaterialModal = $state(null) // { mediumId }
-  let bulkProductModal = $state(null) // { mediumId?, baseName, templateProductId }
+  let bulkMaterialModal = $state(null) // { mediumId, fromQueue? }
+  let bulkProductModal = $state(null) // { mediumId?, fromQueue? }
   let bulkForm = $state({
     colorIds: [],
     unit: 'ml',
@@ -307,17 +309,70 @@
     return base
   }
 
-  function openBulkMaterials(mediumId = null, { keepTemplate = false, baseName = null } = {}) {
+  function queueBaseName(title, optionValues, colorAxis) {
+    const extras = []
+    for (const [axis, vals] of Object.entries(optionValues || {})) {
+      if (colorAxis && axis === colorAxis) continue
+      const clean = (vals || []).map((v) => String(v).trim()).filter(Boolean)
+      if (clean.length === 1) extras.push(clean[0])
+      else if (clean.length > 1) extras.push(clean.join('/'))
+    }
+    const t = String(title || '').trim()
+    if (!extras.length) return t
+    return `${t} — ${extras.join(' — ')}`
+  }
+
+  function matchQueueColorIds(mediumId, shopifyValues) {
+    if (!mediumId || !shopifyValues?.length) return []
+    const ids = []
+    const seen = new Set()
+    for (const val of shopifyValues) {
+      const hits = matchColorsForShopifyValue(mediumId, val)
+      if (hits.length === 1) {
+        const id = hits[0].id
+        if (!seen.has(id)) {
+          seen.add(id)
+          ids.push(id)
+        }
+      }
+    }
+    return ids
+  }
+
+  function colorIdsForBulk({ mediumId, base, kind, fromQueue, colorIds }) {
+    if (colorIds != null) return colorIds
+    if (fromQueue?.shopifyValues?.length) {
+      if (!mediumId) return []
+      const matched = matchQueueColorIds(mediumId, fromQueue.shopifyValues)
+      const takenFn = kind === 'material' ? isBulkMaterialColorTaken : isBulkProductColorTaken
+      return matched.filter((id) => {
+        const c = colors.find((x) => x.id === id)
+        return c && !takenFn(base, c)
+      })
+    }
+    const pool = mediumId ? colorsForMedium(mediumId) : colors
+    const takenFn = kind === 'material' ? isBulkMaterialColorTaken : isBulkProductColorTaken
+    return pool.filter((c) => !takenFn(base, c)).map((c) => c.id)
+  }
+
+  function openBulkMaterials(mediumId = null, { keepTemplate = false, baseName = null, fromQueue = undefined } = {}) {
     const mid = mediumId != null ? Number(mediumId) : media[0]?.id || null
     const prevTemplate = keepTemplate ? bulkForm.template_material_id : ''
+    const fq = fromQueue !== undefined ? fromQueue : bulkMaterialModal?.fromQueue || null
     const base =
       baseName != null
         ? baseName
         : keepTemplate
           ? bulkForm.base_name
           : ''
-    const pool = mid ? colorsForMedium(mid) : colors
-    const available = pool.filter((c) => !isBulkMaterialColorTaken(base, c)).map((c) => c.id)
+    // From queue: do not auto-pick first medium — user must choose for Farb-Match
+    const effectiveMid = fq ? (mediumId != null ? Number(mediumId) : null) : mid
+    const available = colorIdsForBulk({
+      mediumId: effectiveMid,
+      base,
+      kind: 'material',
+      fromQueue: fq,
+    })
     bulkForm = {
       ...bulkForm,
       colorIds: available,
@@ -329,7 +384,7 @@
       template_material_id: prevTemplate || '',
       location_id: String(locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || ''),
     }
-    bulkMaterialModal = { mediumId: mid }
+    bulkMaterialModal = { mediumId: effectiveMid, fromQueue: fq }
   }
 
   function materialTemplateById(templateMaterialId) {
@@ -361,17 +416,32 @@
     if (bulkForm.min_stock === '') {
       bulkForm.min_stock = materialTemplateMinStock(bulkForm.template_material_id)
     }
-    const pool = bulkMaterialModal?.mediumId
-      ? colorsForMedium(bulkMaterialModal.mediumId)
-      : colors
-    bulkForm.colorIds = pool.filter((c) => !isBulkMaterialColorTaken(base, c)).map((c) => c.id)
+    bulkForm.colorIds = colorIdsForBulk({
+      mediumId: bulkMaterialModal?.mediumId,
+      base,
+      kind: 'material',
+      fromQueue: bulkMaterialModal?.fromQueue,
+    })
   }
 
-  function openBulkProducts({ mediumId = null, baseName = '', templateProductId = '', minStock = null } = {}) {
+  function openBulkProducts({
+    mediumId = null,
+    baseName = '',
+    templateProductId = '',
+    minStock = null,
+    colorIds = null,
+    fromQueue = undefined,
+  } = {}) {
     const mid = mediumId != null ? Number(mediumId) : null
+    const fq = fromQueue !== undefined ? fromQueue : bulkProductModal?.fromQueue || null
     const base = baseName || ''
-    const pool = mid ? colorsForMedium(mid) : colors
-    const available = pool.filter((c) => !isBulkProductColorTaken(base, c)).map((c) => c.id)
+    const available = colorIdsForBulk({
+      mediumId: mid,
+      base,
+      kind: 'product',
+      fromQueue: fq,
+      colorIds,
+    })
     bulkForm = {
       ...bulkForm,
       colorIds: available,
@@ -380,7 +450,7 @@
       min_stock: minStock != null ? minStock : templateMinStock(templateProductId),
       location_id: String(locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || ''),
     }
-    bulkProductModal = { mediumId: mid }
+    bulkProductModal = { mediumId: mid, fromQueue: fq }
   }
 
   /** Vorlage im Serien-Dialog gewechselt: Mindestbestand nur übernehmen, wenn leer. */
@@ -405,6 +475,7 @@
       showFlash('error', 'Mindestens eine Farbe wählen.')
       return
     }
+    const queueHandle = bulkMaterialModal?.fromQueue?.handle || null
     saving = true
     try {
       const body = {
@@ -430,6 +501,7 @@
         (result.skipped.length ? `, ${result.skipped.length} übersprungen` : '')
       showFlash('ok', msg)
       for (const w of result.warnings || []) showFlash('ok', w)
+      await maybeMarkQueueDone(queueHandle)
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -447,6 +519,8 @@
       showFlash('error', 'Mindestens eine Farbe wählen.')
       return
     }
+    const queueHandle = bulkProductModal?.fromQueue?.handle || null
+    const onDemand = !!bulkProductModal?.fromQueue?.onDemand
     saving = true
     try {
       const result = await api.products.fromColors({
@@ -458,6 +532,7 @@
         min_stock: parseOptionalQty(bulkForm.min_stock),
         location_id: bulkForm.location_id ? Number(bulkForm.location_id) : null,
         stock_quantity: '0',
+        is_on_demand: onDemand,
       })
       bulkProductModal = null
       await refresh()
@@ -467,10 +542,91 @@
       if (result.warnings?.length) {
         showFlash('error', result.warnings.slice(0, 3).join(' · '))
       }
+      await maybeMarkQueueDone(queueHandle)
     } catch (error) {
       showFlash('error', error.message)
     } finally {
       saving = false
+    }
+  }
+
+  async function loadImportQueue() {
+    if (!authUser || authUser.role !== 'admin') return
+    try {
+      importQueue = await api.importQueue.list()
+    } catch (error) {
+      if (error.status !== 401) showFlash('error', error.message)
+    }
+  }
+
+  function importQueueRows() {
+    if (importQueueFilter === 'all') return importQueue
+    return importQueue.filter((r) => r.status === importQueueFilter)
+  }
+
+  function importQueueOpenCount() {
+    return importQueue.filter((r) => r.status === 'open').length
+  }
+
+  function startQueueSeries(item) {
+    const axes = item.option_axes?.length
+      ? item.option_axes
+      : Object.keys(item.option_values || {})
+    if (axes.length <= 1) {
+      openSeriesFromQueue(item, axes[0] || null)
+      return
+    }
+    queueAxisModal = { item, axes, colorAxis: axes[0] }
+  }
+
+  function openSeriesFromQueue(item, colorAxis) {
+    queueAxisModal = null
+    const values = item.option_values || {}
+    const shopifyValues = colorAxis
+      ? values[colorAxis] || []
+      : Object.values(values).flat()
+    const base = queueBaseName(item.title, values, colorAxis)
+    const fromQueue = {
+      handle: item.handle,
+      onDemand: !!item.on_demand,
+      shopifyValues,
+      colorAxis,
+    }
+    if (item.kind === 'material') {
+      openBulkMaterials(null, { baseName: base, fromQueue })
+    } else {
+      openBulkProducts({ baseName: base, fromQueue })
+    }
+  }
+
+  async function maybeMarkQueueDone(handle) {
+    if (!handle) return
+    if (!confirm('Als erledigt in der Import-Warteschlange markieren?')) return
+    try {
+      await api.importQueue.setStatus(handle, 'done')
+      await loadImportQueue()
+      showFlash('ok', 'In der Import-Warteschlange als erledigt markiert.')
+    } catch (error) {
+      showFlash('error', error.message)
+    }
+  }
+
+  async function discardQueueItem(handle) {
+    if (!confirm('Eintrag aus der Import-Warteschlange entfernen?')) return
+    try {
+      await api.importQueue.remove(handle)
+      await loadImportQueue()
+    } catch (error) {
+      showFlash('error', error.message)
+    }
+  }
+
+  async function reopenQueueItem(handle) {
+    try {
+      await api.importQueue.setStatus(handle, 'open')
+      await loadImportQueue()
+    } catch (error) {
+      showFlash('error', error.message)
     }
   }
 
@@ -844,6 +1000,7 @@
       }
       if (!materialForm.location_id && l[0]) materialForm.location_id = String(l.find((x) => x.name === 'Hamburg')?.id || l[0].id)
       if (!productForm.location_id && l[0]) productForm.location_id = String(l.find((x) => x.name === 'Hamburg')?.id || l[0].id)
+      await loadImportQueue()
       if (tab === 'users') await loadUsers()
     } catch (error) {
       if (error.status === 401) {
@@ -2076,11 +2233,11 @@
       shopifyAssistant = null
       await refresh()
       showFlash('ok', result.message)
-      if (result.series_jobs?.length) {
-        shopifySeriesQueue = [...result.series_jobs]
+      if (result.queue_upserted > 0) {
+        tab = 'import'
         showFlash(
           'ok',
-          `${result.series_jobs.length} Serie(n)/On-Demand vorgemerkt — als Nächstes Serienanlage (Farben aus Shopify).`,
+          `${result.queue_upserted} Eintrag/Einträge in der Import-Warteschlange — dort Serienanlage starten.`,
         )
       }
       if (result.set_ids?.length === 1) {
@@ -2475,6 +2632,9 @@
         Bei Mitarbeitern{#if staffQueueProducts.length} ({staffQueueProducts.length}){/if}
       </button>
       <button class="tab" class:active={tab === 'catalogs'} onclick={() => (tab = 'catalogs')}>Kataloge</button>
+      <button class="tab" class:active={tab === 'import'} onclick={() => (tab = 'import')}>
+        Import{#if importQueueOpenCount()} ({importQueueOpenCount()}){/if}
+      </button>
       <button class="tab" class:active={tab === 'sets'} onclick={() => (tab = 'sets')}>Sets</button>
       <button class="tab" class:active={tab === 'users'} onclick={() => { tab = 'users'; loadUsers() }}>Benutzer</button>
     {:else}
@@ -3306,7 +3466,102 @@
         </div>
       </div>
     </section>
-  {:else}
+  {:else if tab === 'import'}
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Import-Warteschlange</h2>
+        <div class="panel-actions" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center">
+          <label class="btn" style="display:inline-flex;align-items:center;gap:.35rem">
+            Shopify-CSV Assistent
+            <input type="file" accept=".csv,text/csv" hidden onchange={onImportFile} disabled={saving} />
+          </label>
+        </div>
+      </div>
+      <p class="empty" style="margin-top:0">
+        Handles aus dem Assistenten (Serie Produkt/Material oder On-Demand). Medium wählen, Shopify-Farben dem Katalog mappen, dann Serienanlage.
+      </p>
+      <div class="filter-bar form-grid">
+        <label>Status
+          <select bind:value={importQueueFilter}>
+            <option value="open">Offen</option>
+            <option value="done">Erledigt</option>
+            <option value="all">Alle</option>
+          </select>
+        </label>
+      </div>
+      <div class="table-wrap desktop-only">
+        <table>
+          <thead>
+            <tr>
+              <th>Titel</th>
+              <th>Typ</th>
+              <th>Optionen</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each importQueueRows() as row}
+              <tr class:empty={row.status === 'done'}>
+                <td>
+                  <strong>{row.title}</strong>
+                  <div class="empty" style="margin:0">{row.handle}</div>
+                </td>
+                <td>
+                  {row.kind === 'material' ? 'Serie Material' : row.on_demand ? 'On-Demand' : 'Serie Produkt'}
+                </td>
+                <td>
+                  {(row.option_axes || []).join(' · ') || '—'}
+                  {#if row.option_values}
+                    <div class="empty" style="margin:0;font-size:.85em">
+                      {Object.entries(row.option_values)
+                        .map(([k, v]) => `${k}: ${(v || []).length}`)
+                        .join(' · ')}
+                    </div>
+                  {/if}
+                </td>
+                <td>{row.status === 'done' ? 'erledigt' : 'offen'}</td>
+                <td class="col-actions">
+                  {#if row.status === 'open'}
+                    <button type="button" class="btn" onclick={() => startQueueSeries(row)}>Serienanlage</button>
+                    <button type="button" class="btn secondary" onclick={() => discardQueueItem(row.handle)}>Verwerfen</button>
+                  {:else}
+                    <button type="button" class="btn secondary" onclick={() => reopenQueueItem(row.handle)}>Wieder öffnen</button>
+                    <button type="button" class="btn secondary" onclick={() => discardQueueItem(row.handle)}>Löschen</button>
+                  {/if}
+                </td>
+              </tr>
+            {:else}
+              <tr><td colspan="5" class="empty">Keine Einträge — im Assistenten Serie/On-Demand markieren.</td></tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-list mobile-only">
+        {#each importQueueRows() as row}
+          <article class="card" class:empty={row.status === 'done'}>
+            <h3>{row.title}</h3>
+            <p class="empty">{row.handle}</p>
+            <p>
+              {row.kind === 'material' ? 'Serie Material' : row.on_demand ? 'On-Demand' : 'Serie Produkt'}
+              · {row.status === 'done' ? 'erledigt' : 'offen'}
+            </p>
+            <div class="row-actions">
+              {#if row.status === 'open'}
+                <button type="button" class="btn" onclick={() => startQueueSeries(row)}>Serienanlage</button>
+                <button type="button" class="btn secondary" onclick={() => discardQueueItem(row.handle)}>Verwerfen</button>
+              {:else}
+                <button type="button" class="btn secondary" onclick={() => reopenQueueItem(row.handle)}>Wieder öffnen</button>
+                <button type="button" class="btn secondary" onclick={() => discardQueueItem(row.handle)}>Löschen</button>
+              {/if}
+            </div>
+          </article>
+        {:else}
+          <p class="empty">Keine Einträge — im Assistenten Serie/On-Demand markieren.</p>
+        {/each}
+      </div>
+    </section>
+  {:else if tab === 'sets'}
     <section class="panel">
       <div class="panel-header">
         <h2>Shopify-Sets</h2>
@@ -3321,10 +3576,10 @@
       </div>
 
       <div class="steps-intro">
-        <p><strong>Was ist ein Set?</strong> Nur Zusammenstellungen aus <em>mehreren</em> Lagerprodukten (z. B. Geburtstagsset). Einfache Farbvarianten gehören in die Produkt-/Material-Serienanlage — der CSV-Assistent fragt das nach dem Upload.</p>
+        <p><strong>Was ist ein Set?</strong> Nur Zusammenstellungen aus <em>mehreren</em> Lagerprodukten (z. B. Geburtstagsset). Einfache Farbvarianten → Assistent als Serie markieren, dann Tab <strong>Import</strong> → Serienanlage.</p>
         <ol>
           <li>Produkte-CSV laden → Handles einordnen (Set / Serie / On-Demand / ignorieren)</li>
-          <li>Bei Sets: Optionen zuordnen und anwenden</li>
+          <li>Bei Sets: Optionen zuordnen und anwenden; bei Serie: Tab Import</li>
           <li>Baubarkeit prüfen</li>
         </ol>
       </div>
@@ -4224,10 +4479,22 @@
     <div class="modal" role="dialog" aria-modal="true">
       <h3>Materialien aus Farben</h3>
       <p class="empty" style="margin-top:0">
-        Optional Vorlage (Einheit/Einkauf/Tags, „Ist Vorlage“), dann Serienanlage.
-        Name = „Basis Farbe“ — z. B. Vorlage „Kerzen klein - Altrosa“ → Basis „Kerzen klein -“.
-        Bestand startet bei 0. Schon vorhandene Namen sind nicht wählbar.
+        {#if bulkMaterialModal.fromQueue}
+          Aus Import-Warteschlange: zuerst <strong>Medium</strong> wählen (Shopify-Farben → Katalog), Vorlage optional.
+        {:else}
+          Optional Vorlage (Einheit/Einkauf/Tags, „Ist Vorlage“), dann Serienanlage.
+          Name = „Basis Farbe“ — z. B. Vorlage „Kerzen klein - Altrosa“ → Basis „Kerzen klein -“.
+          Bestand startet bei 0. Schon vorhandene Namen sind nicht wählbar.
+        {/if}
       </p>
+      {#if bulkMaterialModal.fromQueue?.shopifyValues?.length}
+        <p class="empty" style="margin-top:0">
+          Shopify-Farben: {bulkMaterialModal.fromQueue.shopifyValues.join(', ')}
+          {#if bulkMaterialModal.mediumId}
+            · gematcht: {matchQueueColorIds(bulkMaterialModal.mediumId, bulkMaterialModal.fromQueue.shopifyValues).length}
+          {/if}
+        </p>
+      {/if}
       <div class="form-grid">
         <label>Basisname
           <input
@@ -4235,25 +4502,32 @@
             placeholder="z. B. Kerzen klein -"
             required
             oninput={() => {
-              const pool = bulkMaterialModal.mediumId
-                ? colorsForMedium(bulkMaterialModal.mediumId)
-                : colors
-              const available = pool
-                .filter((c) => !isBulkMaterialColorTaken(bulkForm.base_name, c))
-                .map((c) => c.id)
-              bulkForm.colorIds = available
+              bulkForm.colorIds = colorIdsForBulk({
+                mediumId: bulkMaterialModal.mediumId,
+                base: bulkForm.base_name,
+                kind: 'material',
+                fromQueue: bulkMaterialModal.fromQueue,
+              })
             }}
           />
         </label>
-        <label>Medium-Filter
+        <label>Medium{bulkMaterialModal.fromQueue ? ' (Pflicht für Match)' : '-Filter'}
           <select
             value={bulkMaterialModal.mediumId ?? ''}
             onchange={(e) => {
               const mid = e.currentTarget.value ? Number(e.currentTarget.value) : null
-              openBulkMaterials(mid, { keepTemplate: true })
+              openBulkMaterials(mid, {
+                keepTemplate: true,
+                baseName: bulkForm.base_name,
+                fromQueue: bulkMaterialModal.fromQueue || null,
+              })
             }}
           >
-            <option value="">alle Medien</option>
+            {#if bulkMaterialModal.fromQueue}
+              <option value="">Medium wählen…</option>
+            {:else}
+              <option value="">alle Medien</option>
+            {/if}
             {#each media as m}<option value={m.id}>{m.name}</option>{/each}
           </select>
         </label>
@@ -4285,27 +4559,31 @@
       </div>
       <fieldset class="tag-picker" style="margin-top:.75rem">
         <legend>Farben</legend>
-        {#each (bulkMaterialModal.mediumId ? colorsForMedium(bulkMaterialModal.mediumId) : colors) as c}
-          {@const taken = isBulkMaterialColorTaken(bulkForm.base_name, c)}
-          <label class="tag-check" class:empty={taken}>
-            <input
-              type="checkbox"
-              disabled={taken}
-              checked={!taken && bulkForm.colorIds.includes(c.id)}
-              onchange={() => toggleBulkColorId(c.id)}
-            />
-            {c.label}{taken ? ' (schon Material)' : ''}
-          </label>
+        {#if bulkMaterialModal.fromQueue && !bulkMaterialModal.mediumId}
+          <p class="empty">Zuerst Medium wählen.</p>
         {:else}
-          <p class="empty">Keine Farben.</p>
-        {/each}
+          {#each (bulkMaterialModal.mediumId ? colorsForMedium(bulkMaterialModal.mediumId) : colors) as c}
+            {@const taken = isBulkMaterialColorTaken(bulkForm.base_name, c)}
+            <label class="tag-check" class:empty={taken}>
+              <input
+                type="checkbox"
+                disabled={taken}
+                checked={!taken && bulkForm.colorIds.includes(c.id)}
+                onchange={() => toggleBulkColorId(c.id)}
+              />
+              {c.label}{taken ? ' (schon Material)' : ''}
+            </label>
+          {:else}
+            <p class="empty">Keine Farben.</p>
+          {/each}
+        {/if}
       </fieldset>
       <div class="modal-actions">
         <button type="button" class="btn secondary" onclick={() => (bulkMaterialModal = null)}>Abbrechen</button>
         <button
           type="button"
           class="btn"
-          disabled={saving || !bulkForm.colorIds.length || !bulkForm.base_name.trim()}
+          disabled={saving || !bulkForm.colorIds.length || !bulkForm.base_name.trim() || (bulkMaterialModal.fromQueue && !bulkMaterialModal.mediumId)}
           onclick={submitBulkMaterials}
         >
           {bulkForm.colorIds.length} anlegen
@@ -4318,11 +4596,23 @@
 {#if bulkProductModal}
   <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (bulkProductModal = null)}>
     <div class="modal" role="dialog" aria-modal="true">
-      <h3>Produkte aus Farben</h3>
+      <h3>Produkte aus Farben{#if bulkProductModal.fromQueue?.onDemand} (On-Demand){/if}</h3>
       <p class="empty" style="margin-top:0">
-        Zuerst optional eine Vorlage anlegen (Stückliste/Tags, „Ist Vorlage“), dann Serienanlage.
-        Name = „Basis Farbe“. Farbige Stücklisten-Materialien werden umgebogen.
+        {#if bulkProductModal.fromQueue}
+          Aus Import-Warteschlange: zuerst <strong>Medium</strong> wählen (Shopify-Farben → Katalog), Vorlage optional.
+        {:else}
+          Zuerst optional eine Vorlage anlegen (Stückliste/Tags, „Ist Vorlage“), dann Serienanlage.
+          Name = „Basis Farbe“. Farbige Stücklisten-Materialien werden umgebogen.
+        {/if}
       </p>
+      {#if bulkProductModal.fromQueue?.shopifyValues?.length}
+        <p class="empty" style="margin-top:0">
+          Shopify-Farben: {bulkProductModal.fromQueue.shopifyValues.join(', ')}
+          {#if bulkProductModal.mediumId}
+            · gematcht: {matchQueueColorIds(bulkProductModal.mediumId, bulkProductModal.fromQueue.shopifyValues).length}
+          {/if}
+        </p>
+      {/if}
       <div class="form-grid">
         <label>Basisname
           <input
@@ -4330,17 +4620,16 @@
             placeholder="z. B. Ring"
             required
             oninput={() => {
-              const pool = bulkProductModal.mediumId
-                ? colorsForMedium(bulkProductModal.mediumId)
-                : colors
-              const available = pool
-                .filter((c) => !isBulkProductColorTaken(bulkForm.base_name, c))
-                .map((c) => c.id)
-              bulkForm.colorIds = available
+              bulkForm.colorIds = colorIdsForBulk({
+                mediumId: bulkProductModal.mediumId,
+                base: bulkForm.base_name,
+                kind: 'product',
+                fromQueue: bulkProductModal.fromQueue,
+              })
             }}
           />
         </label>
-        <label>Medium-Filter
+        <label>Medium{bulkProductModal.fromQueue ? ' (Pflicht für Match)' : '-Filter'}
           <select
             value={bulkProductModal.mediumId ?? ''}
             onchange={(e) => {
@@ -4349,10 +4638,16 @@
                 mediumId: mid,
                 baseName: bulkForm.base_name,
                 templateProductId: bulkForm.template_product_id,
+                minStock: bulkForm.min_stock,
+                fromQueue: bulkProductModal.fromQueue || null,
               })
             }}
           >
-            <option value="">alle Medien</option>
+            {#if bulkProductModal.fromQueue}
+              <option value="">Medium wählen…</option>
+            {:else}
+              <option value="">alle Medien</option>
+            {/if}
             {#each media as m}<option value={m.id}>{m.name}</option>{/each}
           </select>
         </label>
@@ -4375,27 +4670,31 @@
       </div>
       <fieldset class="tag-picker" style="margin-top:.75rem">
         <legend>Farben</legend>
-        {#each (bulkProductModal.mediumId ? colorsForMedium(bulkProductModal.mediumId) : colors) as c}
-          {@const taken = isBulkProductColorTaken(bulkForm.base_name, c)}
-          <label class="tag-check" class:empty={taken}>
-            <input
-              type="checkbox"
-              disabled={taken}
-              checked={!taken && bulkForm.colorIds.includes(c.id)}
-              onchange={() => toggleBulkColorId(c.id)}
-            />
-            {c.label}{taken ? ' (schon Produkt)' : ''}
-          </label>
+        {#if bulkProductModal.fromQueue && !bulkProductModal.mediumId}
+          <p class="empty">Zuerst Medium wählen.</p>
         {:else}
-          <p class="empty">Keine Farben.</p>
-        {/each}
+          {#each (bulkProductModal.mediumId ? colorsForMedium(bulkProductModal.mediumId) : colors) as c}
+            {@const taken = isBulkProductColorTaken(bulkForm.base_name, c)}
+            <label class="tag-check" class:empty={taken}>
+              <input
+                type="checkbox"
+                disabled={taken}
+                checked={!taken && bulkForm.colorIds.includes(c.id)}
+                onchange={() => toggleBulkColorId(c.id)}
+              />
+              {c.label}{taken ? ' (schon Produkt)' : ''}
+            </label>
+          {:else}
+            <p class="empty">Keine Farben.</p>
+          {/each}
+        {/if}
       </fieldset>
       <div class="modal-actions">
         <button type="button" class="btn secondary" onclick={() => (bulkProductModal = null)}>Abbrechen</button>
         <button
           type="button"
           class="btn"
-          disabled={saving || !bulkForm.colorIds.length || !bulkForm.base_name.trim()}
+          disabled={saving || !bulkForm.colorIds.length || !bulkForm.base_name.trim() || (bulkProductModal.fromQueue && !bulkProductModal.mediumId)}
           onclick={submitBulkProducts}
         >
           {bulkForm.colorIds.length} anlegen
@@ -4574,6 +4873,35 @@
           {/if}
         </div>
       </form>
+    </div>
+  </div>
+{/if}
+
+{#if queueAxisModal}
+  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (queueAxisModal = null)}>
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Farb-Option wählen</h3>
+      <p class="empty" style="margin-top:0">
+        Mehrere Shopify-Optionen — welche Achse sind die Variantenfarben? Die übrigen fließen in den Basisnamen.
+      </p>
+      <p><strong>{queueAxisModal.item.title}</strong></p>
+      <label>Diese Option ist die Farbe
+        <select bind:value={queueAxisModal.colorAxis}>
+          {#each queueAxisModal.axes as axis}
+            <option value={axis}>{axis} ({(queueAxisModal.item.option_values?.[axis] || []).length} Werte)</option>
+          {/each}
+        </select>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" onclick={() => (queueAxisModal = null)}>Abbrechen</button>
+        <button
+          type="button"
+          class="btn"
+          onclick={() => openSeriesFromQueue(queueAxisModal.item, queueAxisModal.colorAxis)}
+        >
+          Weiter zur Serienanlage
+        </button>
+      </div>
     </div>
   </div>
 {/if}

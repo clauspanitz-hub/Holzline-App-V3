@@ -840,6 +840,7 @@ def product_read(product: Product) -> ProductRead:
         sku=product.sku,
         min_stock=product.min_stock,
         is_template=bool(product.is_template),
+        is_on_demand=bool(getattr(product, "is_on_demand", False)),
         family=product.family,
         overview_ignored=bool(getattr(product, "overview_ignored", False)),
         color_id=product.color_id,
@@ -1256,6 +1257,7 @@ def create_product(db: Session, payload: ProductCreate) -> ProductRead:
         sku=payload.sku,
         min_stock=_q(payload.min_stock) if payload.min_stock is not None else None,
         is_template=bool(payload.is_template),
+        is_on_demand=bool(getattr(payload, "is_on_demand", False)),
         family=(payload.family.strip() if payload.family else None),
         color_id=color.id if color else None,
         transform_target_id=None,
@@ -1412,6 +1414,7 @@ def create_products_from_colors(db: Session, payload: ProductsFromColorsRequest)
             color_id=color.id,
             min_stock=series_min_stock,
             family=base,
+            is_on_demand=bool(payload.is_on_demand),
         )
         product.tags = list(tags)
         db.add(product)
@@ -2349,7 +2352,7 @@ def preview_shopify_catalog_csv(db: Session, content: str) -> "ShopifyPreviewRes
 
 
 def apply_shopify_catalog_csv(db: Session, content: str, payload: "ShopifyApplyRequest") -> "ShopifyApplyResult":
-    from app.models import ShopifyIgnoredHandle
+    from app.models import ShopifyIgnoredHandle, ShopifyImportQueueItem
     from app.schemas import (
         ShopifyApplyRequest,
         ShopifyApplyResult,
@@ -2368,6 +2371,8 @@ def apply_shopify_catalog_csv(db: Session, content: str, payload: "ShopifyApplyR
     set_handles: list[str] = []
     ignored_added = 0
     series_jobs: list[ShopifySeriesJob] = []
+    queue_upserted = 0
+    now = _utcnow()
 
     for item in payload.items:
         handle = item.handle.strip()
@@ -2387,26 +2392,56 @@ def apply_shopify_catalog_csv(db: Session, content: str, payload: "ShopifyApplyR
             continue
         if item.action == "set":
             set_handles.append(handle)
-            # If it was ignored, stay ignored? No — choosing set means un-ignore
             row = db.get(ShopifyIgnoredHandle, handle)
             if row is not None:
                 db.delete(row)
             continue
         if item.action in ("series_product", "series_material", "on_demand"):
             kind = "material" if item.action == "series_material" else "product"
+            on_demand = item.action == "on_demand"
+            title = data["title"] or handle
+            axes = list(data["option_values"].keys())
+            values = {k: list(v) for k, v in data["option_values"].items()}
             series_jobs.append(
                 ShopifySeriesJob(
                     handle=handle,
-                    title=data["title"] or handle,
+                    title=title,
                     kind=kind,
-                    on_demand=item.action == "on_demand",
-                    option_axes=list(data["option_values"].keys()),
-                    option_values=data["option_values"],
+                    on_demand=on_demand,
+                    option_axes=axes,
+                    option_values=values,
                 )
             )
-            row = db.get(ShopifyIgnoredHandle, handle)
-            if row is not None:
-                db.delete(row)
+            q = db.get(ShopifyImportQueueItem, handle)
+            if q is None:
+                db.add(
+                    ShopifyImportQueueItem(
+                        handle=handle,
+                        title=title,
+                        kind=kind,
+                        on_demand=on_demand,
+                        status="open",
+                        option_axes=axes,
+                        option_values=values,
+                        created_at=now,
+                        updated_at=now,
+                        completed_at=None,
+                    )
+                )
+            else:
+                q.title = title
+                q.kind = kind
+                q.on_demand = on_demand
+                q.option_axes = axes
+                q.option_values = values
+                q.updated_at = now
+                # Re-marking reopens done entries
+                q.status = "open"
+                q.completed_at = None
+            queue_upserted += 1
+            ignored = db.get(ShopifyIgnoredHandle, handle)
+            if ignored is not None:
+                db.delete(ignored)
 
     upsert = {"sets_created": 0, "sets_touched": 0, "variants_upserted": 0, "set_ids": [], "message": ""}
     if set_handles:
@@ -2418,17 +2453,75 @@ def apply_shopify_catalog_csv(db: Session, content: str, payload: "ShopifyApplyR
         parts.append(upsert["message"])
     if ignored_added:
         parts.append(f"{ignored_added} Handle(s) ignoriert")
-    if series_jobs:
-        parts.append(f"{len(series_jobs)} Serie(n)/On-Demand zur Nachbearbeitung")
+    if queue_upserted:
+        parts.append(f"{queue_upserted} in Import-Warteschlange")
     return ShopifyApplyResult(
         sets_created=upsert["sets_created"],
         sets_updated=max(0, upsert["sets_touched"] - upsert["sets_created"]),
         variants_upserted=upsert["variants_upserted"],
         ignored_added=ignored_added,
+        queue_upserted=queue_upserted,
         series_jobs=series_jobs,
         set_ids=upsert["set_ids"],
         message="; ".join(parts) if parts else "Keine Änderungen.",
     )
+
+
+def _import_queue_read(row) -> "ImportQueueItemRead":
+    from app.schemas import ImportQueueItemRead
+
+    return ImportQueueItemRead(
+        handle=row.handle,
+        title=row.title,
+        kind=row.kind if row.kind in ("product", "material") else "product",
+        on_demand=bool(row.on_demand),
+        status=row.status if row.status in ("open", "done") else "open",
+        option_axes=list(row.option_axes or []),
+        option_values={k: list(v) for k, v in (row.option_values or {}).items()},
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        completed_at=row.completed_at,
+    )
+
+
+def list_import_queue(db: Session, status: str | None = None) -> list["ImportQueueItemRead"]:
+    from app.models import ShopifyImportQueueItem
+
+    stmt = select(ShopifyImportQueueItem).order_by(
+        ShopifyImportQueueItem.status.asc(),
+        ShopifyImportQueueItem.updated_at.desc(),
+    )
+    if status in ("open", "done"):
+        stmt = stmt.where(ShopifyImportQueueItem.status == status)
+    rows = db.scalars(stmt).all()
+    return [_import_queue_read(r) for r in rows]
+
+
+def update_import_queue_status(db: Session, handle: str, status: str) -> "ImportQueueItemRead":
+    from app.models import ShopifyImportQueueItem
+
+    row = db.get(ShopifyImportQueueItem, handle.strip())
+    if row is None:
+        raise HTTPException(status_code=404, detail="Warteschlangen-Eintrag nicht gefunden")
+    if status not in ("open", "done"):
+        raise HTTPException(status_code=400, detail="status muss open oder done sein")
+    now = _utcnow()
+    row.status = status
+    row.updated_at = now
+    row.completed_at = now if status == "done" else None
+    db.commit()
+    db.refresh(row)
+    return _import_queue_read(row)
+
+
+def delete_import_queue_item(db: Session, handle: str) -> None:
+    from app.models import ShopifyImportQueueItem
+
+    row = db.get(ShopifyImportQueueItem, handle.strip())
+    if row is None:
+        raise HTTPException(status_code=404, detail="Warteschlangen-Eintrag nicht gefunden")
+    db.delete(row)
+    db.commit()
 
 
 def list_ignored_shopify_handles(db: Session) -> list["ShopifyIgnoredHandleRead"]:
