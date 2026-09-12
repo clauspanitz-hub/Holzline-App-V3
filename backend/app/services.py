@@ -2220,90 +2220,47 @@ def delete_variant_bom_line(db: Session, set_id: int, variant_id: int, line_id: 
 
 
 def import_shopify_inventory_csv(db: Session, content: str) -> ShopifyInventoryImportResult:
-    """Import Sets aus Shopify Inventory- oder Produkte-CSV.
+    """Legacy: import *all* catalog handles as sets. Prefer preview + apply."""
+    from app.shopify_csv import parse_shopify_catalog_csv
 
-    - Mehrere Handles → mehrere Sets
-    - Option-Namen und Title werden vorwärts übernommen (Shopify Produkte-Export
-      schreibt sie oft nur in die erste Zeile eines Produkts)
-    - Reine „Default Title“-Artikel ohne echte Optionen werden übersprungen
-    """
-    import csv
-    import io
-
-    reader = csv.DictReader(io.StringIO(content))
-    if not reader.fieldnames or "Handle" not in reader.fieldnames:
-        raise HTTPException(
-            status_code=400,
-            detail="Ungültiger Shopify-Export (Spalte „Handle“ fehlt)",
-        )
-
-    # handle -> { title, variants: {(o1,o2,o3) -> option fields} }
-    by_handle: dict[str, dict] = {}
-    current_handle: str | None = None
-    option_names: list[str | None] = [None, None, None]
-    current_title: str | None = None
-
-    for row in reader:
-        handle = (row.get("Handle") or "").strip()
-        if not handle:
-            continue
-        if handle != current_handle:
-            current_handle = handle
-            option_names = [None, None, None]
-            current_title = None
-            by_handle.setdefault(handle, {"title": handle, "variants": {}})
-
-        title_cell = (row.get("Title") or "").strip()
-        if title_cell:
-            current_title = title_cell
-            by_handle[handle]["title"] = current_title
-
-        for i in range(3):
-            name_cell = (row.get(f"Option{i + 1} Name") or "").strip()
-            if name_cell:
-                option_names[i] = name_cell
-
-        values = [
-            (row.get(f"Option{i + 1} Value") or "").strip() or None for i in range(3)
-        ]
-        if not any(values):
-            continue
-        # Einfachprodukt ohne Varianten-Optionen
-        if values[0] == "Default Title" and values[1] is None and values[2] is None:
-            continue
-
-        names = [
-            option_names[i] if values[i] is not None else None for i in range(3)
-        ]
-        # Ohne Namen (auch nach Forward-Fill) keine Set-Variante speichern
-        if values[0] is not None and not names[0]:
-            continue
-
-        key = (values[0], values[1], values[2])
-        by_handle[handle]["variants"][key] = {
-            "option1_name": names[0],
-            "option1_value": values[0],
-            "option2_name": names[1],
-            "option2_value": values[1],
-            "option3_name": names[2],
-            "option3_value": values[2],
-        }
-
-    # Handles ohne nutzbare Varianten verwerfen
-    usable = {h: data for h, data in by_handle.items() if data["variants"]}
+    try:
+        usable = parse_shopify_catalog_csv(content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not usable:
         raise HTTPException(
             status_code=400,
-            detail="Keine Set-Varianten im Export gefunden (nur Default-Title oder leere Optionen)",
+            detail="Keine Varianten im Export gefunden (nur Default-Title oder leere Optionen)",
         )
 
+    result = _upsert_sets_from_catalog(db, usable, handles=list(usable.keys()))
+    db.commit()
+    first = result["set_ids"][0] if result["set_ids"] else None
+    return ShopifyInventoryImportResult(
+        set_id=first,
+        created_set=result["sets_created"] > 0,
+        variants_upserted=result["variants_upserted"],
+        sets_touched=result["sets_touched"],
+        sets_created=result["sets_created"],
+        message=result["message"],
+    )
+
+
+def _upsert_sets_from_catalog(
+    db: Session,
+    usable: dict[str, dict],
+    *,
+    handles: list[str],
+) -> dict:
     total_upserted = 0
     sets_created = 0
-    first_set_id: int | None = None
-    first_created = False
+    set_ids: list[int] = []
     summaries: list[str] = []
 
-    for handle, data in usable.items():
+    for handle in handles:
+        data = usable.get(handle)
+        if not data:
+            continue
         variants = data["variants"]
         title = data["title"] or handle
         existing = db.scalars(select(ProductSet).where(ProductSet.handle == handle)).first()
@@ -2321,10 +2278,7 @@ def import_shopify_inventory_csv(db: Session, content: str) -> ShopifyInventoryI
         else:
             existing.name = title or existing.name
 
-        if first_set_id is None:
-            first_set_id = existing.id
-            first_created = created
-
+        set_ids.append(existing.id)
         product_set = _load_set(db, existing.id)
         existing_keys = {
             (v.option1_value, v.option2_value, v.option3_value): v for v in product_set.variants
@@ -2338,12 +2292,13 @@ def import_shopify_inventory_csv(db: Session, content: str) -> ShopifyInventoryI
         total_upserted += upserted
         summaries.append(
             f"„{existing.name}“: +{upserted} Varianten ({len(variants)} im File)"
+            + (" [neu]" if created else "")
         )
 
-    db.commit()
-
-    touched = len(usable)
-    if touched == 1:
+    touched = len(set_ids)
+    if touched == 0:
+        message = "Keine Sets angelegt."
+    elif touched == 1:
         message = summaries[0] + "."
     else:
         message = (
@@ -2351,12 +2306,165 @@ def import_shopify_inventory_csv(db: Session, content: str) -> ShopifyInventoryI
             + "; ".join(summaries[:5])
             + (" …" if len(summaries) > 5 else "")
         )
+    return {
+        "sets_created": sets_created,
+        "sets_touched": touched,
+        "variants_upserted": total_upserted,
+        "set_ids": set_ids,
+        "message": message,
+    }
 
-    return ShopifyInventoryImportResult(
-        set_id=first_set_id,
-        created_set=first_created,
-        variants_upserted=total_upserted,
-        sets_touched=touched,
-        sets_created=sets_created,
-        message=message,
+
+def preview_shopify_catalog_csv(db: Session, content: str) -> "ShopifyPreviewResult":
+    from app.models import ShopifyIgnoredHandle
+    from app.schemas import ShopifyHandlePreview, ShopifyPreviewResult
+    from app.shopify_csv import parse_shopify_catalog_csv
+
+    try:
+        usable = parse_shopify_catalog_csv(content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    ignored_rows = db.scalars(select(ShopifyIgnoredHandle)).all()
+    ignored_map = {r.handle: r for r in ignored_rows}
+    existing_sets = {
+        s.handle: s.id for s in db.scalars(select(ProductSet)).all()
+    }
+
+    handles: list[ShopifyHandlePreview] = []
+    for handle, data in sorted(usable.items(), key=lambda x: x[1]["title"].lower()):
+        axes = list(data["option_values"].keys())
+        handles.append(
+            ShopifyHandlePreview(
+                handle=handle,
+                title=data["title"] or handle,
+                variant_count=len(data["variants"]),
+                option_axes=axes,
+                option_values=data["option_values"],
+                ignored=handle in ignored_map,
+                existing_set_id=existing_sets.get(handle),
+            )
+        )
+    return ShopifyPreviewResult(handles=handles, ignored_total=len(ignored_map))
+
+
+def apply_shopify_catalog_csv(db: Session, content: str, payload: "ShopifyApplyRequest") -> "ShopifyApplyResult":
+    from app.models import ShopifyIgnoredHandle
+    from app.schemas import (
+        ShopifyApplyRequest,
+        ShopifyApplyResult,
+        ShopifySeriesJob,
     )
+    from app.shopify_csv import parse_shopify_catalog_csv
+
+    if not isinstance(payload, ShopifyApplyRequest):
+        payload = ShopifyApplyRequest.model_validate(payload)
+
+    try:
+        usable = parse_shopify_catalog_csv(content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    set_handles: list[str] = []
+    ignored_added = 0
+    series_jobs: list[ShopifySeriesJob] = []
+
+    for item in payload.items:
+        handle = item.handle.strip()
+        data = usable.get(handle)
+        if item.action == "skip":
+            continue
+        if item.action == "ignore":
+            title = (data["title"] if data else None) or handle
+            row = db.get(ShopifyIgnoredHandle, handle)
+            if row is None:
+                db.add(ShopifyIgnoredHandle(handle=handle, title=title))
+                ignored_added += 1
+            else:
+                row.title = title
+            continue
+        if data is None:
+            continue
+        if item.action == "set":
+            set_handles.append(handle)
+            # If it was ignored, stay ignored? No — choosing set means un-ignore
+            row = db.get(ShopifyIgnoredHandle, handle)
+            if row is not None:
+                db.delete(row)
+            continue
+        if item.action in ("series_product", "series_material", "on_demand"):
+            kind = "material" if item.action == "series_material" else "product"
+            series_jobs.append(
+                ShopifySeriesJob(
+                    handle=handle,
+                    title=data["title"] or handle,
+                    kind=kind,
+                    on_demand=item.action == "on_demand",
+                    option_axes=list(data["option_values"].keys()),
+                    option_values=data["option_values"],
+                )
+            )
+            row = db.get(ShopifyIgnoredHandle, handle)
+            if row is not None:
+                db.delete(row)
+
+    upsert = {"sets_created": 0, "sets_touched": 0, "variants_upserted": 0, "set_ids": [], "message": ""}
+    if set_handles:
+        upsert = _upsert_sets_from_catalog(db, usable, handles=set_handles)
+
+    db.commit()
+    parts = []
+    if upsert["sets_touched"]:
+        parts.append(upsert["message"])
+    if ignored_added:
+        parts.append(f"{ignored_added} Handle(s) ignoriert")
+    if series_jobs:
+        parts.append(f"{len(series_jobs)} Serie(n)/On-Demand zur Nachbearbeitung")
+    return ShopifyApplyResult(
+        sets_created=upsert["sets_created"],
+        sets_updated=max(0, upsert["sets_touched"] - upsert["sets_created"]),
+        variants_upserted=upsert["variants_upserted"],
+        ignored_added=ignored_added,
+        series_jobs=series_jobs,
+        set_ids=upsert["set_ids"],
+        message="; ".join(parts) if parts else "Keine Änderungen.",
+    )
+
+
+def list_ignored_shopify_handles(db: Session) -> list["ShopifyIgnoredHandleRead"]:
+    from app.models import ShopifyIgnoredHandle
+    from app.schemas import ShopifyIgnoredHandleRead
+
+    rows = db.scalars(select(ShopifyIgnoredHandle).order_by(ShopifyIgnoredHandle.handle)).all()
+    return [
+        ShopifyIgnoredHandleRead(handle=r.handle, title=r.title, ignored_at=r.ignored_at) for r in rows
+    ]
+
+
+def unignore_shopify_handle(db: Session, handle: str) -> None:
+    from app.models import ShopifyIgnoredHandle
+
+    row = db.get(ShopifyIgnoredHandle, handle.strip())
+    if not row:
+        raise HTTPException(status_code=404, detail="Handle nicht auf der Ignorieren-Liste")
+    db.delete(row)
+    db.commit()
+
+
+def bulk_delete_sets(db: Session, payload: "BulkDeleteRequest") -> "BulkDeleteResult":
+    from app.schemas import BulkDeleteRequest, BulkDeleteResult, BulkDeleteSkip
+
+    if not isinstance(payload, BulkDeleteRequest):
+        payload = BulkDeleteRequest.model_validate(payload)
+    deleted: list[int] = []
+    skipped: list[BulkDeleteSkip] = []
+    for sid in payload.ids:
+        product_set = db.get(ProductSet, sid)
+        if product_set is None:
+            skipped.append(BulkDeleteSkip(id=sid, name=str(sid), reason="nicht gefunden"))
+            continue
+        name = product_set.name
+        db.delete(product_set)
+        deleted.append(sid)
+    db.commit()
+    return BulkDeleteResult(deleted_ids=deleted, skipped=skipped)

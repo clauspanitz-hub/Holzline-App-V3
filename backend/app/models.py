@@ -364,3 +364,13 @@ class AuthSession(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     user: Mapped[User] = relationship(back_populates="sessions")
+
+
+class ShopifyIgnoredHandle(Base):
+    """Shopify product handles permanently ignored in the CSV assistant overview."""
+
+    __tablename__ = "shopify_ignored_handles"
+
+    handle: Mapped[str] = mapped_column(String(200), primary_key=True)
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    ignored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)

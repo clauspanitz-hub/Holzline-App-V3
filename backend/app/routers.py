@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -56,7 +56,11 @@ from app.schemas import (
     ProductSetUpdate,
     ProductUpdate,
     SetBomLineCreate,
+    ShopifyApplyRequest,
+    ShopifyApplyResult,
+    ShopifyIgnoredHandleRead,
     ShopifyInventoryImportResult,
+    ShopifyPreviewResult,
     StockAdjustRequest,
     StockDeltaRequest,
     StockMovementRead,
@@ -463,12 +467,62 @@ async def import_shopify_inventory(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ) -> ShopifyInventoryImportResult:
+    """Legacy: legt alle Varianten-Handles als Sets an. Bevorzugt Preview+Apply."""
     raw = await file.read()
     try:
         content = raw.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise HTTPException(status_code=400, detail="CSV muss UTF-8 sein") from exc
     return services.import_shopify_inventory_csv(db, content)
+
+
+@router.post("/sets/import/shopify-preview", response_model=ShopifyPreviewResult)
+async def preview_shopify_catalog(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> ShopifyPreviewResult:
+    raw = await file.read()
+    try:
+        content = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="CSV muss UTF-8 sein") from exc
+    return services.preview_shopify_catalog_csv(db, content)
+
+
+@router.post("/sets/import/shopify-apply", response_model=ShopifyApplyResult)
+async def apply_shopify_catalog(
+    file: UploadFile = File(...),
+    items_json: str = Form(...),
+    db: Session = Depends(get_db),
+) -> ShopifyApplyResult:
+    import json
+
+    raw = await file.read()
+    try:
+        content = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="CSV muss UTF-8 sein") from exc
+    try:
+        items = json.loads(items_json)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="items_json ungültig") from exc
+    payload = ShopifyApplyRequest.model_validate({"items": items})
+    return services.apply_shopify_catalog_csv(db, content, payload)
+
+
+@router.get("/sets/ignored-handles", response_model=list[ShopifyIgnoredHandleRead])
+def list_ignored_handles(db: Session = Depends(get_db)) -> list[ShopifyIgnoredHandleRead]:
+    return services.list_ignored_shopify_handles(db)
+
+
+@router.delete("/sets/ignored-handles/{handle}", status_code=204)
+def unignore_handle(handle: str, db: Session = Depends(get_db)) -> None:
+    services.unignore_shopify_handle(db, handle)
+
+
+@router.post("/sets/bulk-delete", response_model=BulkDeleteResult)
+def bulk_delete_sets(payload: BulkDeleteRequest, db: Session = Depends(get_db)) -> BulkDeleteResult:
+    return services.bulk_delete_sets(db, payload)
 
 
 def _user_read(user: User) -> UserRead:

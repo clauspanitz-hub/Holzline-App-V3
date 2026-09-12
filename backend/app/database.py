@@ -178,6 +178,7 @@ def init_db() -> None:
         migrate_material_family(engine)
         migrate_overview_ignored(engine)
         migrate_product_bom_components(engine)
+        migrate_shopify_ignored_handles(engine)
         seed_admin_user(db)
         from app.services import backfill_incomplete_tags, ensure_system_incomplete_tags
 
@@ -320,6 +321,25 @@ def migrate_overview_ignored(engine) -> None:
                 conn.execute(
                     text(f"ALTER TABLE {table} ADD COLUMN overview_ignored BOOLEAN NOT NULL DEFAULT 0")
                 )
+
+
+def migrate_shopify_ignored_handles(engine) -> None:
+    """Table for Shopify handles hidden in the CSV assistant."""
+    insp = inspect(engine)
+    if "shopify_ignored_handles" in insp.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE shopify_ignored_handles (
+                    handle VARCHAR(200) PRIMARY KEY,
+                    title VARCHAR(300),
+                    ignored_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
 
 
 def migrate_product_bom_components(engine) -> None:

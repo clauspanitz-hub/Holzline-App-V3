@@ -185,6 +185,21 @@ export const api = {
       form.append('file', file)
       return request('/api/sets/import/shopify-inventory', { method: 'POST', body: form })
     },
+    previewShopify: (file) => {
+      const form = new FormData()
+      form.append('file', file)
+      return request('/api/sets/import/shopify-preview', { method: 'POST', body: form })
+    },
+    applyShopify: (file, items) => {
+      const form = new FormData()
+      form.append('file', file)
+      form.append('items_json', JSON.stringify(items))
+      return request('/api/sets/import/shopify-apply', { method: 'POST', body: form })
+    },
+    listIgnoredHandles: () => request('/api/sets/ignored-handles'),
+    unignoreHandle: (handle) =>
+      request(`/api/sets/ignored-handles/${encodeURIComponent(handle)}`, { method: 'DELETE' }),
+    bulkDelete: (body) => request('/api/sets/bulk-delete', { method: 'POST', body: JSON.stringify(body) }),
   },
 }
 

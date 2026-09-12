@@ -65,6 +65,12 @@
   let movementsModal = $state(null) // { title, rows }
   let setModal = $state(null)
   let setStep = $state(1) // 1 Überblick, 2 Zuordnen, 3 Baubarkeit
+  let shopifyAssistant = $state(null) // { file, preview, actions, showIgnored }
+  let shopifySeriesQueue = $state([])
+  let ignoredHandlesModal = $state(false)
+  let ignoredHandles = $state([])
+  let setCleanupModal = $state(false)
+  let setCleanupIds = $state([])
   let showMaterialTags = $state(false)
   let showProductTags = $state(false)
 
@@ -2026,18 +2032,120 @@
     if (!file) return
     saving = true
     try {
-      const result = await api.sets.importShopify(file)
-      await refresh()
-      showFlash('ok', result.message)
-      if ((result.sets_touched ?? 1) === 1 && result.set_id) {
-        const created = sets.find((s) => s.id === result.set_id)
-        if (created) await openSet(created, 2)
+      const preview = await api.sets.previewShopify(file)
+      const actions = {}
+      for (const h of preview.handles) {
+        if (h.ignored) actions[h.handle] = 'ignore'
+        else if (h.existing_set_id) actions[h.handle] = 'set'
+        else if ((h.option_axes?.length || 0) >= 2) actions[h.handle] = 'skip'
+        else actions[h.handle] = 'skip'
+      }
+      shopifyAssistant = {
+        file,
+        preview,
+        actions,
+        showIgnored: false,
       }
     } catch (error) {
       showFlash('error', error.message)
     } finally {
       saving = false
       event.target.value = ''
+    }
+  }
+
+  function shopifyAssistantRows() {
+    if (!shopifyAssistant?.preview?.handles) return []
+    const rows = shopifyAssistant.preview.handles
+    if (shopifyAssistant.showIgnored) return rows
+    return rows.filter((h) => !h.ignored)
+  }
+
+  async function submitShopifyAssistant() {
+    if (!shopifyAssistant?.file) return
+    const items = Object.entries(shopifyAssistant.actions)
+      .filter(([, action]) => action && action !== 'skip')
+      .map(([handle, action]) => ({ handle, action }))
+    if (!items.length) {
+      showFlash('error', 'Mindestens eine Aktion wählen (nicht nur „überspringen“).')
+      return
+    }
+    saving = true
+    try {
+      const result = await api.sets.applyShopify(shopifyAssistant.file, items)
+      shopifyAssistant = null
+      await refresh()
+      showFlash('ok', result.message)
+      if (result.series_jobs?.length) {
+        shopifySeriesQueue = [...result.series_jobs]
+        showFlash(
+          'ok',
+          `${result.series_jobs.length} Serie(n)/On-Demand vorgemerkt — als Nächstes Serienanlage (Farben aus Shopify).`,
+        )
+      }
+      if (result.set_ids?.length === 1) {
+        const created = sets.find((s) => s.id === result.set_ids[0])
+        if (created) await openSet(created, 2)
+      }
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function openIgnoredHandles() {
+    try {
+      ignoredHandles = await api.sets.listIgnoredHandles()
+      ignoredHandlesModal = true
+    } catch (error) {
+      showFlash('error', error.message)
+    }
+  }
+
+  async function restoreIgnoredHandle(handle) {
+    try {
+      await api.sets.unignoreHandle(handle)
+      ignoredHandles = ignoredHandles.filter((h) => h.handle !== handle)
+      showFlash('ok', `„${handle}“ wieder in der Übersicht.`)
+    } catch (error) {
+      showFlash('error', error.message)
+    }
+  }
+
+  function openSetCleanup() {
+    // Vorauswahl: alles außer typischen Geburtstagssets
+    setCleanupIds = sets
+      .filter((s) => !String(s.handle || '').includes('geburtstagsset'))
+      .map((s) => s.id)
+    setCleanupModal = true
+  }
+
+  function toggleSetCleanupId(id) {
+    if (setCleanupIds.includes(id)) setCleanupIds = setCleanupIds.filter((x) => x !== id)
+    else setCleanupIds = [...setCleanupIds, id]
+  }
+
+  async function submitSetCleanup() {
+    if (!setCleanupIds.length) {
+      showFlash('error', 'Keine Sets ausgewählt.')
+      return
+    }
+    if (!confirm(`${setCleanupIds.length} Set(s) unwiderruflich löschen? Lagerprodukte bleiben erhalten.`)) return
+    saving = true
+    try {
+      const result = await api.sets.bulkDelete({ ids: setCleanupIds })
+      setCleanupModal = false
+      await refresh()
+      showFlash(
+        'ok',
+        `${result.deleted_ids.length} Set(s) gelöscht` +
+          (result.skipped?.length ? `, ${result.skipped.length} übersprungen` : ''),
+      )
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
     }
   }
 
@@ -3202,18 +3310,22 @@
     <section class="panel">
       <div class="panel-header">
         <h2>Shopify-Sets</h2>
-        <label class="btn" style="display:inline-flex;align-items:center;gap:.35rem">
-          1. Shopify-CSV importieren (Produkte-Export oder Inventory)
-          <input type="file" accept=".csv,text/csv" hidden onchange={onImportFile} disabled={saving} />
-        </label>
+        <div class="panel-actions" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center">
+          <label class="btn" style="display:inline-flex;align-items:center;gap:.35rem">
+            Shopify-CSV Assistent
+            <input type="file" accept=".csv,text/csv" hidden onchange={onImportFile} disabled={saving} />
+          </label>
+          <button type="button" class="btn secondary" onclick={openIgnoredHandles}>Ignorieren-Liste</button>
+          <button type="button" class="btn secondary" onclick={openSetCleanup} disabled={!sets.length}>Sets aufräumen</button>
+        </div>
       </div>
 
       <div class="steps-intro">
-        <p><strong>Was ist ein Set?</strong> Nur in Shopify verkauft — bei euch liegen die Einzelteile (Produkte/Materialien). Hier siehst du, welche Farbkombinationen aus dem Lager noch baubar sind.</p>
+        <p><strong>Was ist ein Set?</strong> Nur Zusammenstellungen aus <em>mehreren</em> Lagerprodukten (z. B. Geburtstagsset). Einfache Farbvarianten gehören in die Produkt-/Material-Serienanlage — der CSV-Assistent fragt das nach dem Upload.</p>
         <ol>
-          <li>CSV aus Shopify importieren (Varianten laden)</li>
-          <li>Jede Option (z. B. Ringfarbe „Salbeigrün“) einem Lagerartikel zuordnen</li>
-          <li>Zuordnung anwenden → Baubarkeit prüfen</li>
+          <li>Produkte-CSV laden → Handles einordnen (Set / Serie / On-Demand / ignorieren)</li>
+          <li>Bei Sets: Optionen zuordnen und anwenden</li>
+          <li>Baubarkeit prüfen</li>
         </ol>
       </div>
 
@@ -4462,6 +4574,128 @@
           {/if}
         </div>
       </form>
+    </div>
+  </div>
+{/if}
+
+{#if shopifyAssistant}
+  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (shopifyAssistant = null)}>
+    <div class="modal modal-bulk" role="dialog" aria-modal="true" style="max-width:52rem">
+      <h3>Shopify-CSV Assistent</h3>
+      <p class="empty" style="margin-top:0">
+        Pro Artikel wählen: Set (Zusammenstellung), Serie, On-Demand oder ignorieren.
+        Nichts wird still angelegt — erst „Übernehmen“.
+      </p>
+      <label class="bulk-inline-check" style="margin-bottom:.75rem">
+        <input type="checkbox" bind:checked={shopifyAssistant.showIgnored} />
+        Ignorierte Handles in der Liste zeigen
+      </label>
+      <div class="table-wrap" style="max-height:50vh;overflow:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>Shopify-Artikel</th>
+              <th>Varianten</th>
+              <th>Optionen</th>
+              <th>Aktion</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each shopifyAssistantRows() as h}
+              <tr>
+                <td>
+                  <strong>{h.title}</strong>
+                  <div class="empty">{h.handle}</div>
+                  {#if h.existing_set_id}<span class="empty">bereits als Set</span>{/if}
+                  {#if h.ignored}<span class="empty">ignoriert</span>{/if}
+                </td>
+                <td>{h.variant_count}</td>
+                <td class="empty">{(h.option_axes || []).join(' · ') || '—'}</td>
+                <td>
+                  <select
+                    value={shopifyAssistant.actions[h.handle] || 'skip'}
+                    onchange={(e) => {
+                      shopifyAssistant.actions = {
+                        ...shopifyAssistant.actions,
+                        [h.handle]: e.currentTarget.value,
+                      }
+                    }}
+                  >
+                    <option value="skip">überspringen</option>
+                    <option value="set">Set</option>
+                    <option value="series_product">Serie Produkt</option>
+                    <option value="series_material">Serie Material</option>
+                    <option value="on_demand">On-Demand</option>
+                    <option value="ignore">ignorieren</option>
+                  </select>
+                </td>
+              </tr>
+            {:else}
+              <tr><td colspan="4" class="empty">Keine Einträge (Filter?). Ignorierte einblenden oder andere CSV.</td></tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" onclick={() => (shopifyAssistant = null)}>Abbrechen</button>
+        <button type="button" class="btn" disabled={saving} onclick={submitShopifyAssistant}>Übernehmen</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if ignoredHandlesModal}
+  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (ignoredHandlesModal = false)}>
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Ignorieren-Liste</h3>
+      <p class="empty" style="margin-top:0">Dauerhaft ausgeblendet im Assistenten, bis wiederhergestellt.</p>
+      <ul style="margin:0;padding-left:1.1rem;max-height:50vh;overflow:auto">
+        {#each ignoredHandles as h}
+          <li style="margin:.4rem 0;display:flex;gap:.5rem;align-items:center;justify-content:space-between">
+            <span>{h.title || h.handle} <span class="empty">({h.handle})</span></span>
+            <button type="button" class="btn secondary" onclick={() => restoreIgnoredHandle(h.handle)}>Wiederherstellen</button>
+          </li>
+        {:else}
+          <li class="empty">Keine ignorierten Handles.</li>
+        {/each}
+      </ul>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" onclick={() => (ignoredHandlesModal = false)}>Schließen</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if setCleanupModal}
+  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (setCleanupModal = false)}>
+    <div class="modal modal-bulk" role="dialog" aria-modal="true">
+      <h3>Sets aufräumen</h3>
+      <p class="empty" style="margin-top:0">
+        Falsch importierte Varianten-Artikel entfernen. Geburtstagssets behalten — Häkchen bei Löschen-Kandidaten.
+      </p>
+      <div style="margin-bottom:.5rem;display:flex;gap:.5rem">
+        <button type="button" class="btn secondary" onclick={() => (setCleanupIds = sets.map((s) => s.id))}>Alle</button>
+        <button type="button" class="btn secondary" onclick={() => (setCleanupIds = [])}>Keine</button>
+      </div>
+      <fieldset class="tag-picker" style="max-height:45vh;overflow:auto">
+        {#each sets as s}
+          <label class="tag-check">
+            <input
+              type="checkbox"
+              checked={setCleanupIds.includes(s.id)}
+              onchange={() => toggleSetCleanupId(s.id)}
+            />
+            {s.name}
+            <span class="empty">({s.variant_count} Var.)</span>
+          </label>
+        {/each}
+      </fieldset>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" onclick={() => (setCleanupModal = false)}>Abbrechen</button>
+        <button type="button" class="btn danger" disabled={saving || !setCleanupIds.length} onclick={submitSetCleanup}>
+          {setCleanupIds.length} löschen
+        </button>
+      </div>
     </div>
   </div>
 {/if}

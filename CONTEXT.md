@@ -21,8 +21,8 @@ Ein lagergeführtes Einzelteil der Manufaktur (z. B. Ring in einer Farbe, Kerze,
 _Avoid_: Fertigerzeugnis als Shopify-Set, Artikel (außer als SKU-Synonym), Ware, Variante (als Lagerobjekt)
 
 **Set**:
-Eine nur in Shopify (o. ä.) verkaufte Zusammenstellung aus Produkten; hat selbst keinen Lagerbestand und wird bei Bestellung aus vorhandenen Produkten zusammengestellt.
-_Avoid_: Produkt (für Sets), Bundle als Lagerartikel, fertiges Set auf Lager
+Eine nur in Shopify (o. ä.) verkaufte **Zusammenstellung aus mehreren Lagerprodukten**; hat selbst keinen Lagerbestand und wird bei Bestellung daraus zusammengestellt. Nicht jedes Shopify-Produkt mit Varianten (Farbe/Motiv) ist ein Set.
+_Avoid_: Produkt (für Sets), Bundle als Lagerartikel, fertiges Set auf Lager; jedes variantenfähige Shopify-Produkt automatisch als Set
 
 **Variante**:
 Eine konkrete Set-Konfiguration in Shopify (z. B. Ringfarbe × Kerzenfarbe × Zahlenfarbe), abbildbar als Stückliste aus Produkten.
@@ -103,6 +103,14 @@ _Avoid_: Gemeinsame Familien-Liste mit Produkten; Familie = Tag; nur Gruppierung
 **Vorlage** (Produkt oder Material):
 Ein Artikel, der als Muster für die Serienanlage dient, markiert durch ein explizites Flag „Ist Vorlage“. Beim **Produkt**: Stückliste und Stammdaten (Tags, Mindestbestand). Beim **Material**: Stammdaten ohne Stückliste (Einheit, Einkaufsmenge/-preis, Tags, Mindestbestand). Die Serienanlage kopiert davon und setzt je gewählter Farbe einen neuen Artikel. Das Flag ist nur im **Bearbeiten**-Dialog setzbar, nicht beim Neu-Anlegen. Im Material-Serien-Dropdown: alle Material-Vorlagen wählbar, Vorlagen des aktuellen Medium-Filters zuerst.
 _Avoid_: Template als UI-Fremdwort; nur „ohne Farbe“ als implizite Vorlage; Vorlage-Schalter im Neu-Anlegen-Dialog; Material-Vorlage mit Stückliste; Vorlagen-Dropdown nur Medium-gefiltert ohne andere Medien
+
+**On-Demand-Produkt**:
+Ein **Produkt** mit Stückliste, das vor allem auf Bestellung gefertigt wird; Fertigbestand ist oft 0. „Machbar“ richtet sich nach der **Material-Baubarkeit** über die Stückliste (nicht nach Fertigware auf Lager). Im Shopify-CSV-Assistenten als eigene Markierung wählbar.
+_Avoid_: Als Set modellieren nur weil Shopify es verkauft; Machbarkeit nur über Fertigbestand
+
+**Shopify-CSV-Assistent**:
+Einlesen eines Shopify Produkte-Exports. Pro Handle: **Set**, **Produkt-/Material-Serie**, **On-Demand** oder **ignorieren** — kein stilles Anlegen. Ignorierte Handles → **Ignorieren-Liste**; in der normalen Übersicht ausgeblendet, bis Ignorieren aufgehoben; von der Liste aus später bearbeitbar. Ignorieren ist **dauerhaft pro Handle** (überlebt erneute CSV-Uploads), bis manuell zurückgeholt. **Set:** Options-Zuordnung. **Serie / On-Demand:** Farb-Match + Serienanlage (On-Demand mit Material-Baubarkeit, Anzeige in Produktliste und eigener Übersicht). Bei mehreren Options-Achsen ohne Set: eine Achse = Variante, übrige in den **Basisnamen**. Falsch importierte Sets: Aufräumen per Auswahlliste.
+_Avoid_: Jedes Varianten-Produkt automatisch als Set; stilles Anlegen; Ignorieren = endgültig löschen ohne Wiederaufnahme; Ignorieren nur sitzungsweit; Inventar-Export als einzige Quelle
 
 **Serienanlage** (aus Farben):
 Auf Knopfdruck Materialien oder Produkte aus gewählten Katalogfarben erzeugen (Auswahl + gemeinsame Defaults). Name = **Basis + Farbe** (Basis im Dialog). Mit **Vorlage**: Basis aus Vorlagenname ohne Farbsuffix vorbelegen (Farbe am Namensende abschneiden), Stammdaten/Tags/Stückliste wie bisher. Ohne Vorlage: Basis manuell. „Schon vorhanden“ gilt für den konkreten Namen Basis+Farbe, nicht für die Farbe allein. Material Einheit/Einkauf: Dialog oder Vorlage. Tags: Vorlage plus Dialog (Merge). Manuell angelegte Artikel frei benennbar. Katalog-Umbenennung (Medium/Farbe) benennt Artikel um, die noch den alten Medium+Farbe-Seriennamen tragen.

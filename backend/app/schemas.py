@@ -435,6 +435,60 @@ class ShopifyInventoryImportResult(BaseModel):
     message: str
 
 
+class ShopifyHandlePreview(BaseModel):
+    handle: str
+    title: str
+    variant_count: int
+    option_axes: list[str] = []
+    option_values: dict[str, list[str]] = {}
+    ignored: bool = False
+    existing_set_id: int | None = None
+
+
+class ShopifyPreviewResult(BaseModel):
+    handles: list[ShopifyHandlePreview]
+    ignored_total: int = 0
+
+
+class ShopifyApplyItem(BaseModel):
+    handle: str
+    action: Literal["set", "ignore", "series_product", "series_material", "on_demand", "skip"]
+
+
+class ShopifyApplyRequest(BaseModel):
+    items: list[ShopifyApplyItem] = Field(min_length=1)
+
+
+class ShopifySeriesJob(BaseModel):
+    handle: str
+    title: str
+    kind: Literal["product", "material"]
+    on_demand: bool = False
+    option_axes: list[str] = []
+    option_values: dict[str, list[str]] = {}
+
+
+class ShopifyApplyResult(BaseModel):
+    sets_created: int = 0
+    sets_updated: int = 0
+    variants_upserted: int = 0
+    ignored_added: int = 0
+    series_jobs: list[ShopifySeriesJob] = []
+    set_ids: list[int] = []
+    message: str
+
+
+class ShopifyIgnoredHandleRead(BaseModel):
+    handle: str
+    title: str | None = None
+    ignored_at: datetime | None = None
+
+
+class ShopifyIgnoredHandlesPut(BaseModel):
+    handles: list[str] = Field(min_length=1)
+    titles: dict[str, str] = {}
+
+
 class BackupImportRequest(BaseModel):
     """Backup-Import per JSON-Body: vollständiges Backup-Objekt + Modus."""
 
