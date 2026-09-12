@@ -427,9 +427,11 @@ class ProductSetRead(BaseModel):
 
 
 class ShopifyInventoryImportResult(BaseModel):
-    set_id: int
-    created_set: bool
-    variants_upserted: int
+    set_id: int | None = None
+    created_set: bool = False
+    variants_upserted: int = 0
+    sets_touched: int = 0
+    sets_created: int = 0
     message: str
 
 

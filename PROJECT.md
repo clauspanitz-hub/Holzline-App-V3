@@ -31,7 +31,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **stock_movements:** Historie für Umbuchungen mit virtuellen Standorten und für Umwandlungen
 - **Bei Mitarbeitern:** Überblick Quellprodukte mit Bestand an MA1/MA2
 - **sets:** Shopify-Set ohne eigenen Bestand; Flag `count_materials_in_buildability`
-- **set_variants:** Option1–3 Name/Value (Import aus Shopify)
+- **set_variants:** Option1–3 Name/Value (Import aus Shopify Produkte- oder Inventory-CSV; Multi-Handle, Option-Namen Forward-Fill)
 - **set_bom_lines:** Varianten-Stückliste → Material **oder** Produkt + Menge
 - **option_mappings:** Regel Option+Wert → Material/Produkt+Menge; Overrides je Variante möglich
 - **Baubare Menge:** `min(floor(sum_stock/qty))` über relevante Zeilen; Summe über Standorte **ohne Ausschuss**

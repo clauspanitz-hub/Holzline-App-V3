@@ -2220,63 +2220,143 @@ def delete_variant_bom_line(db: Session, set_id: int, variant_id: int, line_id: 
 
 
 def import_shopify_inventory_csv(db: Session, content: str) -> ShopifyInventoryImportResult:
+    """Import Sets aus Shopify Inventory- oder Produkte-CSV.
+
+    - Mehrere Handles → mehrere Sets
+    - Option-Namen und Title werden vorwärts übernommen (Shopify Produkte-Export
+      schreibt sie oft nur in die erste Zeile eines Produkts)
+    - Reine „Default Title“-Artikel ohne echte Optionen werden übersprungen
+    """
     import csv
     import io
 
     reader = csv.DictReader(io.StringIO(content))
     if not reader.fieldnames or "Handle" not in reader.fieldnames:
-        raise HTTPException(status_code=400, detail="Ungültiger Shopify Inventory-Export")
+        raise HTTPException(
+            status_code=400,
+            detail="Ungültiger Shopify-Export (Spalte „Handle“ fehlt)",
+        )
 
-    variants: dict[tuple, dict] = {}
-    title = None
-    handle = None
+    # handle -> { title, variants: {(o1,o2,o3) -> option fields} }
+    by_handle: dict[str, dict] = {}
+    current_handle: str | None = None
+    option_names: list[str | None] = [None, None, None]
+    current_title: str | None = None
+
     for row in reader:
         handle = (row.get("Handle") or "").strip()
         if not handle:
             continue
-        title = (row.get("Title") or handle).strip()
-        key = (
-            (row.get("Option1 Value") or "").strip() or None,
-            (row.get("Option2 Value") or "").strip() or None,
-            (row.get("Option3 Value") or "").strip() or None,
-        )
-        variants[key] = {
-            "option1_name": (row.get("Option1 Name") or "").strip() or None,
-            "option1_value": key[0],
-            "option2_name": (row.get("Option2 Name") or "").strip() or None,
-            "option2_value": key[1],
-            "option3_name": (row.get("Option3 Name") or "").strip() or None,
-            "option3_value": key[2],
+        if handle != current_handle:
+            current_handle = handle
+            option_names = [None, None, None]
+            current_title = None
+            by_handle.setdefault(handle, {"title": handle, "variants": {}})
+
+        title_cell = (row.get("Title") or "").strip()
+        if title_cell:
+            current_title = title_cell
+            by_handle[handle]["title"] = current_title
+
+        for i in range(3):
+            name_cell = (row.get(f"Option{i + 1} Name") or "").strip()
+            if name_cell:
+                option_names[i] = name_cell
+
+        values = [
+            (row.get(f"Option{i + 1} Value") or "").strip() or None for i in range(3)
+        ]
+        if not any(values):
+            continue
+        # Einfachprodukt ohne Varianten-Optionen
+        if values[0] == "Default Title" and values[1] is None and values[2] is None:
+            continue
+
+        names = [
+            option_names[i] if values[i] is not None else None for i in range(3)
+        ]
+        # Ohne Namen (auch nach Forward-Fill) keine Set-Variante speichern
+        if values[0] is not None and not names[0]:
+            continue
+
+        key = (values[0], values[1], values[2])
+        by_handle[handle]["variants"][key] = {
+            "option1_name": names[0],
+            "option1_value": values[0],
+            "option2_name": names[1],
+            "option2_value": values[1],
+            "option3_name": names[2],
+            "option3_value": values[2],
         }
 
-    if not handle or not variants:
-        raise HTTPException(status_code=400, detail="Keine Varianten im Export gefunden")
+    # Handles ohne nutzbare Varianten verwerfen
+    usable = {h: data for h, data in by_handle.items() if data["variants"]}
+    if not usable:
+        raise HTTPException(
+            status_code=400,
+            detail="Keine Set-Varianten im Export gefunden (nur Default-Title oder leere Optionen)",
+        )
 
-    existing = db.scalars(select(ProductSet).where(ProductSet.handle == handle)).first()
-    created = False
-    if not existing:
-        existing = ProductSet(name=title or handle, handle=handle, count_materials_in_buildability=True)
-        db.add(existing)
-        db.flush()
-        created = True
-    else:
-        existing.name = title or existing.name
+    total_upserted = 0
+    sets_created = 0
+    first_set_id: int | None = None
+    first_created = False
+    summaries: list[str] = []
 
-    product_set = _load_set(db, existing.id)
-    existing_keys = {
-        (v.option1_value, v.option2_value, v.option3_value): v for v in product_set.variants
-    }
-    upserted = 0
-    for key, data in variants.items():
-        if key in existing_keys:
-            continue
-        db.add(SetVariant(set_id=existing.id, **data))
-        upserted += 1
+    for handle, data in usable.items():
+        variants = data["variants"]
+        title = data["title"] or handle
+        existing = db.scalars(select(ProductSet).where(ProductSet.handle == handle)).first()
+        created = False
+        if not existing:
+            existing = ProductSet(
+                name=title,
+                handle=handle,
+                count_materials_in_buildability=True,
+            )
+            db.add(existing)
+            db.flush()
+            created = True
+            sets_created += 1
+        else:
+            existing.name = title or existing.name
+
+        if first_set_id is None:
+            first_set_id = existing.id
+            first_created = created
+
+        product_set = _load_set(db, existing.id)
+        existing_keys = {
+            (v.option1_value, v.option2_value, v.option3_value): v for v in product_set.variants
+        }
+        upserted = 0
+        for key, variant_data in variants.items():
+            if key in existing_keys:
+                continue
+            db.add(SetVariant(set_id=existing.id, **variant_data))
+            upserted += 1
+        total_upserted += upserted
+        summaries.append(
+            f"„{existing.name}“: +{upserted} Varianten ({len(variants)} im File)"
+        )
+
     db.commit()
 
+    touched = len(usable)
+    if touched == 1:
+        message = summaries[0] + "."
+    else:
+        message = (
+            f"{touched} Sets ({sets_created} neu), {total_upserted} neue Varianten. "
+            + "; ".join(summaries[:5])
+            + (" …" if len(summaries) > 5 else "")
+        )
+
     return ShopifyInventoryImportResult(
-        set_id=existing.id,
-        created_set=created,
-        variants_upserted=upserted,
-        message=f"Set „{existing.name}“: {upserted} neue Varianten importiert ({len(variants)} gesamt im File).",
+        set_id=first_set_id,
+        created_set=first_created,
+        variants_upserted=total_upserted,
+        sets_touched=touched,
+        sets_created=sets_created,
+        message=message,
     )

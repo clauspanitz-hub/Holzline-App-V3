@@ -2029,8 +2029,10 @@
       const result = await api.sets.importShopify(file)
       await refresh()
       showFlash('ok', result.message)
-      const created = sets.find((s) => s.id === result.set_id)
-      if (created) await openSet(created, 2)
+      if ((result.sets_touched ?? 1) === 1 && result.set_id) {
+        const created = sets.find((s) => s.id === result.set_id)
+        if (created) await openSet(created, 2)
+      }
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -3201,7 +3203,7 @@
       <div class="panel-header">
         <h2>Shopify-Sets</h2>
         <label class="btn" style="display:inline-flex;align-items:center;gap:.35rem">
-          1. Inventory-CSV importieren
+          1. Shopify-CSV importieren (Produkte-Export oder Inventory)
           <input type="file" accept=".csv,text/csv" hidden onchange={onImportFile} disabled={saving} />
         </label>
       </div>
@@ -3252,7 +3254,7 @@
                 <td><button class="btn secondary" onclick={() => openSet(setItem)}>Einrichten</button></td>
               </tr>
             {:else}
-              <tr><td colspan="4" class="empty">{listUi.sets.q ? 'Keine Treffer.' : 'Noch kein Set — oben die Shopify-Inventory-CSV wählen (z. B. inventory_export.csv).'}</td></tr>
+              <tr><td colspan="4" class="empty">{listUi.sets.q ? 'Keine Treffer.' : 'Noch kein Set — oben Shopify Produkte- oder Inventory-CSV wählen.'}</td></tr>
             {/each}
           </tbody>
         </table>
@@ -3268,7 +3270,7 @@
             <button class="btn secondary" onclick={() => openSet(setItem)}>Einrichten</button>
           </article>
         {:else}
-          <p class="empty">{listUi.sets.q ? 'Keine Treffer.' : 'Noch kein Set — Inventory-CSV importieren.'}</p>
+          <p class="empty">{listUi.sets.q ? 'Keine Treffer.' : 'Noch kein Set — Shopify-CSV importieren.'}</p>
         {/each}
       </div>
     </section>
