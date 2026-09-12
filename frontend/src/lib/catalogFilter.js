@@ -10,6 +10,35 @@ export function emptyCatalogFilter() {
   }
 }
 
+export function namesMatch(a, b) {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
+}
+
+export function familyMatchingMedium(mediumName, families = []) {
+  return families.find((f) => namesMatch(f, mediumName)) || null
+}
+
+export function tagMatchingMedium(mediumName, tags = []) {
+  return tags.find((t) => namesMatch(t.name, mediumName)) || null
+}
+
+/** Familie und Tag gleichen Namens mit Medium an-/abschalten. */
+export function applyMediumCompanion(filter, medium, { families = [], tags = [], on }) {
+  if (!medium) return filter
+  const family = familyMatchingMedium(medium.name, families)
+  const tag = tagMatchingMedium(medium.name, tags)
+  let nextFamilies = [...(filter.families || [])]
+  let nextTags = [...(filter.tagIds || [])]
+  if (on) {
+    if (family && !nextFamilies.some((f) => namesMatch(f, family))) nextFamilies.push(family)
+    if (tag && !nextTags.includes(tag.id)) nextTags.push(tag.id)
+  } else {
+    if (family) nextFamilies = nextFamilies.filter((f) => !namesMatch(f, family))
+    if (tag) nextTags = nextTags.filter((id) => Number(id) !== Number(tag.id))
+  }
+  return { ...filter, families: nextFamilies, tagIds: nextTags }
+}
+
 export function catalogFilterActive(filter) {
   if (!filter) return false
   return (

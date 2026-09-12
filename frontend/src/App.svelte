@@ -34,8 +34,8 @@
   let overviewCriticalOpen = $state(false)
   let overviewIncompleteOpen = $state(false)
   let overviewIgnoredOpen = $state(false)
-  let overviewOrdersOpen = $state(false)
-  let overviewTodosOpen = $state(false)
+  let overviewOrdersOpen = $state(true)
+  let overviewTodosOpen = $state(true)
   let shippedOrdersOpen = $state(false)
   let colorSuggestions = $state([])
   let loading = $state(true)
@@ -1462,8 +1462,8 @@
 
   const displayedOverviewMaterials = $derived.by(() => {
     return prepareRows(
-      applyCatalogFilter(criticalMaterials, catalogFilter, colors),
-      { ...listUi.overviewMaterials, q: catalogFilter.q },
+      criticalMaterials,
+      listUi.overviewMaterials,
       (m) => stockRowSearchText(m, materialLocations),
       stockSortGetter(listUi.overviewMaterials.sortKey),
     )
@@ -1471,8 +1471,8 @@
   const overviewMaterialGroups = $derived(groupProductsByFamily(displayedOverviewMaterials))
   const displayedOverviewProducts = $derived(
     prepareRows(
-      applyCatalogFilter(criticalProducts, catalogFilter, colors),
-      { ...listUi.overviewProducts, q: catalogFilter.q },
+      criticalProducts,
+      listUi.overviewProducts,
       (p) => stockRowSearchText(p, orderedLocations),
       stockSortGetter(listUi.overviewProducts.sortKey),
     ),
@@ -1503,16 +1503,16 @@
   )
   const displayedIncompleteProducts = $derived(
     prepareRows(
-      applyCatalogFilter(incompleteProducts, catalogFilter, colors),
-      { ...listUi.overviewProducts, q: catalogFilter.q },
+      incompleteProducts,
+      { ...listUi.overviewProducts, q: '' },
       (p) => stockRowSearchText(p, orderedLocations),
       stockSortGetter('name'),
     ),
   )
   const displayedIncompleteMaterials = $derived(
     prepareRows(
-      applyCatalogFilter(incompleteMaterials, catalogFilter, colors),
-      { ...listUi.overviewMaterials, q: catalogFilter.q },
+      incompleteMaterials,
+      { ...listUi.overviewMaterials, q: '' },
       (m) => stockRowSearchText(m, materialLocations),
       stockSortGetter('name'),
     ),
@@ -2896,7 +2896,7 @@
           </button>
         {/if}
       </nav>
-      {#if authUser.role === 'admin' && (tab === 'overview' || tab === 'materials' || tab === 'products')}
+      {#if authUser.role === 'admin' && (tab === 'materials' || tab === 'products')}
         <FilterBar
           {media}
           {colors}
@@ -3116,37 +3116,50 @@
       </div>
     </section>
   {:else if tab === 'overview'}
-    <section class="panel">
+    {#if negativeMaterials.length || negativeProducts.length}
+      <div class="flash warn">
+        Negativbestand vorhanden — Details in den Listen prüfen.
+      </div>
+    {/if}
+
+    <section class="panel" class:collapsed={!overviewOrdersOpen}>
       <div class="panel-header">
-        <h2>Übersicht</h2>
+        <h2>
+          <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewOrdersOpen = !overviewOrdersOpen)}>
+            {overviewOrdersOpen ? '▼' : '▶'} Aktuelle Bestellungen
+            <span class="empty">({currentOrders.length})</span>
+          </button>
+        </h2>
         <button class="btn secondary" onclick={refresh}>Aktualisieren</button>
       </div>
-      {#if negativeMaterials.length || negativeProducts.length}
-        <div class="flash warn">
-          Negativbestand vorhanden — Details in den Listen prüfen.
-        </div>
-      {/if}
-
-      <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewOrdersOpen = !overviewOrdersOpen)}>
-        {overviewOrdersOpen ? '▼' : '▶'} Aktuelle Bestellungen
-        <span class="empty">({currentOrders.length})</span>
-      </button>
       {#if overviewOrdersOpen}
         {@render ordersMarkup(currentOrders, 'Keine aktuellen Bestellungen.')}
       {/if}
+    </section>
 
-      <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewTodosOpen = !overviewTodosOpen)}>
-        {overviewTodosOpen ? '▼' : '▶'} Offene Todos aus Bestellungen
-        <span class="empty">({overviewOpenTodos.length})</span>
-      </button>
+    <section class="panel" class:collapsed={!overviewTodosOpen}>
+      <div class="panel-header">
+        <h2>
+          <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewTodosOpen = !overviewTodosOpen)}>
+            {overviewTodosOpen ? '▼' : '▶'} Offene Todos aus Bestellungen
+            <span class="empty">({overviewOpenTodos.length})</span>
+          </button>
+        </h2>
+      </div>
       {#if overviewTodosOpen}
         {@render todosMarkup(overviewOpenTodos, 'Keine offenen Werkstatt-Todos aus Bestellungen.')}
       {/if}
+    </section>
 
-      <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewCriticalOpen = !overviewCriticalOpen)}>
-        {overviewCriticalOpen ? '▼' : '▶'} Kritische Artikel
-        <span class="empty">({displayedOverviewProducts.length + displayedOverviewMaterials.length})</span>
-      </button>
+    <section class="panel" class:collapsed={!overviewCriticalOpen}>
+      <div class="panel-header">
+        <h2>
+          <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewCriticalOpen = !overviewCriticalOpen)}>
+            {overviewCriticalOpen ? '▼' : '▶'} Kritische Artikel
+            <span class="empty">({displayedOverviewProducts.length + displayedOverviewMaterials.length})</span>
+          </button>
+        </h2>
+      </div>
       {#if overviewCriticalOpen}
         <p class="empty">
           Produkte und Materialien mit Gesamt ≤ 0 oder unter Mindestbestand. Einträge können dauerhaft ignoriert werden.
@@ -3294,11 +3307,17 @@
           {/if}
         {/if}
       {/if}
+    </section>
 
-      <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewIncompleteOpen = !overviewIncompleteOpen)}>
-        {overviewIncompleteOpen ? '▼' : '▶'} Unvollständigkeit
-        <span class="empty">({displayedIncompleteProducts.length + displayedIncompleteMaterials.length})</span>
-      </button>
+    <section class="panel" class:collapsed={!overviewIncompleteOpen}>
+      <div class="panel-header">
+        <h2>
+          <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewIncompleteOpen = !overviewIncompleteOpen)}>
+            {overviewIncompleteOpen ? '▼' : '▶'} Unvollständigkeit
+            <span class="empty">({displayedIncompleteProducts.length + displayedIncompleteMaterials.length})</span>
+          </button>
+        </h2>
+      </div>
       {#if overviewIncompleteOpen}
         <p class="empty">Fehlende Stammdaten (System-Tags „fehlt …“).</p>
         <h3>Produkte</h3>
@@ -3352,7 +3371,6 @@
           </table>
         </div>
       {/if}
-
     </section>
     <BackupPanel onFlash={showFlash} onImported={refresh} />
   {:else if tab === 'materials'}
