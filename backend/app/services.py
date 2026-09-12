@@ -969,11 +969,12 @@ def _unique_material_name(db: Session, color: Color) -> tuple[str, str | None]:
 def create_materials_from_colors(db: Session, payload: MaterialsFromColorsRequest) -> MaterialsFromColorsResult:
     from app.schemas import BulkSkipInfo
 
-    taken = _colors_with_material(db)
+    base = payload.base_name.strip()
     created_ids: list[int] = []
     skipped: list[BulkSkipInfo] = []
     warnings: list[str] = []
     location = get_location(db, payload.location_id) if payload.location_id else default_location(db)
+    used_names: set[str] = set()
 
     template: Material | None = None
     if payload.template_material_id is not None:
@@ -1020,19 +1021,16 @@ def create_materials_from_colors(db: Session, payload: MaterialsFromColorsReques
         if not color:
             skipped.append(BulkSkipInfo(color_id=color_id, color_name="?", reason="Farbe nicht gefunden"))
             continue
-        if color_id in taken:
+        name = f"{base} {color.name}".strip()
+        if name in used_names or db.scalars(select(Material.id).where(Material.name == name).limit(1)).first():
             skipped.append(
-                BulkSkipInfo(color_id=color_id, color_name=color.name, reason="bereits als Material vorhanden")
+                BulkSkipInfo(
+                    color_id=color_id,
+                    color_name=color.name,
+                    reason=f"Materialname „{name}“ bereits vergeben",
+                )
             )
             continue
-        name, name_warn = _unique_material_name(db, color)
-        if name_warn:
-            warnings.append(name_warn)
-        if template is not None:
-            family = template.family
-        else:
-            medium = color.medium
-            family = medium.name if medium is not None else None
         material = Material(
             name=name,
             unit=unit,
@@ -1040,7 +1038,7 @@ def create_materials_from_colors(db: Session, payload: MaterialsFromColorsReques
             purchase_price=purchase_price,
             cost_per_unit=cost,
             min_stock=series_min_stock,
-            family=family,
+            family=base,
             color_id=color.id,
         )
         material.tags = list(tags)
@@ -1054,7 +1052,7 @@ def create_materials_from_colors(db: Session, payload: MaterialsFromColorsReques
             )
         )
         created_ids.append(material.id)
-        taken.add(color_id)
+        used_names.add(name)
 
     for mid in created_ids:
         material = _load_material(db, mid)

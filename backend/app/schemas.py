@@ -497,6 +497,7 @@ class BulkSkipInfo(BaseModel):
 
 class MaterialsFromColorsRequest(BaseModel):
     color_ids: list[int] = Field(min_length=1)
+    base_name: str = Field(min_length=1, max_length=180)
     template_material_id: int | None = None
     unit: Unit | None = None
     purchase_quantity: Quantity | None = Field(default=None, gt=0)

@@ -288,16 +288,38 @@
     return products.some((p) => p.name === name)
   }
 
-  function openBulkMaterials(mediumId = null, { keepTemplate = false } = {}) {
+  function isBulkMaterialColorTaken(baseName, color) {
+    const name = bulkProductName(baseName, color)
+    if (!name) return false
+    return materials.some((m) => m.name === name)
+  }
+
+  /** Basis aus Vorlagenname: Farbsuffix am Ende abschneiden (wie Produkt-Nachlegen). */
+  function seriesBaseFromTemplate(template) {
+    if (!template?.name) return ''
+    let base = String(template.name).trim()
+    const colorName = template.color?.name
+    if (colorName && base.toLowerCase().endsWith(String(colorName).toLowerCase())) {
+      base = base.slice(0, base.length - colorName.length).trim() || base
+    }
+    return base
+  }
+
+  function openBulkMaterials(mediumId = null, { keepTemplate = false, baseName = null } = {}) {
     const mid = mediumId != null ? Number(mediumId) : media[0]?.id || null
-    const taken = colorIdsWithMaterial()
-    const available = mid
-      ? colorsForMedium(mid).filter((c) => !taken.has(c.id)).map((c) => c.id)
-      : colors.filter((c) => !taken.has(c.id)).map((c) => c.id)
     const prevTemplate = keepTemplate ? bulkForm.template_material_id : ''
+    const base =
+      baseName != null
+        ? baseName
+        : keepTemplate
+          ? bulkForm.base_name
+          : ''
+    const pool = mid ? colorsForMedium(mid) : colors
+    const available = pool.filter((c) => !isBulkMaterialColorTaken(base, c)).map((c) => c.id)
     bulkForm = {
       ...bulkForm,
       colorIds: available,
+      base_name: base,
       unit: keepTemplate && prevTemplate ? bulkForm.unit : 'ml',
       purchase_quantity: keepTemplate && prevTemplate ? bulkForm.purchase_quantity : '750',
       purchase_price: keepTemplate && prevTemplate ? bulkForm.purchase_price : '0',
@@ -325,16 +347,22 @@
     return template?.min_stock != null ? String(template.min_stock) : ''
   }
 
-  /** Vorlage im Material-Serien-Dialog: Stammdaten aus Vorlage vorbelegen. */
+  /** Vorlage im Material-Serien-Dialog: Basis + Stammdaten aus Vorlage. */
   function onBulkMaterialTemplateChange() {
     const template = materialTemplateById(bulkForm.template_material_id)
     if (!template) return
+    const base = seriesBaseFromTemplate(template)
+    bulkForm.base_name = base
     bulkForm.unit = template.unit
     bulkForm.purchase_quantity = String(template.purchase_quantity ?? 1)
     bulkForm.purchase_price = String(template.purchase_price ?? 0)
     if (bulkForm.min_stock === '') {
       bulkForm.min_stock = materialTemplateMinStock(bulkForm.template_material_id)
     }
+    const pool = bulkMaterialModal?.mediumId
+      ? colorsForMedium(bulkMaterialModal.mediumId)
+      : colors
+    bulkForm.colorIds = pool.filter((c) => !isBulkMaterialColorTaken(base, c)).map((c) => c.id)
   }
 
   function openBulkProducts({ mediumId = null, baseName = '', templateProductId = '', minStock = null } = {}) {
@@ -366,6 +394,11 @@
   }
 
   async function submitBulkMaterials() {
+    const base = bulkForm.base_name.trim()
+    if (!base) {
+      showFlash('error', 'Basisname fehlt (z. B. Kerzen klein -).')
+      return
+    }
     if (!bulkForm.colorIds.length) {
       showFlash('error', 'Mindestens eine Farbe wählen.')
       return
@@ -374,6 +407,7 @@
     try {
       const body = {
         color_ids: bulkForm.colorIds,
+        base_name: base,
         template_material_id: bulkForm.template_material_id
           ? Number(bulkForm.template_material_id)
           : null,
@@ -4080,10 +4114,27 @@
     <div class="modal" role="dialog" aria-modal="true">
       <h3>Materialien aus Farben</h3>
       <p class="empty" style="margin-top:0">
-        Optional Vorlage (Einheit/Einkauf/Tags/Mindestbestand, „Ist Vorlage“). Name = Medium Farbe.
-        Bestand startet bei 0. Schon vorhandene Farben sind nicht wählbar.
+        Optional Vorlage (Einheit/Einkauf/Tags, „Ist Vorlage“), dann Serienanlage.
+        Name = „Basis Farbe“ — z. B. Vorlage „Kerzen klein - Altrosa“ → Basis „Kerzen klein -“.
+        Bestand startet bei 0. Schon vorhandene Namen sind nicht wählbar.
       </p>
       <div class="form-grid">
+        <label>Basisname
+          <input
+            bind:value={bulkForm.base_name}
+            placeholder="z. B. Kerzen klein -"
+            required
+            oninput={() => {
+              const pool = bulkMaterialModal.mediumId
+                ? colorsForMedium(bulkMaterialModal.mediumId)
+                : colors
+              const available = pool
+                .filter((c) => !isBulkMaterialColorTaken(bulkForm.base_name, c))
+                .map((c) => c.id)
+              bulkForm.colorIds = available
+            }}
+          />
+        </label>
         <label>Medium-Filter
           <select
             value={bulkMaterialModal.mediumId ?? ''}
@@ -4125,7 +4176,7 @@
       <fieldset class="tag-picker" style="margin-top:.75rem">
         <legend>Farben</legend>
         {#each (bulkMaterialModal.mediumId ? colorsForMedium(bulkMaterialModal.mediumId) : colors) as c}
-          {@const taken = colorIdsWithMaterial().has(c.id)}
+          {@const taken = isBulkMaterialColorTaken(bulkForm.base_name, c)}
           <label class="tag-check" class:empty={taken}>
             <input
               type="checkbox"
@@ -4141,7 +4192,12 @@
       </fieldset>
       <div class="modal-actions">
         <button type="button" class="btn secondary" onclick={() => (bulkMaterialModal = null)}>Abbrechen</button>
-        <button type="button" class="btn" disabled={saving || !bulkForm.colorIds.length} onclick={submitBulkMaterials}>
+        <button
+          type="button"
+          class="btn"
+          disabled={saving || !bulkForm.colorIds.length || !bulkForm.base_name.trim()}
+          onclick={submitBulkMaterials}
+        >
           {bulkForm.colorIds.length} anlegen
         </button>
       </div>
