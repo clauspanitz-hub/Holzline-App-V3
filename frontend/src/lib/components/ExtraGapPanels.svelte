@@ -12,7 +12,7 @@
     incompleteOpen = $bindable(false),
     ignoredOpen = $bindable(false),
     saving = false,
-    onOpenEdit = () => {},
+    onOpenEdit = (_item, _ids) => {},
     onIgnore = () => {},
     onUnignore = () => {},
     onPatch = async () => {},
@@ -124,7 +124,7 @@
               />
             </td>
             <td>
-              <button type="button" class="group-toggle" onclick={() => onOpenEdit(item)}>{item.name}</button>
+              <button type="button" class="group-toggle" onclick={() => onOpenEdit(item, rows.map((r) => r.id))}>{item.name}</button>
               {#if item.incomplete_fields?.length}
                 <div class="incomplete-hint">
                   <span class="incomplete-icon" aria-hidden="true">!</span>
@@ -180,7 +180,7 @@
             {/each}
             <td>
               <div class="row-actions">
-                <button type="button" class="btn secondary" onclick={() => onOpenEdit(item)}>Bearbeiten</button>
+                <button type="button" class="btn secondary" onclick={() => onOpenEdit(item, rows.map((r) => r.id))}>Bearbeiten</button>
                 {#if showIgnore}
                   <button type="button" class="btn secondary" disabled={saving} onclick={() => onIgnore(item)}>Ignorieren</button>
                 {/if}

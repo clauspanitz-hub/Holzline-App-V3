@@ -646,6 +646,20 @@ select {
   flex-wrap: wrap;
 }
 
+.edit-nav {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.35rem 0 0.85rem;
+}
+
+.edit-nav button {
+  flex: 1;
+}
+
+.edit-nav-bottom {
+  margin: 1rem 0 0;
+}
+
 .bom-block {
   margin-top: 1rem;
   padding-top: 0.85rem;

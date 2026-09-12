@@ -127,6 +127,9 @@
   let selectedProductIds = $state([])
   let bulkEditModal = $state(null) // { kind: 'material' | 'product' }
   let bulkEditForm = $state(emptyBulkEditForm())
+  /** Momentaufnahme sichtbarer Zeilen für Vorheriger/Nächster im Bearbeiten-Dialog */
+  let editNav = $state(null) // { kind: 'material' | 'product', ids: number[], index: number }
+  let editFormBaseline = $state('')
 
   let materialForm = $state(emptyMaterial())
   let productForm = $state(emptyProduct())
@@ -1714,7 +1717,101 @@
     stockDrafts = drafts
   }
 
+  function visibleGroupItemIds(groups) {
+    const ids = []
+    for (const group of groups || []) {
+      if (collapsedFamilies[group.key] !== false) continue
+      for (const row of group.rows || []) {
+        if (row?.id != null) ids.push(row.id)
+      }
+    }
+    return ids
+  }
+
+  function beginEditNav(kind, ids, currentId) {
+    const list = Array.isArray(ids) ? ids.map((id) => Number(id)).filter((id) => Number.isFinite(id)) : []
+    const index = list.indexOf(Number(currentId))
+    if (list.length < 2 || index < 0) {
+      editNav = null
+      return
+    }
+    editNav = { kind, ids: list, index }
+  }
+
+  function captureEditBaseline(kind) {
+    editFormBaseline = JSON.stringify(kind === 'material' ? materialForm : productForm)
+  }
+
+  function editFormDirty(kind) {
+    return JSON.stringify(kind === 'material' ? materialForm : productForm) !== editFormBaseline
+  }
+
+  function navItemExists(kind, id) {
+    const rows = kind === 'material' ? materials : products
+    return rows.some((row) => Number(row.id) === Number(id))
+  }
+
+  function editNavNeighbor(delta) {
+    if (!editNav) return -1
+    let i = editNav.index + delta
+    while (i >= 0 && i < editNav.ids.length) {
+      if (navItemExists(editNav.kind, editNav.ids[i])) return i
+      i += delta
+    }
+    return -1
+  }
+
+  const showEditNav = $derived(
+    !!editNav && (materialModal?.mode === 'edit' || productModal?.mode === 'edit'),
+  )
+  const editNavHasPrev = $derived.by(() => {
+    if (!editNav) return false
+    const rows = editNav.kind === 'material' ? materials : products
+    for (let i = editNav.index - 1; i >= 0; i--) {
+      const id = editNav.ids[i]
+      if (rows.some((row) => Number(row.id) === Number(id))) return true
+    }
+    return false
+  })
+  const editNavHasNext = $derived.by(() => {
+    if (!editNav) return false
+    const rows = editNav.kind === 'material' ? materials : products
+    for (let i = editNav.index + 1; i < editNav.ids.length; i++) {
+      const id = editNav.ids[i]
+      if (rows.some((row) => Number(row.id) === Number(id))) return true
+    }
+    return false
+  })
+
+  function closeMaterialModal() {
+    materialModal = null
+    editNav = null
+  }
+
+  function closeProductModal() {
+    productModal = null
+    editNav = null
+  }
+
+  async function stepEditNav(delta) {
+    if (!editNav || saving) return
+    const kind = editNav.kind
+    if (editFormDirty(kind)) {
+      const ok = kind === 'material' ? await saveMaterial({ keepOpen: true }) : await saveProduct({ keepOpen: true })
+      if (!ok) return
+    }
+    const nextIndex = editNavNeighbor(delta)
+    if (nextIndex < 0) return
+    const id = editNav.ids[nextIndex]
+    const item = (kind === 'material' ? materials : products).find((row) => Number(row.id) === Number(id))
+    if (!item) return
+    editNav = { ...editNav, index: nextIndex }
+    if (kind === 'material') openEditMaterial(item, { keepNav: true })
+    else openEditProduct(item, { keepNav: true })
+  }
+
   function openCreateMaterial(template = null, { name = '', orderLink = null } = {}) {
+    editNav = null
     materialForm = emptyMaterial()
     materialForm.location_id = String(locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || '')
     showMaterialTags = false
@@ -1740,7 +1837,8 @@
     materialModal = { mode: 'create', orderLink }
   }
 
-  function openEditMaterial(material) {
+  function openEditMaterial(material, { ids, keepNav = false } = {}) {
+    if (!keepNav) beginEditNav('material', ids, material.id)
     const mid = mediumIdFromColor(material.color_id) || (material.color?.medium_id ? String(material.color.medium_id) : '')
     materialForm = {
       name: material.name,
@@ -1760,9 +1858,11 @@
     showMaterialTags = materialForm.tagIds.length > 0
     initStockDrafts(material)
     materialModal = { mode: 'edit', id: material.id, material }
+    captureEditBaseline('material')
   }
 
   function openCreateProduct(template = null, { name = '', orderLink = null } = {}) {
+    editNav = null
     productForm = emptyProduct()
     productForm.location_id = String(locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || '')
     inlineMaterialForm = null
@@ -1788,7 +1888,8 @@
     productModal = { mode: 'create', product: null, templateBom: template?.bom ? [...template.bom] : [], orderLink }
   }
 
-  function openEditProduct(product) {
+  function openEditProduct(product, { ids, keepNav = false } = {}) {
+    if (!keepNav) beginEditNav('product', ids, product.id)
     const mid = mediumIdFromColor(product.color_id) || (product.color?.medium_id ? String(product.color.medium_id) : '')
     productForm = {
       name: product.name,
@@ -1809,6 +1910,7 @@
     initStockDrafts(product)
     productModal = { mode: 'edit', product }
     loadColorSuggestions(product.color_id)
+    captureEditBaseline('product')
   }
 
   async function loadColorSuggestions(colorId) {
@@ -2154,7 +2256,7 @@
     }
   }
 
-  async function saveMaterial() {
+  async function saveMaterial({ keepOpen = false } = {}) {
     saving = true
     try {
       const colorPayload = {
@@ -2181,25 +2283,40 @@
         }
         showFlash('ok', 'Material angelegt.')
         markSaved()
-      } else {
-        await api.materials.update(materialModal.id, {
-          name: materialForm.name.trim(),
-          unit: materialForm.unit,
-          purchase_quantity: materialForm.purchase_quantity,
-          purchase_price: materialForm.purchase_price,
-          min_stock: parseOptionalQty(materialForm.min_stock),
-          is_template: !!materialForm.is_template,
-          family: materialForm.family.trim() || null,
-          decimal_places: itemDecimals(materialForm),
-          ...colorPayload,
-        })
-        showFlash('ok', 'Material gespeichert.')
-        markSaved()
+        materialModal = null
+        editNav = null
+        await refresh()
+        return true
+      }
+      await api.materials.update(materialModal.id, {
+        name: materialForm.name.trim(),
+        unit: materialForm.unit,
+        purchase_quantity: materialForm.purchase_quantity,
+        purchase_price: materialForm.purchase_price,
+        min_stock: parseOptionalQty(materialForm.min_stock),
+        is_template: !!materialForm.is_template,
+        family: materialForm.family.trim() || null,
+        decimal_places: itemDecimals(materialForm),
+        ...colorPayload,
+      })
+      showFlash('ok', 'Material gespeichert.')
+      markSaved()
+      await refresh()
+      if (keepOpen) {
+        const fresh = materials.find((m) => m.id === materialModal.id)
+        if (fresh) {
+          materialModal = { ...materialModal, material: fresh }
+          initStockDrafts(fresh)
+          captureEditBaseline('material')
+        }
+        return true
       }
       materialModal = null
-      await refresh()
+      editNav = null
+      return true
     } catch (error) {
       showFlash('error', error.message)
+      return false
     } finally {
       saving = false
     }
@@ -2267,7 +2384,7 @@
     }
   }
 
-  async function saveProduct() {
+  async function saveProduct({ keepOpen = false } = {}) {
     saving = true
     try {
       const colorPayload = {
@@ -2321,6 +2438,7 @@
         bomForm = { kind: 'material', material_id: '', product_id: '', quantity_required: '' }
         inlineMaterialForm = null
         await loadColorSuggestions((fresh || created).color_id)
+        captureEditBaseline('product')
         const mid = productForm.medium_id
         if (mid) {
           const colorName = colors.find((c) => c.id === Number(productForm.color_id))?.name
@@ -2344,28 +2462,31 @@
             })
           }
         }
-      } else {
-        await api.products.update(productModal.product.id, {
-          name: productForm.name.trim(),
-          sku: productForm.sku.trim() || null,
-          selling_price: productForm.selling_price === '' ? '0' : productForm.selling_price,
-          min_stock: parseOptionalQty(productForm.min_stock),
-          is_template: !!productForm.is_template,
-          family: productForm.family.trim() || null,
-          ...colorPayload,
-        })
-        showFlash('ok', 'Produkt gespeichert.')
-        markSaved()
-        await refresh()
-        const fresh = products.find((p) => p.id === productModal.product.id)
-        if (fresh) {
-          productModal = { mode: 'edit', product: fresh }
-          initStockDrafts(fresh)
-          await loadColorSuggestions(fresh.color_id)
-        }
+        return true
       }
+      await api.products.update(productModal.product.id, {
+        name: productForm.name.trim(),
+        sku: productForm.sku.trim() || null,
+        selling_price: productForm.selling_price === '' ? '0' : productForm.selling_price,
+        min_stock: parseOptionalQty(productForm.min_stock),
+        is_template: !!productForm.is_template,
+        family: productForm.family.trim() || null,
+        ...colorPayload,
+      })
+      showFlash('ok', 'Produkt gespeichert.')
+      markSaved()
+      await refresh()
+      const fresh = products.find((p) => p.id === productModal.product.id)
+      if (fresh) {
+        productModal = { mode: 'edit', product: fresh }
+        initStockDrafts(fresh)
+        await loadColorSuggestions(fresh.color_id)
+        captureEditBaseline('product')
+      }
+      return true
     } catch (error) {
       showFlash('error', error.message)
+      return false
     } finally {
       saving = false
     }
@@ -2421,6 +2542,7 @@
     try {
       await api.products.remove(product.id)
       productModal = null
+      editNav = null
       showFlash('ok', 'Produkt gelöscht.')
       await refresh()
     } catch (error) {
@@ -3331,7 +3453,7 @@
                 onToggleCollapse={toggleFamilyCollapse}
               >
                 {#snippet row({ product })}
-                  <tr class="row-click" onclick={() => openEditProduct(product)}>
+                  <tr class="row-click" onclick={() => openEditProduct(product, { ids: visibleGroupItemIds(overviewProductGroups) })}>
                     <td>
                       {product.name}
                       {#if formatMinStock(product)}
@@ -3346,7 +3468,7 @@
                     </td>
                     <td onclick={(e) => e.stopPropagation()}>
                       <div class="row-actions">
-                        <button class="btn secondary" onclick={() => openEditProduct(product)}>Bearbeiten</button>
+                        <button class="btn secondary" onclick={() => openEditProduct(product, { ids: visibleGroupItemIds(overviewProductGroups) })}>Bearbeiten</button>
                         <button class="btn secondary" disabled={saving} onclick={() => setOverviewIgnored('product', product, true)}>Ignorieren</button>
                       </div>
                     </td>
@@ -3391,7 +3513,7 @@
                 onToggleCollapse={toggleFamilyCollapse}
               >
                 {#snippet row({ item: material })}
-                  <tr class="row-click" onclick={() => openEditMaterial(material)}>
+                  <tr class="row-click" onclick={() => openEditMaterial(material, { ids: visibleGroupItemIds(overviewMaterialGroups) })}>
                     <td>
                       {material.name}
                       {#if formatMinStock(material)}
@@ -3406,7 +3528,7 @@
                     </td>
                     <td onclick={(e) => e.stopPropagation()}>
                       <div class="row-actions">
-                        <button class="btn secondary" onclick={() => openEditMaterial(material)}>Bearbeiten</button>
+                        <button class="btn secondary" onclick={() => openEditMaterial(material, { ids: visibleGroupItemIds(overviewMaterialGroups) })}>Bearbeiten</button>
                         <button class="btn secondary" disabled={saving} onclick={() => setOverviewIgnored('material', material, true)}>Ignorieren</button>
                       </div>
                     </td>
@@ -3466,11 +3588,11 @@
                 onToggleCollapse={toggleFamilyCollapse}
               >
                 {#snippet row({ product })}
-                  <tr class="row-click" onclick={() => openEditProduct(product)}>
+                  <tr class="row-click" onclick={() => openEditProduct(product, { ids: visibleGroupItemIds(incompleteProductGroups) })}>
                     <td>{product.name}</td>
                     <td>{incompleteHint(product) || '—'}</td>
                     <td onclick={(e) => e.stopPropagation()}>
-                      <button class="btn secondary" onclick={() => openEditProduct(product)}>Bearbeiten</button>
+                      <button class="btn secondary" onclick={() => openEditProduct(product, { ids: visibleGroupItemIds(incompleteProductGroups) })}>Bearbeiten</button>
                     </td>
                   </tr>
                 {/snippet}
@@ -3491,11 +3613,11 @@
                 onToggleCollapse={toggleFamilyCollapse}
               >
                 {#snippet row({ item: material })}
-                  <tr class="row-click" onclick={() => openEditMaterial(material)}>
+                  <tr class="row-click" onclick={() => openEditMaterial(material, { ids: visibleGroupItemIds(incompleteMaterialGroups) })}>
                     <td>{material.name}</td>
                     <td>{incompleteHint(material) || '—'}</td>
                     <td onclick={(e) => e.stopPropagation()}>
-                      <button class="btn secondary" onclick={() => openEditMaterial(material)}>Bearbeiten</button>
+                      <button class="btn secondary" onclick={() => openEditMaterial(material, { ids: visibleGroupItemIds(incompleteMaterialGroups) })}>Bearbeiten</button>
                     </td>
                   </tr>
                 {/snippet}
@@ -3518,7 +3640,7 @@
       bind:incompleteOpen={extraMatIncompleteOpen}
       bind:ignoredOpen={extraMatIgnoredOpen}
       {saving}
-      onOpenEdit={openEditMaterial}
+      onOpenEdit={(item, ids) => openEditMaterial(item, { ids })}
       onIgnore={(item) => setOverviewIgnored('material', item, true)}
       onUnignore={(item) => setOverviewIgnored('material', item, false)}
       onPatch={(item, patch) => patchGapItem('material', item, patch)}
@@ -3591,7 +3713,7 @@
               onToggleFamilySelection={(group) => toggleFamilySelection(group, 'material')}
             >
               {#snippet row({ item: material })}
-                <tr class="row-click" onclick={() => openEditMaterial(material)}>
+                <tr class="row-click" onclick={() => openEditMaterial(material, { ids: visibleGroupItemIds(materialGroups) })}>
                   <td class="col-select" onclick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
@@ -3626,7 +3748,7 @@
                   </td>
                   <td onclick={(e) => e.stopPropagation()}>
                     <div class="row-actions">
-                      <button class="btn secondary" onclick={() => openEditMaterial(material)}>Bearbeiten</button>
+                      <button class="btn secondary" onclick={() => openEditMaterial(material, { ids: visibleGroupItemIds(materialGroups) })}>Bearbeiten</button>
                       <button class="btn secondary" onclick={() => openTransfer('material', material)}>Umbuchen</button>
                       <button type="button" class="btn danger" onclick={(e) => { e.stopPropagation(); removeMaterial(material) }}>Löschen</button>
                     </div>
@@ -3650,7 +3772,7 @@
       bind:incompleteOpen={extraProdIncompleteOpen}
       bind:ignoredOpen={extraProdIgnoredOpen}
       {saving}
-      onOpenEdit={openEditProduct}
+      onOpenEdit={(item, ids) => openEditProduct(item, { ids })}
       onIgnore={(item) => setOverviewIgnored('product', item, true)}
       onUnignore={(item) => setOverviewIgnored('product', item, false)}
       onPatch={(item, patch) => patchGapItem('product', item, patch)}
@@ -3716,7 +3838,7 @@
               onToggleFamilySelection={toggleFamilySelection}
             >
               {#snippet row({ product })}
-                <tr class="row-click" onclick={() => openEditProduct(product)}>
+                <tr class="row-click" onclick={() => openEditProduct(product, { ids: visibleGroupItemIds(productGroups) })}>
                   <td class="col-select" onclick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
@@ -3754,7 +3876,7 @@
                   </td>
                   <td onclick={(e) => e.stopPropagation()}>
                     <div class="row-actions">
-                      <button class="btn secondary" onclick={() => openEditProduct(product)}>Bearbeiten</button>
+                      <button class="btn secondary" onclick={() => openEditProduct(product, { ids: visibleGroupItemIds(productGroups) })}>Bearbeiten</button>
                       <button class="btn" onclick={() => openManufacture(product)}>Fertigen</button>
                       <button class="btn secondary" onclick={() => openTransfer('product', product)}>Umbuchen</button>
                       {#if canTransformProduct(product)}
@@ -4365,9 +4487,15 @@
 {/if}
 
 {#if materialModal}
-  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (materialModal = null)}>
+  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && closeMaterialModal()}>
     <div class="modal" role="dialog" aria-modal="true">
       <h3>{materialModal.mode === 'create' ? 'Material anlegen' : 'Material bearbeiten'}</h3>
+      {#if showEditNav && editNav?.kind === 'material'}
+        <div class="edit-nav">
+          <button type="button" class="btn secondary" disabled={saving || !editNavHasPrev} onclick={() => stepEditNav(-1)}>Vorheriger</button>
+          <button type="button" class="btn secondary" disabled={saving || !editNavHasNext} onclick={() => stepEditNav(1)}>Nächster</button>
+        </div>
+      {/if}
       <form class="form-grid" onsubmit={(e) => { e.preventDefault(); saveMaterial() }}>
         <label>Name
           <input list="material-name-suggestions" bind:value={materialForm.name} required />
@@ -4456,7 +4584,7 @@
           <label>Anfangsbestand<input type="number" step={qtyStep(materialForm.decimal_places)} bind:value={materialForm.stock_quantity} required /></label>
         {/if}
         <div class="modal-actions">
-          <button type="button" class="btn secondary" onclick={() => (materialModal = null)}>Abbrechen</button>
+          <button type="button" class="btn secondary" onclick={() => closeMaterialModal()}>Abbrechen</button>
           <button class="btn" disabled={saving}>{saveButtonOk ? '✓ Gespeichert' : 'Speichern'}</button>
         </div>
       </form>
@@ -4482,15 +4610,27 @@
             {/if}
           {/each}
         </div>
+        {#if showEditNav && editNav?.kind === 'material'}
+          <div class="edit-nav edit-nav-bottom">
+            <button type="button" class="btn secondary" disabled={saving || !editNavHasPrev} onclick={() => stepEditNav(-1)}>Vorheriger</button>
+            <button type="button" class="btn secondary" disabled={saving || !editNavHasNext} onclick={() => stepEditNav(1)}>Nächster</button>
+          </div>
+        {/if}
       {/if}
     </div>
   </div>
 {/if}
 
 {#if productModal}
-  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (productModal = null)}>
+  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && closeProductModal()}>
     <div class="modal" role="dialog" aria-modal="true">
       <h3>{productModal.mode === 'create' ? 'Produkt anlegen' : 'Produkt bearbeiten'}</h3>
+      {#if showEditNav && editNav?.kind === 'product'}
+        <div class="edit-nav">
+          <button type="button" class="btn secondary" disabled={saving || !editNavHasPrev} onclick={() => stepEditNav(-1)}>Vorheriger</button>
+          <button type="button" class="btn secondary" disabled={saving || !editNavHasNext} onclick={() => stepEditNav(1)}>Nächster</button>
+        </div>
+      {/if}
       <form class="form-grid" onsubmit={(e) => { e.preventDefault(); saveProduct() }}>
         <label>Name
           <input list="product-name-suggestions" bind:value={productForm.name} required />
@@ -4572,7 +4712,7 @@
           <label>Anfangsbestand<input type="number" step={qtyStep(0)} bind:value={productForm.stock_quantity} required /></label>
         {/if}
         <div class="modal-actions">
-          <button type="button" class="btn secondary" onclick={() => (productModal = null)}>Schließen</button>
+          <button type="button" class="btn secondary" onclick={() => closeProductModal()}>Schließen</button>
           <button class="btn" disabled={saving}>{saveButtonOk ? '✓ Gespeichert' : 'Speichern'}</button>
         </div>
       </form>
@@ -4707,6 +4847,12 @@
               </div>
             </div>
           {/if}
+        </div>
+      {/if}
+      {#if showEditNav && editNav?.kind === 'product'}
+        <div class="edit-nav edit-nav-bottom">
+          <button type="button" class="btn secondary" disabled={saving || !editNavHasPrev} onclick={() => stepEditNav(-1)}>Vorheriger</button>
+          <button type="button" class="btn secondary" disabled={saving || !editNavHasNext} onclick={() => stepEditNav(1)}>Nächster</button>
         </div>
       {/if}
     </div>
