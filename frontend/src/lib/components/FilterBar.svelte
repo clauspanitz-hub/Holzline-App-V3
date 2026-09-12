@@ -1,5 +1,5 @@
 <script>
-  import { applyMediumCompanion, catalogFilterActive } from '../catalogFilter.js'
+  import { catalogFilterActive } from '../catalogFilter.js'
 
   let {
     media = [],
@@ -27,24 +27,15 @@
   )
   const tagLabel = $derived(filter.tagIds.length ? `${filter.tagIds.length} Tags` : 'alle Tags')
 
-  function mediumById(id) {
-    return media.find((m) => m.id === id) || null
-  }
-
   function toggleMedium(id) {
     const on = filter.mediumIds.includes(id)
-    const medium = mediumById(id)
     const mediumIds = on ? filter.mediumIds.filter((x) => x !== id) : [...filter.mediumIds, id]
     let colorIds = filter.colorIds
     if (on) {
       const drop = new Set(colors.filter((c) => c.medium_id === id).map((c) => c.id))
       colorIds = colorIds.filter((cid) => !drop.has(cid))
     }
-    filter = applyMediumCompanion({ ...filter, mediumIds, colorIds }, medium, {
-      families,
-      tags,
-      on: !on,
-    })
+    filter = { ...filter, mediumIds, colorIds }
   }
 
   function toggleColor(color) {
@@ -53,16 +44,10 @@
       ? filter.colorIds.filter((id) => id !== color.id)
       : [...filter.colorIds, color.id]
     let mediumIds = filter.mediumIds
-    let next = { ...filter, colorIds, mediumIds }
     if (!on && !mediumIds.includes(color.medium_id)) {
       mediumIds = [...mediumIds, color.medium_id]
-      next = applyMediumCompanion({ ...filter, colorIds, mediumIds }, mediumById(color.medium_id), {
-        families,
-        tags,
-        on: true,
-      })
     }
-    filter = next
+    filter = { ...filter, colorIds, mediumIds }
   }
 
   function toggleFamily(name) {

@@ -72,6 +72,7 @@
   let materialModal = $state(null)
   let productModal = $state(null)
   let manufactureModal = $state(null)
+  let purchaseModal = $state(null)
   let transferModal = $state(null)
   let transformModal = $state(null)
   let movementsModal = $state(null) // { title, rows }
@@ -135,6 +136,7 @@
   let productForm = $state(emptyProduct())
   let bomForm = $state({ kind: 'material', material_id: '', product_id: '', quantity_required: '' })
   let manufactureForm = $state({ quantity: '1', location_id: '' })
+  let purchaseForm = $state({ quantity: '', location_id: '', purchase_price: '' })
   let transferForm = $state({ from_location_id: '', to_location_id: '', quantity: '1', note: '' })
   let transformForm = $state({ location_id: '', quantity: '1', note: '' })
   let stockDrafts = $state({}) // location_id -> { setValue, deltaValue }
@@ -1609,7 +1611,7 @@
   const overviewProductGroups = $derived(groupProductsByFamily(displayedOverviewProducts))
   const displayedMaterials = $derived.by(() => {
     return prepareRows(
-      applyCatalogFilter(materials, catalogFilter, colors),
+      applyCatalogFilter(materials, catalogFilter, colors, media),
       { ...listUi.materials, q: catalogFilter.q },
       (m) => stockRowSearchText(m, materialLocations),
       stockSortGetter(listUi.materials.sortKey),
@@ -1619,7 +1621,7 @@
   const materialGroups = $derived(groupProductsByFamily(displayedMaterials))
   const displayedProducts = $derived(
     prepareRows(
-      applyCatalogFilter(products, catalogFilter, colors),
+      applyCatalogFilter(products, catalogFilter, colors, media),
       { ...listUi.products, q: catalogFilter.q },
       (p) => stockRowSearchText(p, orderedLocations),
       stockSortGetter(listUi.products.sortKey),
@@ -1648,7 +1650,7 @@
   )
   const extraCriticalMaterials = $derived(
     prepareRows(
-      applyCatalogFilter(criticalMaterials, catalogFilter, colors),
+      applyCatalogFilter(criticalMaterials, catalogFilter, colors, media),
       { q: catalogFilter.q, sortKey: 'name', sortDir: 'asc' },
       (m) => stockRowSearchText(m, materialLocations),
       stockSortGetter('name'),
@@ -1656,7 +1658,7 @@
   )
   const extraIncompleteMaterials = $derived(
     prepareRows(
-      applyCatalogFilter(incompleteMaterials, catalogFilter, colors),
+      applyCatalogFilter(incompleteMaterials, catalogFilter, colors, media),
       { q: catalogFilter.q, sortKey: 'name', sortDir: 'asc' },
       (m) => stockRowSearchText(m, materialLocations),
       stockSortGetter('name'),
@@ -1664,7 +1666,7 @@
   )
   const extraCriticalProducts = $derived(
     prepareRows(
-      applyCatalogFilter(criticalProducts, catalogFilter, colors),
+      applyCatalogFilter(criticalProducts, catalogFilter, colors, media),
       { q: catalogFilter.q, sortKey: 'name', sortDir: 'asc' },
       (p) => stockRowSearchText(p, materialLocations),
       stockSortGetter('name'),
@@ -1672,7 +1674,7 @@
   )
   const extraIncompleteProducts = $derived(
     prepareRows(
-      applyCatalogFilter(incompleteProducts, catalogFilter, colors),
+      applyCatalogFilter(incompleteProducts, catalogFilter, colors, media),
       { q: catalogFilter.q, sortKey: 'name', sortDir: 'asc' },
       (p) => stockRowSearchText(p, materialLocations),
       stockSortGetter('name'),
@@ -1680,7 +1682,7 @@
   )
   const extraIgnoredMaterials = $derived(
     prepareRows(
-      applyCatalogFilter(ignoredCriticalMaterials, catalogFilter, colors),
+      applyCatalogFilter(ignoredCriticalMaterials, catalogFilter, colors, media),
       { q: catalogFilter.q, sortKey: 'name', sortDir: 'asc' },
       (m) => stockRowSearchText(m, materialLocations),
       stockSortGetter('name'),
@@ -1688,7 +1690,7 @@
   )
   const extraIgnoredProducts = $derived(
     prepareRows(
-      applyCatalogFilter(ignoredCriticalProducts, catalogFilter, colors),
+      applyCatalogFilter(ignoredCriticalProducts, catalogFilter, colors, media),
       { q: catalogFilter.q, sortKey: 'name', sortDir: 'asc' },
       (p) => stockRowSearchText(p, materialLocations),
       stockSortGetter('name'),
@@ -2260,6 +2262,17 @@
     manufactureModal = product
   }
 
+  function openPurchase(material) {
+    purchaseForm = {
+      quantity: '',
+      location_id: String(
+        materialLocations.find((x) => x.name === 'Hamburg')?.id || materialLocations[0]?.id || '',
+      ),
+      purchase_price: String(material.purchase_price ?? 0),
+    }
+    purchaseModal = material
+  }
+
   function openTransfer(kind, item) {
     transferForm = {
       from_location_id: String(item.stocks[0]?.location_id || locations[0]?.id || ''),
@@ -2680,6 +2693,32 @@
       manufactureModal = null
       await refresh()
       showFlash(result.warnings?.length ? 'warn' : 'ok', result.warnings?.join(' ') || 'Fertigung gebucht.')
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function submitPurchase() {
+    if (!purchaseModal) return
+    const qty = Number(String(purchaseForm.quantity).replace(',', '.'))
+    if (!Number.isFinite(qty) || qty <= 0) {
+      showFlash('error', 'Menge muss größer als 0 sein.')
+      return
+    }
+    saving = true
+    try {
+      await api.materials.update(purchaseModal.id, {
+        purchase_price: purchaseForm.purchase_price,
+      })
+      await api.materials.deltaStock(purchaseModal.id, {
+        location_id: Number(purchaseForm.location_id),
+        delta: qty,
+      })
+      purchaseModal = null
+      await refresh()
+      showFlash('ok', 'Einkauf gespeichert.')
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -3696,6 +3735,7 @@
       onUnignore={(item) => setOverviewIgnored('material', item, false)}
       onPatch={(item, patch) => patchGapItem('material', item, patch)}
       onAdjustStock={(item, body) => adjustGapStock('material', item, body)}
+      onPurchase={openPurchase}
     />
     <section class="panel">
       <div class="panel-header">
@@ -3828,6 +3868,7 @@
       onUnignore={(item) => setOverviewIgnored('product', item, false)}
       onPatch={(item, patch) => patchGapItem('product', item, patch)}
       onAdjustStock={(item, body) => adjustGapStock('product', item, body)}
+      onManufacture={openManufacture}
     />
     <section class="panel">
       <div class="panel-header">
@@ -4936,6 +4977,30 @@
         <div class="modal-actions">
           <button type="button" class="btn secondary" onclick={() => { manufactureModal = null; manufactureTodoId = null }}>Abbrechen</button>
           <button class="btn" disabled={saving}>Fertigen</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}
+
+{#if purchaseModal}
+  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (purchaseModal = null)}>
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Einkauf: {purchaseModal.name}</h3>
+      <form class="form-grid" onsubmit={(e) => { e.preventDefault(); submitPurchase() }}>
+        <label>Menge ({purchaseModal.unit})
+          <input type="number" step={qtyStep(itemDecimals(purchaseModal))} min={qtyStep(itemDecimals(purchaseModal))} bind:value={purchaseForm.quantity} required />
+        </label>
+        <label>Standort
+          <select bind:value={purchaseForm.location_id}>{#each materialLocations as l}<option value={l.id}>{l.name}</option>{/each}</select>
+        </label>
+        <label>Neuer Einkaufspreis (€)
+          <input type="number" step="0.01" min="0" bind:value={purchaseForm.purchase_price} required />
+        </label>
+        <p class="empty" style="margin:0">Bisher: {formatMoney(purchaseModal.purchase_price)}</p>
+        <div class="modal-actions">
+          <button type="button" class="btn secondary" onclick={() => (purchaseModal = null)}>Abbrechen</button>
+          <button class="btn" disabled={saving}>Speichern</button>
         </div>
       </form>
     </div>

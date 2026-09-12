@@ -17,6 +17,8 @@
     onUnignore = () => {},
     onPatch = async () => {},
     onAdjustStock = async () => {},
+    onManufacture = (_item) => {},
+    onPurchase = (_item) => {},
   } = $props()
 
   const isMaterial = $derived(kind === 'material')
@@ -180,9 +182,15 @@
             {/each}
             <td>
               <div class="row-actions">
-                <button type="button" class="btn secondary" onclick={() => onOpenEdit(item, rows.map((r) => r.id))}>Bearbeiten</button>
                 {#if showIgnore}
+                  {#if isMaterial}
+                    <button type="button" class="btn" disabled={saving} onclick={() => onPurchase(item)}>Einkauf</button>
+                  {:else}
+                    <button type="button" class="btn" disabled={saving} onclick={() => onManufacture(item)}>Fertigen</button>
+                  {/if}
                   <button type="button" class="btn secondary" disabled={saving} onclick={() => onIgnore(item)}>Ignorieren</button>
+                {:else}
+                  <button type="button" class="btn secondary" onclick={() => onOpenEdit(item, rows.map((r) => r.id))}>Bearbeiten</button>
                 {/if}
               </div>
             </td>
