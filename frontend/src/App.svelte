@@ -276,7 +276,10 @@
       stock_location_id: '',
       stock_quantity: '',
       setBom: false,
+      bom_mode: 'upsert',
+      bom_kind: 'material',
       bom_material_id: '',
+      bom_product_id: '',
       bom_quantity: '',
     }
   }
@@ -980,15 +983,33 @@
       }
     }
     if (kind === 'product' && bulkEditForm.setBom) {
-      const mid = Number(bulkEditForm.bom_material_id)
+      const bomKind = bulkEditForm.bom_kind === 'product' ? 'product' : 'material'
+      const componentId = Number(bomKind === 'product' ? bulkEditForm.bom_product_id : bulkEditForm.bom_material_id)
       const qty = bulkEditForm.bom_quantity
-      if (!mid || !qty || Number(qty) <= 0) {
-        showFlash('error', 'Für Stückliste Material und Menge angeben.')
+      const remove = bulkEditForm.bom_mode === 'remove'
+      if (!componentId) {
+        showFlash('error', 'Für die Stückliste eine Komponente wählen.')
         return
       }
-      if (
+      if (!remove && (!qty || Number(qty) <= 0)) {
+        showFlash('error', 'Für Stückliste Komponente und Menge angeben.')
+        return
+      }
+      const componentName =
+        (bomKind === 'product'
+          ? products.find((p) => p.id === componentId)?.name
+          : materials.find((m) => m.id === componentId)?.name) || `#${componentId}`
+      if (remove) {
+        if (
+          !confirm(
+            `WARNUNG: Stücklistenzeile „${componentName}“ bei ${ids.length} Produkten entfernen?\nAndere Zeilen bleiben. Produkte ohne diese Zeile werden übersprungen.`,
+          )
+        ) {
+          return
+        }
+      } else if (
         !confirm(
-          `WARNUNG: Stücklistenzeile (Material ${mid}, Menge ${qty}) bei ${ids.length} Produkten hinzufügen oder ändern?\nAndere Zeilen bleiben erhalten.`,
+          `WARNUNG: Stücklistenzeile „${componentName}“ (Menge ${qty}) bei ${ids.length} Produkten hinzufügen oder ändern?\nAndere Zeilen bleiben erhalten.`,
         )
       ) {
         return
@@ -1032,16 +1053,37 @@
           else await api.products.adjustStock(id, { location_id: locId, quantity })
         }
       }
+      let bomSkipped = 0
+      let bomChanged = 0
       if (kind === 'product' && bulkEditForm.setBom) {
-        const materialId = Number(bulkEditForm.bom_material_id)
+        const bomKind = bulkEditForm.bom_kind === 'product' ? 'product' : 'material'
+        const componentId = Number(bomKind === 'product' ? bulkEditForm.bom_product_id : bulkEditForm.bom_material_id)
+        const remove = bulkEditForm.bom_mode === 'remove'
         const quantity_required = String(bulkEditForm.bom_quantity)
         for (const id of ids) {
           const product = products.find((p) => p.id === id)
-          const existing = (product?.bom || []).find((line) => line.material_id === materialId)
-          if (existing) {
+          const existing = (product?.bom || []).find((line) =>
+            bomKind === 'product'
+              ? Number(line.product_id) === componentId
+              : Number(line.material_id) === componentId,
+          )
+          if (remove) {
+            if (!existing) {
+              bomSkipped += 1
+              continue
+            }
+            await api.products.removeBom(id, existing.id)
+            bomChanged += 1
+          } else if (existing) {
             await api.products.updateBom(id, existing.id, { quantity_required })
+            bomChanged += 1
           } else {
-            await api.products.addBom(id, { material_id: materialId, quantity_required })
+            const payload =
+              bomKind === 'product'
+                ? { product_id: componentId, quantity_required }
+                : { material_id: componentId, quantity_required }
+            await api.products.addBom(id, payload)
+            bomChanged += 1
           }
         }
       }
@@ -1049,7 +1091,16 @@
       else selectedProductIds = []
       bulkEditModal = null
       await refresh()
-      showFlash('ok', `${ids.length} Eintrag/Einträge aktualisiert.`)
+      if (kind === 'product' && bulkEditForm.setBom && bulkEditForm.bom_mode === 'remove') {
+        showFlash(
+          'ok',
+          bomSkipped
+            ? `Stückliste: ${bomChanged} entfernt, ${bomSkipped} ohne diese Zeile übersprungen.`
+            : `Stücklistenzeile bei ${bomChanged} Produkten entfernt.`,
+        )
+      } else {
+        showFlash('ok', `${ids.length} Eintrag/Einträge aktualisiert.`)
+      }
       markSaved()
     } catch (error) {
       showFlash('error', error.message)
@@ -4489,12 +4540,19 @@
 {#if materialModal}
   <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && closeMaterialModal()}>
     <div class="modal" role="dialog" aria-modal="true">
-      <h3>{materialModal.mode === 'create' ? 'Material anlegen' : 'Material bearbeiten'}</h3>
-      {#if showEditNav && editNav?.kind === 'material'}
-        <div class="edit-nav">
-          <button type="button" class="btn secondary" disabled={saving || !editNavHasPrev} onclick={() => stepEditNav(-1)}>Vorheriger</button>
-          <button type="button" class="btn secondary" disabled={saving || !editNavHasNext} onclick={() => stepEditNav(1)}>Nächster</button>
+      {#if materialModal.mode === 'edit'}
+        <div class="modal-sticky">
+          <h3>Material bearbeiten</h3>
+          <p class="modal-sticky-name">{materialForm.name || materialModal.material?.name || '—'}</p>
+          {#if showEditNav && editNav?.kind === 'material'}
+            <div class="edit-nav">
+              <button type="button" class="btn secondary" disabled={saving || !editNavHasPrev} onclick={() => stepEditNav(-1)}>Vorheriger</button>
+              <button type="button" class="btn secondary" disabled={saving || !editNavHasNext} onclick={() => stepEditNav(1)}>Nächster</button>
+            </div>
+          {/if}
         </div>
+      {:else}
+        <h3>Material anlegen</h3>
       {/if}
       <form class="form-grid" onsubmit={(e) => { e.preventDefault(); saveMaterial() }}>
         <label>Name
@@ -4624,12 +4682,19 @@
 {#if productModal}
   <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && closeProductModal()}>
     <div class="modal" role="dialog" aria-modal="true">
-      <h3>{productModal.mode === 'create' ? 'Produkt anlegen' : 'Produkt bearbeiten'}</h3>
-      {#if showEditNav && editNav?.kind === 'product'}
-        <div class="edit-nav">
-          <button type="button" class="btn secondary" disabled={saving || !editNavHasPrev} onclick={() => stepEditNav(-1)}>Vorheriger</button>
-          <button type="button" class="btn secondary" disabled={saving || !editNavHasNext} onclick={() => stepEditNav(1)}>Nächster</button>
+      {#if productModal.mode === 'edit'}
+        <div class="modal-sticky">
+          <h3>Produkt bearbeiten</h3>
+          <p class="modal-sticky-name">{productForm.name || productModal.product?.name || '—'}</p>
+          {#if showEditNav && editNav?.kind === 'product'}
+            <div class="edit-nav">
+              <button type="button" class="btn secondary" disabled={saving || !editNavHasPrev} onclick={() => stepEditNav(-1)}>Vorheriger</button>
+              <button type="button" class="btn secondary" disabled={saving || !editNavHasNext} onclick={() => stepEditNav(1)}>Nächster</button>
+            </div>
+          {/if}
         </div>
+      {:else}
+        <h3>Produkt anlegen</h3>
       {/if}
       <form class="form-grid" onsubmit={(e) => { e.preventDefault(); saveProduct() }}>
         <label>Name
@@ -5730,18 +5795,43 @@
                   <input type="checkbox" bind:checked={bulkEditForm.setBom} />
                   <span>
                     <strong>Stücklistenzeile</strong>
-                    <small>Hinzufügen oder Menge ändern (mit Warnung)</small>
+                    <small>Hinzufügen/Ändern oder Entfernen (mit Warnung)</small>
                   </span>
                 </label>
               </div>
               {#if bulkEditForm.setBom}
                 <div class="bulk-block-body bulk-block-nested">
-                  <label class="bulk-field">Material
-                    <FamilySelect bind:value={bulkEditForm.bom_material_id} items={materials} emptyLabel="wählen…" />
+                  <label class="bulk-field">Aktion
+                    <select bind:value={bulkEditForm.bom_mode}>
+                      <option value="upsert">Hinzufügen oder Menge ändern</option>
+                      <option value="remove">Zeile entfernen</option>
+                    </select>
                   </label>
-                  <label class="bulk-field">Menge pro Produkteinheit
-                    <input type="number" step="0.001" min="0.001" bind:value={bulkEditForm.bom_quantity} />
+                  <label class="bulk-field">Komponente
+                    <select bind:value={bulkEditForm.bom_kind}>
+                      <option value="material">Material</option>
+                      <option value="product">Produkt</option>
+                    </select>
                   </label>
+                  {#if bulkEditForm.bom_kind === 'product'}
+                    <label class="bulk-field">Produkt
+                      <FamilySelect bind:value={bulkEditForm.bom_product_id} items={products} emptyLabel="wählen…" />
+                    </label>
+                  {:else}
+                    <label class="bulk-field">Material
+                      <FamilySelect
+                        bind:value={bulkEditForm.bom_material_id}
+                        items={materials}
+                        emptyLabel="wählen…"
+                        formatItem={(m) => `${m.name} (${m.unit})`}
+                      />
+                    </label>
+                  {/if}
+                  {#if bulkEditForm.bom_mode !== 'remove'}
+                    <label class="bulk-field">Menge pro Produkteinheit
+                      <input type="number" step="0.001" min="0.001" bind:value={bulkEditForm.bom_quantity} />
+                    </label>
+                  {/if}
                 </div>
               {/if}
             </section>
