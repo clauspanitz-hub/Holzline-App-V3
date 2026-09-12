@@ -88,6 +88,7 @@
     location_id: '',
     base_name: '',
     template_product_id: '',
+    template_material_id: '',
   })
 
   /** Produktfamilien: eingeklappte Gruppen der Produkt-Tabelle */
@@ -158,6 +159,7 @@
       purchase_quantity: '1',
       purchase_price: '0',
       min_stock: '',
+      is_template: false,
       family: '',
       location_id: '',
       medium_id: '',
@@ -286,22 +288,29 @@
     return products.some((p) => p.name === name)
   }
 
-  function openBulkMaterials(mediumId = null) {
+  function openBulkMaterials(mediumId = null, { keepTemplate = false } = {}) {
     const mid = mediumId != null ? Number(mediumId) : media[0]?.id || null
     const taken = colorIdsWithMaterial()
     const available = mid
       ? colorsForMedium(mid).filter((c) => !taken.has(c.id)).map((c) => c.id)
       : colors.filter((c) => !taken.has(c.id)).map((c) => c.id)
+    const prevTemplate = keepTemplate ? bulkForm.template_material_id : ''
     bulkForm = {
       ...bulkForm,
       colorIds: available,
-      unit: 'ml',
-      purchase_quantity: '750',
-      purchase_price: '0',
-      min_stock: '',
+      unit: keepTemplate && prevTemplate ? bulkForm.unit : 'ml',
+      purchase_quantity: keepTemplate && prevTemplate ? bulkForm.purchase_quantity : '750',
+      purchase_price: keepTemplate && prevTemplate ? bulkForm.purchase_price : '0',
+      min_stock: keepTemplate ? bulkForm.min_stock : '',
+      template_material_id: prevTemplate || '',
       location_id: String(locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || ''),
     }
     bulkMaterialModal = { mediumId: mid }
+  }
+
+  function materialTemplateById(templateMaterialId) {
+    if (!templateMaterialId) return null
+    return materials.find((m) => m.id === Number(templateMaterialId)) || null
   }
 
   /** Mindestbestand der Vorlage als Vorbelegung für die Serienanlage. */
@@ -309,6 +318,23 @@
     if (!templateProductId) return ''
     const template = products.find((p) => p.id === Number(templateProductId))
     return template?.min_stock != null ? String(template.min_stock) : ''
+  }
+
+  function materialTemplateMinStock(templateMaterialId) {
+    const template = materialTemplateById(templateMaterialId)
+    return template?.min_stock != null ? String(template.min_stock) : ''
+  }
+
+  /** Vorlage im Material-Serien-Dialog: Stammdaten aus Vorlage vorbelegen. */
+  function onBulkMaterialTemplateChange() {
+    const template = materialTemplateById(bulkForm.template_material_id)
+    if (!template) return
+    bulkForm.unit = template.unit
+    bulkForm.purchase_quantity = String(template.purchase_quantity ?? 1)
+    bulkForm.purchase_price = String(template.purchase_price ?? 0)
+    if (bulkForm.min_stock === '') {
+      bulkForm.min_stock = materialTemplateMinStock(bulkForm.template_material_id)
+    }
   }
 
   function openBulkProducts({ mediumId = null, baseName = '', templateProductId = '', minStock = null } = {}) {
@@ -346,14 +372,22 @@
     }
     saving = true
     try {
-      const result = await api.materials.fromColors({
+      const body = {
         color_ids: bulkForm.colorIds,
-        unit: bulkForm.unit,
-        purchase_quantity: bulkForm.purchase_quantity,
-        purchase_price: bulkForm.purchase_price,
+        template_material_id: bulkForm.template_material_id
+          ? Number(bulkForm.template_material_id)
+          : null,
         min_stock: parseOptionalQty(bulkForm.min_stock),
         location_id: bulkForm.location_id ? Number(bulkForm.location_id) : null,
-      })
+      }
+      if (bulkForm.unit) body.unit = bulkForm.unit
+      if (bulkForm.purchase_quantity !== '' && bulkForm.purchase_quantity != null) {
+        body.purchase_quantity = bulkForm.purchase_quantity
+      }
+      if (bulkForm.purchase_price !== '' && bulkForm.purchase_price != null) {
+        body.purchase_price = bulkForm.purchase_price
+      }
+      const result = await api.materials.fromColors(body)
       bulkMaterialModal = null
       await refresh()
       const msg = `${result.created.length} Material(ien) angelegt` +
@@ -549,10 +583,8 @@
     if (bulkEditForm.setTags) body.tag_ids = bulkEditForm.tagIds
     if (bulkEditForm.clear_family) body.clear_family = true
     else if (bulkEditForm.family.trim()) body.family = bulkEditForm.family.trim()
-    if (kind === 'product') {
-      if (bulkEditForm.is_template === 'yes') body.is_template = true
-      else if (bulkEditForm.is_template === 'no') body.is_template = false
-    }
+    if (bulkEditForm.is_template === 'yes') body.is_template = true
+    else if (bulkEditForm.is_template === 'no') body.is_template = false
     saving = true
     try {
       const hasSafeFields =
@@ -941,12 +973,23 @@
   const negativeMaterials = $derived(materials.filter((item) => item.is_negative))
   const negativeProducts = $derived(products.filter((item) => item.is_negative))
   const hasProductTemplates = $derived(products.some((p) => p.is_template))
+  const hasMaterialTemplates = $derived(materials.some((m) => m.is_template))
   const productsForBomTemplate = $derived(
     [...products].sort((a, b) => {
       if (!!a.is_template !== !!b.is_template) return a.is_template ? -1 : 1
       return a.name.localeCompare(b.name, 'de')
     }),
   )
+  const materialsForSeriesTemplate = $derived.by(() => {
+    const mid = bulkMaterialModal?.mediumId != null ? Number(bulkMaterialModal.mediumId) : null
+    const templates = materials.filter((m) => m.is_template)
+    return [...templates].sort((a, b) => {
+      const aMatch = mid != null && a.color?.medium_id === mid
+      const bMatch = mid != null && b.color?.medium_id === mid
+      if (aMatch !== bMatch) return aMatch ? -1 : 1
+      return a.name.localeCompare(b.name, 'de')
+    })
+  })
 
   function stockAt(item, locationId) {
     const row = item.stocks?.find((s) => s.location_id === locationId)
@@ -1164,6 +1207,7 @@
       purchase_quantity: String(material.purchase_quantity ?? 1),
       purchase_price: String(material.purchase_price ?? material.cost_per_unit ?? 0),
       min_stock: material.min_stock != null ? String(material.min_stock) : '',
+      is_template: !!material.is_template,
       family: material.family || '',
       location_id: '',
       medium_id: mid,
@@ -1575,6 +1619,7 @@
           purchase_quantity: materialForm.purchase_quantity,
           purchase_price: materialForm.purchase_price,
           min_stock: parseOptionalQty(materialForm.min_stock),
+          is_template: !!materialForm.is_template,
           family: materialForm.family.trim() || null,
           ...colorPayload,
         })
@@ -3257,6 +3302,12 @@
         <datalist id="material-family-suggestions">
           {#each materialFamilies as f}<option value={f}></option>{/each}
         </datalist>
+        {#if materialModal.mode === 'edit'}
+          <label class="tag-check">
+            <input type="checkbox" bind:checked={materialForm.is_template} />
+            Ist Vorlage
+          </label>
+        {/if}
         <label>Medium
           <select
             bind:value={materialForm.medium_id}
@@ -4028,18 +4079,29 @@
   <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (bulkMaterialModal = null)}>
     <div class="modal" role="dialog" aria-modal="true">
       <h3>Materialien aus Farben</h3>
-      <p class="empty" style="margin-top:0">Name = Medium Farbe (z. B. Lack Salbeigrün). Bestand startet bei 0. Schon vorhandene Farben sind nicht wählbar.</p>
+      <p class="empty" style="margin-top:0">
+        Optional Vorlage (Einheit/Einkauf/Tags/Mindestbestand, „Ist Vorlage“). Name = Medium Farbe.
+        Bestand startet bei 0. Schon vorhandene Farben sind nicht wählbar.
+      </p>
       <div class="form-grid">
         <label>Medium-Filter
           <select
             value={bulkMaterialModal.mediumId ?? ''}
             onchange={(e) => {
               const mid = e.currentTarget.value ? Number(e.currentTarget.value) : null
-              openBulkMaterials(mid)
+              openBulkMaterials(mid, { keepTemplate: true })
             }}
           >
             <option value="">alle Medien</option>
             {#each media as m}<option value={m.id}>{m.name}</option>{/each}
+          </select>
+        </label>
+        <label>Vorlage
+          <select bind:value={bulkForm.template_material_id} onchange={onBulkMaterialTemplateChange}>
+            <option value="">keine</option>
+            {#each materialsForSeriesTemplate as m}
+              <option value={m.id}>Vorlage: {m.name}</option>
+            {/each}
           </select>
         </label>
         <label>Einheit
@@ -4052,8 +4114,13 @@
           <input type="number" step="0.01" bind:value={bulkForm.purchase_price} />
         </label>
         <label>Mindestbestand (optional)
-          <input type="number" step="0.001" min="0" bind:value={bulkForm.min_stock} placeholder="leer = keiner" />
+          <input type="number" step="0.001" min="0" bind:value={bulkForm.min_stock} placeholder="leer = Vorlage / keiner" />
         </label>
+        {#if !hasMaterialTemplates}
+          <p class="empty" style="grid-column:1/-1;margin:0">
+            Noch keine Vorlage — Material bearbeiten und „Ist Vorlage“ setzen.
+          </p>
+        {/if}
       </div>
       <fieldset class="tag-picker" style="margin-top:.75rem">
         <legend>Farben</legend>
@@ -4231,7 +4298,7 @@
             </div>
           </section>
 
-          {#if bulkEditModal.kind === 'product'}
+          {#if bulkEditModal.kind === 'product' || bulkEditModal.kind === 'material'}
             <section class="bulk-block">
               <h4 class="bulk-block-title">Ist Vorlage</h4>
               <div class="bulk-block-body">

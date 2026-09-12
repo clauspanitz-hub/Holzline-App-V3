@@ -192,6 +192,19 @@ def resolve_tags(db: Session, tag_ids: list[int]) -> list[Tag]:
     return [by_id[tid] for tid in unique_ids]
 
 
+def merge_tags(*groups: list[Tag]) -> list[Tag]:
+    """Merge tag lists preserving order; first occurrence wins."""
+    out: list[Tag] = []
+    seen: set[int] = set()
+    for group in groups:
+        for tag in group:
+            if tag.id in seen:
+                continue
+            seen.add(tag.id)
+            out.append(tag)
+    return out
+
+
 def ensure_system_incomplete_tags(db: Session) -> list[str]:
     """Create missing system fehlt-tags. Returns names of newly created tags."""
     from app.incomplete_tags import SYSTEM_INCOMPLETE_TAG_NAMES
@@ -800,6 +813,7 @@ def material_read(material: Material) -> MaterialRead:
         purchase_price=material.purchase_price,
         cost_per_unit=material.cost_per_unit,
         min_stock=material.min_stock,
+        is_template=bool(getattr(material, "is_template", False)),
         family=material.family,
         overview_ignored=bool(getattr(material, "overview_ignored", False)),
         color_id=material.color_id,
@@ -960,10 +974,42 @@ def create_materials_from_colors(db: Session, payload: MaterialsFromColorsReques
     skipped: list[BulkSkipInfo] = []
     warnings: list[str] = []
     location = get_location(db, payload.location_id) if payload.location_id else default_location(db)
-    tags = resolve_tags(db, payload.tag_ids)
-    purchase_quantity = _q(payload.purchase_quantity)
-    purchase_price = _m(payload.purchase_price)
+
+    template: Material | None = None
+    if payload.template_material_id is not None:
+        template = _load_material(db, payload.template_material_id)
+
+    unit = payload.unit if payload.unit is not None else (template.unit if template else None)
+    if payload.purchase_quantity is not None:
+        purchase_quantity = _q(payload.purchase_quantity)
+    elif template is not None:
+        purchase_quantity = _q(template.purchase_quantity)
+    else:
+        purchase_quantity = None
+    if payload.purchase_price is not None:
+        purchase_price = _m(payload.purchase_price)
+    elif template is not None:
+        purchase_price = _m(template.purchase_price)
+    else:
+        purchase_price = None
+
+    if unit is None or purchase_quantity is None or purchase_price is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Einheit und Einkauf müssen im Dialog stehen oder von der Vorlage kommen",
+        )
+
     cost = _unit_cost(purchase_price, purchase_quantity)
+    dialog_tags = resolve_tags(db, payload.tag_ids)
+    template_tags = list(template.tags) if template else []
+    tags = merge_tags(template_tags, dialog_tags)
+
+    if payload.min_stock is not None:
+        series_min_stock: Decimal | None = _q(payload.min_stock)
+    elif template is not None and template.min_stock is not None:
+        series_min_stock = _q(template.min_stock)
+    else:
+        series_min_stock = None
 
     seen: set[int] = set()
     for color_id in payload.color_ids:
@@ -982,13 +1028,19 @@ def create_materials_from_colors(db: Session, payload: MaterialsFromColorsReques
         name, name_warn = _unique_material_name(db, color)
         if name_warn:
             warnings.append(name_warn)
+        if template is not None:
+            family = template.family
+        else:
+            medium = color.medium
+            family = medium.name if medium is not None else None
         material = Material(
             name=name,
-            unit=payload.unit,
+            unit=unit,
             purchase_quantity=purchase_quantity,
             purchase_price=purchase_price,
             cost_per_unit=cost,
-            min_stock=_q(payload.min_stock) if payload.min_stock is not None else None,
+            min_stock=series_min_stock,
+            family=family,
             color_id=color.id,
         )
         material.tags = list(tags)
@@ -1317,15 +1369,19 @@ def create_products_from_colors(db: Session, payload: ProductsFromColorsRequest)
     skipped: list[BulkSkipInfo] = []
     warnings: list[str] = []
     location = get_location(db, payload.location_id) if payload.location_id else default_location(db)
-    tags = resolve_tags(db, payload.tag_ids)
+    dialog_tags = resolve_tags(db, payload.tag_ids)
     used_names: set[str] = set()
 
     template_lines: list[ProductMaterial] = []
     template_min_stock: Decimal | None = None
+    template_tags: list[Tag] = []
     if payload.template_product_id is not None:
         template = _load_product(db, payload.template_product_id)
         template_lines = list(template.materials)
         template_min_stock = template.min_stock
+        template_tags = list(template.tags)
+
+    tags = merge_tags(template_tags, dialog_tags)
 
     if payload.min_stock is not None:
         series_min_stock: Decimal | None = _q(payload.min_stock)
@@ -1496,6 +1552,8 @@ def bulk_update_materials(db: Session, payload: "MaterialBulkUpdate") -> list[Ma
             material.family = None
         elif payload.family is not None:
             material.family = family
+        if payload.is_template is not None:
+            material.is_template = bool(payload.is_template)
         if tags is not None:
             material.tags = list(tags)
         sync_incomplete_tags(db, material, before_missing=before_missing)

@@ -103,6 +103,7 @@ class Material(Base):
     purchase_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=Decimal("0"))
     cost_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False, default=Decimal("0"))
     min_stock: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     family: Mapped[str | None] = mapped_column(String(200), nullable=True)
     overview_ignored: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     color_id: Mapped[int | None] = mapped_column(ForeignKey("colors.id", ondelete="SET NULL"), nullable=True)

@@ -171,6 +171,7 @@ def init_db() -> None:
         migrate_color_media_catalog(engine, db)
         migrate_min_stock(engine)
         migrate_product_is_template(engine)
+        migrate_material_is_template(engine)
         migrate_audit_timestamps(engine)
         migrate_transform_target(engine)
         migrate_product_family(engine)
@@ -256,6 +257,17 @@ def migrate_product_is_template(engine) -> None:
         cols = {c["name"] for c in insp.get_columns("products")}
         if "is_template" not in cols:
             conn.execute(text("ALTER TABLE products ADD COLUMN is_template BOOLEAN NOT NULL DEFAULT 0"))
+
+
+def migrate_material_is_template(engine) -> None:
+    """Add materials.is_template flag for Serienanlage-Vorlagen."""
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        if "materials" not in insp.get_table_names():
+            return
+        cols = {c["name"] for c in insp.get_columns("materials")}
+        if "is_template" not in cols:
+            conn.execute(text("ALTER TABLE materials ADD COLUMN is_template BOOLEAN NOT NULL DEFAULT 0"))
 
 
 def migrate_transform_target(engine) -> None:

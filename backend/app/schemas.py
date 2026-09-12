@@ -132,6 +132,7 @@ class MaterialUpdate(BaseModel):
     purchase_quantity: Quantity | None = Field(default=None, gt=0)
     purchase_price: Money | None = None
     min_stock: Quantity | None = None
+    is_template: bool | None = None
     family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     tag_ids: list[int] | None = None
@@ -156,6 +157,7 @@ class MaterialRead(BaseModel):
     purchase_price: Money
     cost_per_unit: UnitCost
     min_stock: Quantity | None = None
+    is_template: bool = False
     family: str | None = None
     overview_ignored: bool = False
     color_id: int | None = None
@@ -495,12 +497,31 @@ class BulkSkipInfo(BaseModel):
 
 class MaterialsFromColorsRequest(BaseModel):
     color_ids: list[int] = Field(min_length=1)
-    unit: Unit
-    purchase_quantity: Quantity = Field(default=Decimal("1"), gt=0)
-    purchase_price: Money = Decimal("0")
+    template_material_id: int | None = None
+    unit: Unit | None = None
+    purchase_quantity: Quantity | None = Field(default=None, gt=0)
+    purchase_price: Money | None = None
     min_stock: Quantity | None = None
     location_id: int | None = None
     tag_ids: list[int] = []
+
+    @model_validator(mode="after")
+    def require_stammdaten_or_template(self) -> "MaterialsFromColorsRequest":
+        if self.template_material_id is not None:
+            return self
+        missing: list[str] = []
+        if self.unit is None:
+            missing.append("unit")
+        if self.purchase_quantity is None:
+            missing.append("purchase_quantity")
+        if self.purchase_price is None:
+            missing.append("purchase_price")
+        if missing:
+            raise ValueError(
+                "Ohne Vorlage sind Einheit und Einkauf Pflicht "
+                f"(fehlt: {', '.join(missing)})"
+            )
+        return self
 
 
 class MaterialsFromColorsResult(BaseModel):
@@ -532,6 +553,7 @@ class MaterialBulkUpdate(BaseModel):
     tag_ids: list[int] | None = None
     family: str | None = Field(default=None, max_length=200)
     clear_family: bool = False
+    is_template: bool | None = None
 
 
 class ProductBulkUpdate(BaseModel):

@@ -17,7 +17,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 ## 3. Datenmodell
 
 ### Phase 1 (Basis)
-- **materials:** `id`, `name` (unique), `unit`, `purchase_quantity`, `purchase_price`, `cost_per_unit` (= Preis/Einkaufsmenge), optional `min_stock`/`color`/`tags`/`family` (Materialfamilie), Audit `created_at`/`updated_at`/`created_by`/`updated_by` — Bestand nur in `material_stocks`
+- **materials:** `id`, `name` (unique), `unit`, `purchase_quantity`, `purchase_price`, `cost_per_unit` (= Preis/Einkaufsmenge), optional `min_stock`/`color`/`tags`/`family` (Materialfamilie), `is_template`, Audit `created_at`/`updated_at`/`created_by`/`updated_by` — Bestand nur in `material_stocks`
 - **products:** `id`, `name` (unique), `sku` (optional unique), optional `min_stock`/`color`/`tags`/`family` (Produktfamilie), `is_template`, Audit wie Materialien — kein Gesamtbestand mehr an der Zeile
 - **Unvollständig (UI):** Material: Mindestbestand, Einkaufspreis=0; Produkt: Mindestbestand, Stückliste — sichtbar als „!“ und als System-Tags `fehlt …` (ADR `0011`)
 - **product_materials:** Produkt-Stückliste — Material **oder** Komponenten-Produkt → Fertigen (ADR `0012`)
@@ -53,6 +53,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Medium als Katalog; Katalog-Tab; Serienanlage Materialien/Produkte aus Farben
 - [x] Medium als Katalog (Art), Farben/Optionen, Tags-Katalog, Tab Kataloge (ADR `0005`)
 - [x] Produkt-Flag „Ist Vorlage“ + Serienanlage-UX (Vorlagen priorisiert)
+- [x] Material-Flag „Ist Vorlage“ + Serienanlage wie Produkte (Stammdaten/Tags; Familie aus Vorlage bzw. Medium)
 - [x] Standort Ausschuss; Quell→Ziel; Umwandeln; Bewegungs-Historie; Bei Mitarbeitern (ADR `0006`)
 - [x] Serien-Mindestbestand; Produktfamilie; Mehrfachbearbeitung (ADR `0007`)
 - [x] JSON-Datensicherung Export/Import; Übersicht mit Familienfilter; leichtes UI-Split (ADR `0008`)
