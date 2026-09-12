@@ -221,6 +221,7 @@ class BomLineRead(BaseModel):
 class ProductBase(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     sku: str | None = Field(default=None, max_length=100)
+    selling_price: Money = Decimal("0")
     min_stock: Quantity | None = None
     is_template: bool = False
     family: str | None = Field(default=None, max_length=200)
@@ -254,6 +255,7 @@ class ProductCreate(ProductBase):
 class ProductUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     sku: str | None = Field(default=None, max_length=100)
+    selling_price: Money | None = None
     min_stock: Quantity | None = None
     is_template: bool | None = None
     is_on_demand: bool | None = None
@@ -286,6 +288,7 @@ class ProductRead(BaseModel):
     id: int
     name: str
     sku: str | None
+    selling_price: Money = Decimal("0")
     min_stock: Quantity | None = None
     is_template: bool = False
     is_on_demand: bool = False
@@ -490,6 +493,13 @@ class ShopifySeriesJob(BaseModel):
     option_values: dict[str, list[str]] = {}
 
 
+class SellingPriceConflict(BaseModel):
+    product_id: int
+    name: str
+    current: Money
+    csv: Money
+
+
 class ShopifyApplyResult(BaseModel):
     sets_created: int = 0
     sets_updated: int = 0
@@ -498,6 +508,8 @@ class ShopifyApplyResult(BaseModel):
     queue_upserted: int = 0
     series_jobs: list[ShopifySeriesJob] = []
     set_ids: list[int] = []
+    selling_prices_filled: int = 0
+    selling_price_conflicts: list[SellingPriceConflict] = []
     message: str
 
 
@@ -658,6 +670,7 @@ class ProductBulkUpdate(BaseModel):
     ids: list[int] = Field(min_length=1)
     min_stock: Quantity | None = None
     clear_min_stock: bool = False
+    selling_price: Money | None = None
     tag_ids: list[int] | None = None
     family: str | None = Field(default=None, max_length=200)
     clear_family: bool = False

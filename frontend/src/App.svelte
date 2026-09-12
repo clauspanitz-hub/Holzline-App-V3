@@ -12,6 +12,7 @@
   import ProductGroupSection from './lib/components/ProductGroupSection.svelte'
   import BackupPanel from './lib/components/BackupPanel.svelte'
   import FilterBar from './lib/components/FilterBar.svelte'
+  import ExtraGapPanels from './lib/components/ExtraGapPanels.svelte'
   import { applyCatalogFilter, emptyCatalogFilter } from './lib/catalogFilter.js'
 
   let tab = $state('overview')
@@ -35,6 +36,15 @@
   let overviewIncompleteOpen = $state(false)
   let overviewIgnoredOpen = $state(false)
   let overviewOrdersOpen = $state(true)
+  let extraMatCriticalOpen = $state(false)
+  let extraMatIncompleteOpen = $state(false)
+  let extraMatIgnoredOpen = $state(false)
+  let extraProdCriticalOpen = $state(false)
+  let extraProdIncompleteOpen = $state(false)
+  let extraProdIgnoredOpen = $state(false)
+  let sellingPriceConflicts = $state(null)
+  let sellingPriceStage = $state('ask')
+  let sellingPricePicks = $state({})
   let overviewTodosOpen = $state(true)
   let shippedOrdersOpen = $state(false)
   let colorSuggestions = $state([])
@@ -190,6 +200,7 @@
     return {
       name: '',
       sku: '',
+      selling_price: '0',
       stock_quantity: '0',
       min_stock: '',
       is_template: false,
@@ -251,6 +262,7 @@
     return {
       deleteSelected: false,
       min_stock: '',
+      selling_price: '',
       clear_min_stock: false,
       setTags: false,
       tagIds: [],
@@ -717,6 +729,7 @@
     try {
       await api.orders.remove(order.id)
       await refresh()
+      showFlash('ok', 'Bestellung gelöscht.')
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -833,7 +846,65 @@
       if (kind === 'material') await api.materials.update(item.id, { overview_ignored: ignored })
       else await api.products.update(item.id, { overview_ignored: ignored })
       await refresh()
-      showFlash('ok', ignored ? 'Aus Übersicht ausgeblendet.' : 'Wieder in Übersicht.')
+      showFlash('ok', ignored ? 'Aus der Warnliste ausgeblendet.' : 'Wieder in der Warnliste.')
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function patchGapItem(kind, item, patch) {
+    saving = true
+    try {
+      if (kind === 'material') await api.materials.update(item.id, patch)
+      else await api.products.update(item.id, patch)
+      await refresh({ silent: true })
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function adjustGapStock(kind, item, body) {
+    saving = true
+    try {
+      if (kind === 'material') await api.materials.adjustStock(item.id, body)
+      else await api.products.adjustStock(item.id, body)
+      await refresh({ silent: true })
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function resolveSellingPriceConflicts(mode, overrides = {}) {
+    const rows = sellingPriceConflicts || []
+    if (!rows.length) return
+    saving = true
+    try {
+      const idsCsv = []
+      for (const row of rows) {
+        const choice = overrides[row.product_id] || mode
+        if (choice === 'csv') idsCsv.push(row.product_id)
+      }
+      if (idsCsv.length) {
+        const byPrice = new Map()
+        for (const row of rows) {
+          if (!idsCsv.includes(row.product_id)) continue
+          const key = String(row.csv)
+          if (!byPrice.has(key)) byPrice.set(key, [])
+          byPrice.get(key).push(row.product_id)
+        }
+        for (const [price, ids] of byPrice) {
+          await api.products.bulkUpdate({ ids, selling_price: price })
+        }
+      }
+      sellingPriceConflicts = null
+      await refresh()
+      showFlash('ok', mode === 'keep' ? 'Bisherige Verkaufspreise behalten.' : 'Verkaufspreise aus CSV übernommen.')
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -928,6 +999,9 @@
       const min = parseOptionalQty(bulkEditForm.min_stock)
       if (min != null) body.min_stock = min
     }
+    if (bulkEditForm.selling_price !== '' && bulkEditForm.selling_price != null) {
+      body.selling_price = bulkEditForm.selling_price
+    }
     if (bulkEditForm.setTags) body.tag_ids = bulkEditForm.tagIds
     if (bulkEditForm.clear_family) body.clear_family = true
     else if (bulkEditForm.family.trim()) body.family = bulkEditForm.family.trim()
@@ -938,6 +1012,7 @@
       const hasSafeFields =
         body.clear_min_stock ||
         body.min_stock != null ||
+        body.selling_price != null ||
         body.tag_ids ||
         body.clear_family ||
         body.family != null ||
@@ -1517,6 +1592,54 @@
       stockSortGetter('name'),
     ),
   )
+  const extraCriticalMaterials = $derived(
+    prepareRows(
+      applyCatalogFilter(criticalMaterials, catalogFilter, colors),
+      { q: catalogFilter.q, sortKey: 'name', sortDir: 'asc' },
+      (m) => stockRowSearchText(m, materialLocations),
+      stockSortGetter('name'),
+    ),
+  )
+  const extraIncompleteMaterials = $derived(
+    prepareRows(
+      applyCatalogFilter(incompleteMaterials, catalogFilter, colors),
+      { q: catalogFilter.q, sortKey: 'name', sortDir: 'asc' },
+      (m) => stockRowSearchText(m, materialLocations),
+      stockSortGetter('name'),
+    ),
+  )
+  const extraCriticalProducts = $derived(
+    prepareRows(
+      applyCatalogFilter(criticalProducts, catalogFilter, colors),
+      { q: catalogFilter.q, sortKey: 'name', sortDir: 'asc' },
+      (p) => stockRowSearchText(p, materialLocations),
+      stockSortGetter('name'),
+    ),
+  )
+  const extraIncompleteProducts = $derived(
+    prepareRows(
+      applyCatalogFilter(incompleteProducts, catalogFilter, colors),
+      { q: catalogFilter.q, sortKey: 'name', sortDir: 'asc' },
+      (p) => stockRowSearchText(p, materialLocations),
+      stockSortGetter('name'),
+    ),
+  )
+  const extraIgnoredMaterials = $derived(
+    prepareRows(
+      applyCatalogFilter(ignoredCriticalMaterials, catalogFilter, colors),
+      { q: catalogFilter.q, sortKey: 'name', sortDir: 'asc' },
+      (m) => stockRowSearchText(m, materialLocations),
+      stockSortGetter('name'),
+    ),
+  )
+  const extraIgnoredProducts = $derived(
+    prepareRows(
+      applyCatalogFilter(ignoredCriticalProducts, catalogFilter, colors),
+      { q: catalogFilter.q, sortKey: 'name', sortDir: 'asc' },
+      (p) => stockRowSearchText(p, materialLocations),
+      stockSortGetter('name'),
+    ),
+  )
   const incompleteProductGroups = $derived(groupProductsByFamily(displayedIncompleteProducts))
   const incompleteMaterialGroups = $derived(groupProductsByFamily(displayedIncompleteMaterials))
   const bomQtyStep = $derived.by(() => {
@@ -1651,6 +1774,7 @@
         ...productForm,
         name: `${template.name} (Kopie)`,
         sku: '',
+        selling_price: template.selling_price != null ? String(template.selling_price) : '0',
         stock_quantity: '0',
         min_stock: template.min_stock != null ? String(template.min_stock) : '',
         family: template.family || '',
@@ -1669,6 +1793,7 @@
     productForm = {
       name: product.name,
       sku: product.sku || '',
+      selling_price: product.selling_price != null ? String(product.selling_price) : '0',
       stock_quantity: '0',
       min_stock: product.min_stock != null ? String(product.min_stock) : '',
       is_template: !!product.is_template,
@@ -1932,6 +2057,7 @@
   }
 
   async function deleteCatalogColor(item) {
+    if (!confirm(`Farbe „${item.name}“ löschen?`)) return
     saving = true
     try {
       await api.colors.remove(item.id)
@@ -2155,6 +2281,7 @@
         const created = await api.products.create({
           name: productForm.name.trim(),
           sku: productForm.sku.trim() || null,
+          selling_price: productForm.selling_price === '' ? '0' : productForm.selling_price,
           min_stock: parseOptionalQty(productForm.min_stock),
           is_template: !!productForm.is_template,
           family: productForm.family.trim() || null,
@@ -2221,6 +2348,7 @@
         await api.products.update(productModal.product.id, {
           name: productForm.name.trim(),
           sku: productForm.sku.trim() || null,
+          selling_price: productForm.selling_price === '' ? '0' : productForm.selling_price,
           min_stock: parseOptionalQty(productForm.min_stock),
           is_template: !!productForm.is_template,
           family: productForm.family.trim() || null,
@@ -2496,6 +2624,11 @@
       const result = await api.sets.applyShopify(shopifyAssistant.file, items)
       shopifyAssistant = null
       await refresh()
+      if (result.selling_price_conflicts?.length) {
+        sellingPriceConflicts = result.selling_price_conflicts
+        sellingPriceStage = 'ask'
+        sellingPricePicks = Object.fromEntries(result.selling_price_conflicts.map((c) => [c.product_id, 'csv']))
+      }
       showFlash('ok', result.message)
       if (result.queue_upserted > 0) {
         tab = 'import'
@@ -3374,6 +3507,23 @@
     </section>
     <BackupPanel onFlash={showFlash} onImported={refresh} />
   {:else if tab === 'materials'}
+    <ExtraGapPanels
+      kind="material"
+      criticalRows={extraCriticalMaterials}
+      incompleteRows={extraIncompleteMaterials}
+      ignoredRows={extraIgnoredMaterials}
+      locations={materialLocations}
+      bind:selectedIds={selectedMaterialIds}
+      bind:criticalOpen={extraMatCriticalOpen}
+      bind:incompleteOpen={extraMatIncompleteOpen}
+      bind:ignoredOpen={extraMatIgnoredOpen}
+      {saving}
+      onOpenEdit={openEditMaterial}
+      onIgnore={(item) => setOverviewIgnored('material', item, true)}
+      onUnignore={(item) => setOverviewIgnored('material', item, false)}
+      onPatch={(item, patch) => patchGapItem('material', item, patch)}
+      onAdjustStock={(item, body) => adjustGapStock('material', item, body)}
+    />
     <section class="panel">
       <div class="panel-header">
         <h2>Materialien</h2>
@@ -3478,7 +3628,7 @@
                     <div class="row-actions">
                       <button class="btn secondary" onclick={() => openEditMaterial(material)}>Bearbeiten</button>
                       <button class="btn secondary" onclick={() => openTransfer('material', material)}>Umbuchen</button>
-                      <button class="btn danger" onclick={() => removeMaterial(material)}>Löschen</button>
+                      <button type="button" class="btn danger" onclick={(e) => { e.stopPropagation(); removeMaterial(material) }}>Löschen</button>
                     </div>
                   </td>
                 </tr>
@@ -3489,6 +3639,23 @@
       </div>
     </section>
   {:else if tab === 'products'}
+    <ExtraGapPanels
+      kind="product"
+      criticalRows={extraCriticalProducts}
+      incompleteRows={extraIncompleteProducts}
+      ignoredRows={extraIgnoredProducts}
+      locations={materialLocations}
+      bind:selectedIds={selectedProductIds}
+      bind:criticalOpen={extraProdCriticalOpen}
+      bind:incompleteOpen={extraProdIncompleteOpen}
+      bind:ignoredOpen={extraProdIgnoredOpen}
+      {saving}
+      onOpenEdit={openEditProduct}
+      onIgnore={(item) => setOverviewIgnored('product', item, true)}
+      onUnignore={(item) => setOverviewIgnored('product', item, false)}
+      onPatch={(item, patch) => patchGapItem('product', item, patch)}
+      onAdjustStock={(item, body) => adjustGapStock('product', item, body)}
+    />
     <section class="panel">
       <div class="panel-header">
         <h2>Produkte</h2>
@@ -3594,7 +3761,7 @@
                         <button class="btn secondary" onclick={() => openTransform(product)}>Umwandeln</button>
                       {/if}
                       <button class="btn secondary" onclick={() => openMovements(product)}>Historie</button>
-                      <button class="btn danger" onclick={() => removeProduct(product)}>Löschen</button>
+                      <button type="button" class="btn danger" onclick={(e) => { e.stopPropagation(); removeProduct(product) }}>Löschen</button>
                     </div>
                   </td>
                 </tr>
@@ -3730,8 +3897,7 @@
                     {#if canTransformProduct(product)}
                       <button class="btn" onclick={() => openTransform(product)}>Umwandeln</button>
                     {/if}
-                    <button class="btn secondary" onclick={() => openMovements(product)}>Historie</button>
-                    <button class="btn secondary" onclick={() => openEditProduct(product)}>Bearbeiten</button>
+                    <button type="button" class="btn secondary" onclick={() => openMovements(product)}>Historie</button>
                   </div>
                 </td>
               </tr>
@@ -4333,6 +4499,9 @@
           {#each products as p}<option value={p.name}></option>{/each}
         </datalist>
         <label>SKU<input bind:value={productForm.sku} placeholder="optional" /></label>
+        <label>Verkaufspreis (€)
+          <input type="number" step="0.01" min="0" bind:value={productForm.selling_price} />
+        </label>
         <label>Produktfamilie
           <input list="product-family-suggestions" bind:value={productForm.family} placeholder="optional, z. B. Ring" />
         </label>
@@ -4455,7 +4624,7 @@
                 · {formatQty(line.quantity_required, line.decimal_places ?? 0)}{line.material_unit ? ` ${line.material_unit}` : ''}
                 · {formatMoney(line.line_cost)}
               </div>
-              <button class="btn danger" onclick={() => removeBomLine(line)}>Entfernen</button>
+              <button type="button" class="btn danger" onclick={() => removeBomLine(line)}>Entfernen</button>
             </div>
           {:else}
             <p class="empty">Keine Stückliste.</p>
@@ -4682,7 +4851,7 @@
                 {mapping.component_name}
                 (× {formatQty(mapping.quantity_required)})
               </div>
-              <button class="btn danger" disabled={saving} onclick={() => removeMapping(mapping)}>Entfernen</button>
+              <button type="button" class="btn danger" disabled={saving} onclick={() => removeMapping(mapping)}>Entfernen</button>
             </div>
           {:else}
             <p class="empty">Keine Options-Zuordnung — unter Schritt 2 anlegen.</p>
@@ -4697,7 +4866,7 @@
                 <strong>{comp.name}</strong>
                 <span class="empty">· in {comp.count} Varianten</span>
               </div>
-              <button class="btn danger" disabled={saving} onclick={() => detachSetComponent(comp)}>Entfernen</button>
+              <button type="button" class="btn danger" disabled={saving} onclick={() => detachSetComponent(comp)}>Entfernen</button>
             </div>
           {:else}
             <p class="empty">Noch keine Stücklistenzeilen — Zuordnungen anwenden oder manuell setzen.</p>
@@ -4724,7 +4893,7 @@
                 {mapping.component_name}
                 (× {formatQty(mapping.quantity_required)})
               </div>
-              <button class="btn danger" onclick={() => removeMapping(mapping)}>Entfernen</button>
+              <button type="button" class="btn danger" onclick={() => removeMapping(mapping)}>Entfernen</button>
             </div>
           {:else}
             <p class="empty">Noch keine Zuordnung — unten die erste Option zuordnen.</p>
@@ -5247,6 +5416,49 @@
   </div>
 {/if}
 
+{#if sellingPriceConflicts?.length}
+  <div class="modal-backdrop" role="presentation">
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Verkaufspreise weichen ab</h3>
+      {#if sellingPriceStage === 'ask'}
+        <p class="empty" style="margin-top:0">
+          {sellingPriceConflicts.length} Produkt(e) haben schon einen Preis, der vom CSV abweicht.
+        </p>
+        <div class="modal-actions">
+          <button type="button" class="btn" disabled={saving} onclick={() => resolveSellingPriceConflicts('csv')}>alle CSV</button>
+          <button type="button" class="btn secondary" disabled={saving} onclick={() => resolveSellingPriceConflicts('keep')}>alle behalten</button>
+          <button type="button" class="btn secondary" onclick={() => (sellingPriceStage = 'list')}>einzeln</button>
+        </div>
+      {:else}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Produkt</th><th>Bisher</th><th>CSV</th><th></th></tr>
+            </thead>
+            <tbody>
+              {#each sellingPriceConflicts as row}
+                <tr>
+                  <td>{row.name}</td>
+                  <td class="num">{formatMoney(row.current)}</td>
+                  <td class="num">{formatMoney(row.csv)}</td>
+                  <td>
+                    <label><input type="radio" name={`price-${row.product_id}`} checked={sellingPricePicks[row.product_id] === 'csv'} onchange={() => (sellingPricePicks = { ...sellingPricePicks, [row.product_id]: 'csv' })} /> CSV</label>
+                    <label><input type="radio" name={`price-${row.product_id}`} checked={sellingPricePicks[row.product_id] === 'keep'} onchange={() => (sellingPricePicks = { ...sellingPricePicks, [row.product_id]: 'keep' })} /> behalten</label>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn secondary" onclick={() => (sellingPriceStage = 'ask')}>Zurück</button>
+          <button type="button" class="btn" disabled={saving} onclick={() => resolveSellingPriceConflicts('mixed', sellingPricePicks)}>Übernehmen</button>
+        </div>
+      {/if}
+    </div>
+  </div>
+{/if}
+
 {#if bulkEditModal}
   <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (bulkEditModal = null)}>
     <div class="modal modal-bulk" role="dialog" aria-modal="true">
@@ -5288,6 +5500,23 @@
               </label>
             </div>
           </section>
+
+          {#if bulkEditModal.kind === 'product'}
+            <section class="bulk-block">
+              <h4 class="bulk-block-title">Verkaufspreis</h4>
+              <div class="bulk-block-body">
+                <label class="bulk-field">Wert setzen (€)
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    bind:value={bulkEditForm.selling_price}
+                    placeholder="leer = nicht ändern"
+                  />
+                </label>
+              </div>
+            </section>
+          {/if}
 
           <section class="bulk-block">
             <h4 class="bulk-block-title">{bulkEditModal.kind === 'material' ? 'Materialfamilie' : 'Produktfamilie'}</h4>
@@ -5407,9 +5636,9 @@
         <div class="modal-actions">
           <button type="button" class="btn secondary" onclick={() => (bulkEditModal = null)}>Abbrechen</button>
           {#if bulkEditForm.deleteSelected}
-            <button class="btn danger" disabled={saving}>Löschen</button>
+            <button type="submit" class="btn danger" disabled={saving}>Löschen</button>
           {:else}
-            <button class="btn" disabled={saving}>Speichern</button>
+            <button type="submit" class="btn" disabled={saving}>Speichern</button>
           {/if}
         </div>
       </form>

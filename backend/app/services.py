@@ -796,6 +796,8 @@ def product_incomplete_fields_raw(product: Product) -> list[str]:
         missing.append("Mindestbestand")
     if not product.materials:
         missing.append("Stückliste")
+    if Decimal(getattr(product, "selling_price", 0) or 0) == 0:
+        missing.append("Verkaufspreis")
     return missing
 
 
@@ -853,6 +855,7 @@ def product_read(product: Product) -> ProductRead:
         id=product.id,
         name=product.name,
         sku=product.sku,
+        selling_price=getattr(product, "selling_price", None) or Decimal("0"),
         min_stock=product.min_stock,
         is_template=bool(product.is_template),
         is_on_demand=bool(getattr(product, "is_on_demand", False)),
@@ -1269,6 +1272,7 @@ def create_product(db: Session, payload: ProductCreate) -> ProductRead:
     product = Product(
         name=payload.name.strip(),
         sku=payload.sku,
+        selling_price=_m(getattr(payload, "selling_price", None) or 0),
         min_stock=_q(payload.min_stock) if payload.min_stock is not None else None,
         is_template=bool(payload.is_template),
         is_on_demand=bool(getattr(payload, "is_on_demand", False)),
@@ -1388,11 +1392,13 @@ def create_products_from_colors(db: Session, payload: ProductsFromColorsRequest)
 
     template_lines: list[ProductMaterial] = []
     template_min_stock: Decimal | None = None
+    template_selling_price: Decimal = Decimal("0")
     template_tags: list[Tag] = []
     if payload.template_product_id is not None:
         template = _load_product(db, payload.template_product_id)
         template_lines = list(template.materials)
         template_min_stock = template.min_stock
+        template_selling_price = Decimal(getattr(template, "selling_price", 0) or 0)
         template_tags = list(template.tags)
 
     tags = merge_tags(template_tags, dialog_tags)
@@ -1427,6 +1433,7 @@ def create_products_from_colors(db: Session, payload: ProductsFromColorsRequest)
             sku=None,
             color_id=color.id,
             min_stock=series_min_stock,
+            selling_price=template_selling_price,
             family=base,
             is_on_demand=bool(payload.is_on_demand),
         )
@@ -1526,6 +1533,8 @@ def update_product(db: Session, product_id: int, payload: ProductUpdate) -> Prod
         data["family"] = data["family"].strip() or None
     if "min_stock" in data:
         data["min_stock"] = _q(data["min_stock"]) if data["min_stock"] is not None else None
+    if "selling_price" in data and data["selling_price"] is not None:
+        data["selling_price"] = _m(data["selling_price"])
     if "color_id" in data:
         color = get_color(db, data["color_id"])
         data["color_id"] = color.id if color else None
@@ -1593,6 +1602,8 @@ def bulk_update_products(db: Session, payload: "ProductBulkUpdate") -> list[Prod
             product.min_stock = None
         elif payload.min_stock is not None:
             product.min_stock = _q(payload.min_stock)
+        if payload.selling_price is not None:
+            product.selling_price = _m(payload.selling_price)
         if payload.clear_family:
             product.family = None
         elif payload.family is not None:
@@ -2374,6 +2385,86 @@ def preview_shopify_catalog_csv(db: Session, content: str) -> "ShopifyPreviewRes
     return ShopifyPreviewResult(handles=handles, ignored_total=len(ignored_map))
 
 
+def _norm_label(value: str | None) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _match_product_for_variant_price(products: list[Product], title: str, option_values: tuple, sku: str | None) -> Product | None:
+    sku_key = (sku or "").strip().lower()
+    if sku_key:
+        for product in products:
+            if (product.sku or "").strip().lower() == sku_key:
+                return product
+    title_n = _norm_label(title)
+    option_ns = {_norm_label(v) for v in option_values if v}
+    hits: list[Product] = []
+    for product in products:
+        color_n = _norm_label(product.color.name) if product.color else ""
+        name_n = _norm_label(product.name)
+        color_ok = bool(color_n and color_n in option_ns)
+        name_ok = bool(
+            title_n
+            and (
+                name_n == f"{title_n} {color_n}".strip()
+                or name_n.startswith(title_n)
+                or title_n in name_n
+            )
+        )
+        if color_ok and name_ok:
+            hits.append(product)
+    if len(hits) == 1:
+        return hits[0]
+    exact = [
+        p
+        for p in hits
+        if _norm_label(p.name) == f"{title_n} {_norm_label(p.color.name if p.color else '')}".strip()
+    ]
+    if len(exact) == 1:
+        return exact[0]
+    return None
+
+
+def apply_catalog_selling_prices(db: Session, usable: dict) -> tuple[int, list]:
+    """Fill empty/0 Verkaufspreis from CSV; collect conflicts when a price already exists."""
+    from app.schemas import SellingPriceConflict
+
+    products = list(
+        db.scalars(
+            select(Product).options(
+                selectinload(Product.color).selectinload(Color.medium),
+                selectinload(Product.tags),
+                selectinload(Product.materials),
+            )
+        ).unique().all()
+    )
+    filled = 0
+    conflicts: dict[int, SellingPriceConflict] = {}
+    for data in usable.values():
+        title = data.get("title") or ""
+        for key, fields in (data.get("variants") or {}).items():
+            price = fields.get("price")
+            if price is None:
+                continue
+            product = _match_product_for_variant_price(products, title, key, fields.get("sku"))
+            if product is None:
+                continue
+            current = Decimal(getattr(product, "selling_price", 0) or 0)
+            if current == 0:
+                before = product_incomplete_fields_raw(product)
+                product.selling_price = _m(price)
+                sync_incomplete_tags(db, product, before_missing=before)
+                _stamp_update(product)
+                filled += 1
+            elif current != Decimal(price):
+                conflicts[product.id] = SellingPriceConflict(
+                    product_id=product.id,
+                    name=product.name,
+                    current=current,
+                    csv=_m(price),
+                )
+    return filled, list(conflicts.values())
+
+
 def apply_shopify_catalog_csv(db: Session, content: str, payload: "ShopifyApplyRequest") -> "ShopifyApplyResult":
     from app.models import ShopifyIgnoredHandle, ShopifyImportQueueItem
     from app.schemas import (
@@ -2471,6 +2562,9 @@ def apply_shopify_catalog_csv(db: Session, content: str, payload: "ShopifyApplyR
         upsert = _upsert_sets_from_catalog(db, usable, handles=set_handles)
 
     db.commit()
+    filled, conflicts = apply_catalog_selling_prices(db, usable)
+    if filled:
+        db.commit()
     parts = []
     if upsert["sets_touched"]:
         parts.append(upsert["message"])
@@ -2478,6 +2572,10 @@ def apply_shopify_catalog_csv(db: Session, content: str, payload: "ShopifyApplyR
         parts.append(f"{ignored_added} Handle(s) ignoriert")
     if queue_upserted:
         parts.append(f"{queue_upserted} in Import-Warteschlange")
+    if filled:
+        parts.append(f"{filled} Verkaufspreis/e gesetzt")
+    if conflicts:
+        parts.append(f"{len(conflicts)} Preisabweichung(en) zur Bestätigung")
     return ShopifyApplyResult(
         sets_created=upsert["sets_created"],
         sets_updated=max(0, upsert["sets_touched"] - upsert["sets_created"]),
@@ -2486,6 +2584,8 @@ def apply_shopify_catalog_csv(db: Session, content: str, payload: "ShopifyApplyR
         queue_upserted=queue_upserted,
         series_jobs=series_jobs,
         set_ids=upsert["set_ids"],
+        selling_prices_filled=filled,
+        selling_price_conflicts=conflicts,
         message="; ".join(parts) if parts else "Keine Änderungen.",
     )
 

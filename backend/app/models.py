@@ -128,6 +128,7 @@ class Product(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     sku: Mapped[str | None] = mapped_column(String(100), unique=True, nullable=True)
+    selling_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=Decimal("0"))
     min_stock: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_on_demand: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

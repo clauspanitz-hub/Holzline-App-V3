@@ -4,7 +4,34 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from collections import defaultdict
+from decimal import Decimal, InvalidOperation
+
+
+def parse_variant_price(raw: str | None) -> Decimal | None:
+    if raw is None:
+        return None
+    text = str(raw).strip().replace("€", "").replace(" ", "")
+    if not text:
+        return None
+    if "," in text and "." in text:
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif "," in text:
+        text = text.replace(",", ".")
+    text = re.sub(r"[^0-9.]", "", text)
+    if not text:
+        return None
+    try:
+        value = Decimal(text)
+    except InvalidOperation:
+        return None
+    if value < 0:
+        return None
+    return value.quantize(Decimal("0.01"))
 
 
 def parse_shopify_catalog_csv(content: str) -> dict[str, dict]:
@@ -49,6 +76,8 @@ def parse_shopify_catalog_csv(content: str) -> dict[str, dict]:
             continue
 
         key = (values[0], values[1], values[2])
+        sku = (row.get("Variant SKU") or row.get("SKU") or "").strip() or None
+        price = parse_variant_price(row.get("Variant Price") or row.get("Price"))
         by_handle[handle]["variants"][key] = {
             "option1_name": names[0],
             "option1_value": values[0],
@@ -56,6 +85,8 @@ def parse_shopify_catalog_csv(content: str) -> dict[str, dict]:
             "option2_value": values[1],
             "option3_name": names[2],
             "option3_value": values[2],
+            "sku": sku,
+            "price": price,
         }
         for n, v in zip(names, values):
             if n and v:
@@ -71,3 +102,4 @@ def parse_shopify_catalog_csv(content: str) -> dict[str, dict]:
         if data["variants"]
     }
     return usable
+

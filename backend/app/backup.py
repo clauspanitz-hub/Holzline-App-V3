@@ -208,6 +208,7 @@ def _export_product(product: Product) -> dict[str, Any]:
     return {
         "name": product.name,
         "sku": product.sku,
+        "selling_price": _num(getattr(product, "selling_price", None)),
         "min_stock": _num(product.min_stock),
         "is_template": product.is_template,
         "is_on_demand": bool(getattr(product, "is_on_demand", False)),
@@ -698,6 +699,8 @@ def _import_products(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
             product.name = name
 
         _apply_sku(ctx, product, sku, context=context)
+        selling_price = _dec_field(entry, "selling_price", context=context, default=Decimal("0"))
+        product.selling_price = services._m(selling_price if selling_price is not None else 0)
         min_stock = _dec_field(entry, "min_stock", context=context)
         product.min_stock = services._q(min_stock) if min_stock is not None else None
         product.is_template = _bool_field(entry, "is_template")

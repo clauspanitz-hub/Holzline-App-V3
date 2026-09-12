@@ -959,6 +959,20 @@ select {
   outline-offset: 1px;
 }
 
+.gap-cell {
+  width: 5.2rem;
+  max-width: 100%;
+  padding: 0.2rem 0.3rem;
+  background: var(--bg-soft);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.extra-gap-table .gap-cell {
+  font-variant-numeric: tabular-nums;
+}
+
 .catalog-filter-status {
   grid-column: 1 / -1;
   display: flex;

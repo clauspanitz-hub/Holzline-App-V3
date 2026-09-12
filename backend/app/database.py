@@ -177,6 +177,7 @@ def init_db() -> None:
         migrate_product_family(engine)
         migrate_material_family(engine)
         migrate_overview_ignored(engine)
+        migrate_product_selling_price(engine)
         migrate_product_bom_components(engine)
         migrate_shopify_ignored_handles(engine)
         migrate_product_is_on_demand(engine)
@@ -311,6 +312,19 @@ def migrate_material_family(engine) -> None:
         cols = {c["name"] for c in insp.get_columns("materials")}
         if "family" not in cols:
             conn.execute(text("ALTER TABLE materials ADD COLUMN family VARCHAR(200)"))
+
+
+def migrate_product_selling_price(engine) -> None:
+    """Verkaufspreis am Produkt (Euro, Default 0 = unvollständig)."""
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        if "products" not in insp.get_table_names():
+            return
+        cols = {c["name"] for c in insp.get_columns("products")}
+        if "selling_price" not in cols:
+            conn.execute(
+                text("ALTER TABLE products ADD COLUMN selling_price NUMERIC(14, 2) NOT NULL DEFAULT 0")
+            )
 
 
 def migrate_overview_ignored(engine) -> None:

@@ -18,8 +18,8 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 
 ### Phase 1 (Basis)
 - **materials:** `id`, `name` (unique), `unit`, `purchase_quantity`, `purchase_price`, `cost_per_unit` (= Preis/Einkaufsmenge), optional `min_stock`/`color`/`tags`/`family` (Materialfamilie), `is_template`, Audit `created_at`/`updated_at`/`created_by`/`updated_by` — Bestand nur in `material_stocks`
-- **products:** `id`, `name` (unique), `sku` (optional unique), optional `min_stock`/`color`/`tags`/`family` (Produktfamilie), `is_template`, Audit wie Materialien — kein Gesamtbestand mehr an der Zeile
-- **Unvollständig (UI):** Material: Mindestbestand, Einkaufspreis=0; Produkt: Mindestbestand, Stückliste — sichtbar als „!“ und als System-Tags `fehlt …` (ADR `0011`)
+- **products:** `id`, `name` (unique), `sku` (optional unique), `selling_price` (Verkaufspreis EUR, 0 = unvollständig), optional `min_stock`/`color`/`tags`/`family` (Produktfamilie), `is_template`, Audit wie Materialien — kein Gesamtbestand mehr an der Zeile
+- **Unvollständig (UI):** Material: Mindestbestand, Einkaufspreis=0; Produkt: Mindestbestand, Stückliste, Verkaufspreis=0 — sichtbar als „!“ und als System-Tags `fehlt …` (ADR `0011`)
 - **product_materials:** Produkt-Stückliste — Material **oder** Komponenten-Produkt → Fertigen (ADR `0012`)
 - **Materialherstellkosten:** live aus Produkt-Stückliste
 

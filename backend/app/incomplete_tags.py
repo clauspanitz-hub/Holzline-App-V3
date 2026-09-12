@@ -5,17 +5,19 @@ from __future__ import annotations
 FIELD_MIN_STOCK = "Mindestbestand"
 FIELD_BOM = "Stückliste"
 FIELD_PURCHASE = "Einkaufspreis"
+FIELD_SELLING = "Verkaufspreis"
 
 TAG_BY_FIELD: dict[str, str] = {
     FIELD_MIN_STOCK: "fehlt Mindestbestand",
     FIELD_BOM: "fehlt Stückliste",
     FIELD_PURCHASE: "fehlt Einkaufspreis",
+    FIELD_SELLING: "fehlt Verkaufspreis",
 }
 
 SYSTEM_INCOMPLETE_TAG_NAMES: frozenset[str] = frozenset(TAG_BY_FIELD.values())
 
 MATERIAL_INCOMPLETE_FIELDS: frozenset[str] = frozenset({FIELD_MIN_STOCK, FIELD_PURCHASE})
-PRODUCT_INCOMPLETE_FIELDS: frozenset[str] = frozenset({FIELD_MIN_STOCK, FIELD_BOM})
+PRODUCT_INCOMPLETE_FIELDS: frozenset[str] = frozenset({FIELD_MIN_STOCK, FIELD_BOM, FIELD_SELLING})
 
 
 def is_system_incomplete_tag(name: str) -> bool:
