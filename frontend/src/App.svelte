@@ -3145,7 +3145,7 @@
 
       <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewCriticalOpen = !overviewCriticalOpen)}>
         {overviewCriticalOpen ? '▼' : '▶'} Kritische Artikel
-        <span class="empty">({criticalProducts.length + criticalMaterials.length})</span>
+        <span class="empty">({displayedOverviewProducts.length + displayedOverviewMaterials.length})</span>
       </button>
       {#if overviewCriticalOpen}
         <p class="empty">
@@ -3297,7 +3297,7 @@
 
       <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewIncompleteOpen = !overviewIncompleteOpen)}>
         {overviewIncompleteOpen ? '▼' : '▶'} Unvollständigkeit
-        <span class="empty">({incompleteProducts.length + incompleteMaterials.length})</span>
+        <span class="empty">({displayedIncompleteProducts.length + displayedIncompleteMaterials.length})</span>
       </button>
       {#if overviewIncompleteOpen}
         <p class="empty">Fehlende Stammdaten (System-Tags „fehlt …“).</p>
