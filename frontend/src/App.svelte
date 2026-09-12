@@ -274,10 +274,6 @@
     return colors.filter((c) => c.medium_id === mid)
   }
 
-  function colorIdsWithMaterial() {
-    return new Set(materials.filter((m) => m.color_id).map((m) => m.color_id))
-  }
-
   function bulkProductName(baseName, color) {
     return `${String(baseName || '').trim()} ${color.name}`.trim()
   }
