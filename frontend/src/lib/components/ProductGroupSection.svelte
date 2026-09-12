@@ -21,7 +21,7 @@
     <td colspan={colSpan}>
       <div class="group-header-row">
         <button type="button" class="group-toggle" onclick={() => onToggleCollapse(group.key)}>
-          {collapsedFamilies[group.key] ? '▶' : '▼'}
+          {collapsedFamilies[group.key] === false ? '▼' : '▶'}
           {group.key}
           <span class="empty">({group.rows.length})</span>
         </button>
@@ -33,7 +33,7 @@
       </div>
     </td>
   </tr>
-  {#if !collapsedFamilies[group.key]}
+  {#if collapsedFamilies[group.key] === false}
     {#each group.rows as item (item.id)}
       {@render row({ item, product: item, group })}
     {/each}

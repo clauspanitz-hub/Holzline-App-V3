@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from math import floor
 
@@ -1232,10 +1232,6 @@ def list_products(
             selectinload(Product.materials).selectinload(ProductMaterial.component_product).selectinload(
                 Product.materials
             ).selectinload(ProductMaterial.material),
-            selectinload(Product.materials)
-            .selectinload(ProductMaterial.component_product)
-            .selectinload(Product.materials)
-            .selectinload(ProductMaterial.component_product),
             selectinload(Product.stocks).selectinload(ProductStock.location),
             selectinload(Product.color).selectinload(Color.medium),
             selectinload(Product.tags),
@@ -2012,9 +2008,17 @@ def _load_set(db: Session, set_id: int) -> ProductSet:
     return product_set
 
 
-def product_set_read(db: Session, product_set: ProductSet, include_variants: bool = True) -> ProductSetRead:
+def product_set_read(
+    db: Session,
+    product_set: ProductSet,
+    include_variants: bool = True,
+    include_mappings: bool = True,
+) -> ProductSetRead:
     variants = (
         [variant_read(db, product_set, variant) for variant in product_set.variants] if include_variants else []
+    )
+    mappings = (
+        [option_mapping_read(db, m) for m in product_set.option_mappings] if include_mappings else []
     )
     return ProductSetRead(
         id=product_set.id,
@@ -2022,8 +2026,9 @@ def product_set_read(db: Session, product_set: ProductSet, include_variants: boo
         handle=product_set.handle,
         count_materials_in_buildability=product_set.count_materials_in_buildability,
         variant_count=len(product_set.variants),
+        mapping_count=len(product_set.option_mappings),
         variants=variants,
-        option_mappings=[option_mapping_read(db, m) for m in product_set.option_mappings],
+        option_mappings=mappings,
     )
 
 
@@ -2032,11 +2037,11 @@ def list_sets(db: Session) -> list[ProductSetRead]:
         select(ProductSet)
         .order_by(ProductSet.name)
         .options(
-            selectinload(ProductSet.variants).selectinload(SetVariant.bom_lines),
+            selectinload(ProductSet.variants),
             selectinload(ProductSet.option_mappings),
         )
     ).all()
-    return [product_set_read(db, row) for row in rows]
+    return [product_set_read(db, row, include_variants=False, include_mappings=False) for row in rows]
 
 
 def create_set(db: Session, payload: ProductSetCreate) -> ProductSetRead:
@@ -2597,7 +2602,7 @@ def _todo_read(todo: WorkTodo) -> "TodoRead":
     )
 
 
-def _line_read(line: OrderLine) -> "OrderLineRead":
+def _line_read(line: OrderLine, include_todos: bool = True) -> "OrderLineRead":
     from app.schemas import OrderLineRead
 
     return OrderLineRead(
@@ -2608,11 +2613,11 @@ def _line_read(line: OrderLine) -> "OrderLineRead":
         material_id=line.material_id,
         product_name=line.product.name if line.product else None,
         material_name=line.material.name if line.material else None,
-        todos=[_todo_read(t) for t in line.todos],
+        todos=[_todo_read(t) for t in line.todos] if include_todos else [],
     )
 
 
-def _order_read(order: CustomerOrder) -> "OrderRead":
+def _order_read(order: CustomerOrder, include_line_todos: bool = True) -> "OrderRead":
     from app.schemas import OrderRead
 
     status = order.status if order.status in ("open", "ready", "shipped") else "open"
@@ -2622,7 +2627,7 @@ def _order_read(order: CustomerOrder) -> "OrderRead":
         customer_name=order.customer_name,
         external_number=order.external_number,
         status=status,
-        lines=[_line_read(ln) for ln in order.lines],
+        lines=[_line_read(ln, include_todos=include_line_todos) for ln in order.lines],
         todos=[_todo_read(t) for t in order.todos],
         created_at=order.created_at,
         updated_at=order.updated_at,
@@ -2707,7 +2712,7 @@ def create_order(db: Session, payload: "OrderCreate") -> "OrderRead":
 
     if not isinstance(payload, OrderCreate):
         payload = OrderCreate.model_validate(payload)
-    ordered_on = payload.ordered_on or date.today()
+    ordered_on = payload.ordered_on or datetime.now()
     order = CustomerOrder(
         ordered_on=ordered_on,
         customer_name=(payload.customer_name or "").strip() or None,
@@ -2746,8 +2751,6 @@ def list_orders(db: Session, status: str | None = None) -> list["OrderRead"]:
         .options(
             selectinload(CustomerOrder.lines).selectinload(OrderLine.product),
             selectinload(CustomerOrder.lines).selectinload(OrderLine.material),
-            selectinload(CustomerOrder.lines).selectinload(OrderLine.todos).selectinload(WorkTodo.product),
-            selectinload(CustomerOrder.lines).selectinload(OrderLine.todos).selectinload(WorkTodo.material),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.product),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.material),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.order),
@@ -2756,7 +2759,7 @@ def list_orders(db: Session, status: str | None = None) -> list["OrderRead"]:
     if status in ("open", "ready", "shipped"):
         stmt = stmt.where(CustomerOrder.status == status)
     rows = db.scalars(stmt).unique().all()
-    return [_order_read(row) for row in rows]
+    return [_order_read(row, include_line_todos=False) for row in rows]
 
 
 def get_order(db: Session, order_id: int) -> "OrderRead":

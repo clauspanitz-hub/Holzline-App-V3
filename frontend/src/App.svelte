@@ -9,6 +9,7 @@
     templateSeriesPrefix,
   } from './lib/setOptionMatch.js'
   import FamilyFilter from './lib/components/FamilyFilter.svelte'
+  import FamilySelect from './lib/components/FamilySelect.svelte'
   import ProductGroupSection from './lib/components/ProductGroupSection.svelte'
   import BackupPanel from './lib/components/BackupPanel.svelte'
 
@@ -32,9 +33,12 @@
   let filterColorId = $state('')
   let filterFamily = $state('')
   let filterMaterialFamily = $state('')
-  let overviewProductsOpen = $state(true)
-  let overviewMaterialsOpen = $state(true)
+  let overviewProductsOpen = $state(false)
+  let overviewMaterialsOpen = $state(false)
   let overviewIgnoredOpen = $state(false)
+  let overviewOrdersOpen = $state(false)
+  let overviewTodosOpen = $state(false)
+  let shippedOrdersOpen = $state(false)
   let colorSuggestions = $state([])
   let loading = $state(true)
   let flash = $state(null)
@@ -71,6 +75,7 @@
   let queueAxisModal = $state(null) // { item, axes, colorAxis }
   let orders = $state([])
   let todos = $state([])
+  let loadedBuckets = { catalog: false, inventory: false, orders: false, sets: false, queue: false }
   let todoCategoryFilter = $state('workshop')
   let todoStatusFilter = $state('open')
   let orderForm = $state(emptyOrderForm())
@@ -198,10 +203,10 @@
     }
   }
 
-  function todayISO() {
+  function nowDateTimeLocal() {
     const d = new Date()
     const pad = (n) => String(n).padStart(2, '0')
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
   }
 
   function emptyOrderLine() {
@@ -210,11 +215,24 @@
 
   function emptyOrderForm() {
     return {
-      ordered_on: todayISO(),
+      ordered_on: nowDateTimeLocal(),
       customer_name: '',
       external_number: '',
       lines: [emptyOrderLine()],
     }
+  }
+
+  function onOrderProductPicked(index, productId) {
+    const lines = [...orderForm.lines]
+    lines[index] = { ...lines[index], product_id: productId }
+    if (productId) {
+      const product = products.find((p) => String(p.id) === String(productId))
+      if (product) lines[index].label = product.name
+    }
+    if (productId && index === lines.length - 1) {
+      lines.push(emptyOrderLine())
+    }
+    orderForm.lines = lines
   }
 
   function orderStatusLabel(status) {
@@ -279,7 +297,8 @@
   }
 
   function toggleFamilyCollapse(key) {
-    collapsedFamilies = { ...collapsedFamilies, [key]: !collapsedFamilies[key] }
+    const isOpen = collapsedFamilies[key] === false
+    collapsedFamilies = { ...collapsedFamilies, [key]: isOpen }
   }
 
   function incompleteHint(item) {
@@ -1081,67 +1100,112 @@
   }
 
   async function refresh({ silent = false } = {}) {
+    loadedBuckets = { catalog: false, inventory: false, orders: false, sets: false, queue: false }
+    await ensureTabData({ silent })
+  }
+
+  async function selectTab(next) {
+    tab = next
+    await ensureTabData({ silent: true })
+  }
+
+  async function ensureTabData({ silent = false } = {}) {
     if (!authUser) return
     if (!silent) loading = true
     try {
       if (authUser.role === 'mitarbeiter') {
-        const [p, u, l, med, c] = await Promise.all([
-          api.products.list(),
-          api.units(),
-          api.locations(),
-          api.media.list(),
-          api.colors.list(),
-        ])
-        products = p
-        units = u
-        locations = l
-        media = med
-        colors = c
-        materials = []
-        sets = []
-        allTags = []
+        if (!loadedBuckets.catalog || !loadedBuckets.inventory) {
+          const [p, u, l, med, c] = await Promise.all([
+            api.products.list(),
+            api.units(),
+            api.locations(),
+            api.media.list(),
+            api.colors.list(),
+          ])
+          products = p
+          units = u
+          locations = l
+          media = med
+          colors = c
+          materials = []
+          sets = []
+          allTags = []
+          loadedBuckets.catalog = true
+          loadedBuckets.inventory = true
+        }
         return
       }
+      const t = tab
       const filter = {
         tag: filterTag || undefined,
         color_id: filterColorId || undefined,
       }
-      const [m, p, u, l, s, med, c, t, o, td] = await Promise.all([
-        api.materials.list(filter),
-        api.products.list(filter),
-        api.units(),
-        api.locations(),
-        api.sets.list(),
-        api.media.list(),
-        api.colors.list(),
-        api.tags.list(),
-        api.orders.list(),
-        api.todos.list(),
-      ])
-      materials = m
-      products = p
-      units = u
-      locations = l
-      sets = s
-      media = med
-      colors = c
-      allTags = t
-      orders = o
-      todos = td
-      const drafts = { ...catalogNewColorDrafts }
-      for (const row of med) {
-        if (drafts[row.id] == null) drafts[row.id] = ''
+      const jobs = []
+      if (!loadedBuckets.catalog) {
+        jobs.push(
+          Promise.all([api.units(), api.locations(), api.media.list(), api.colors.list(), api.tags.list()]).then(
+            ([u, l, med, c, tags]) => {
+              units = u
+              locations = l
+              media = med
+              colors = c
+              allTags = tags
+              const drafts = { ...catalogNewColorDrafts }
+              for (const row of med) {
+                if (drafts[row.id] == null) drafts[row.id] = ''
+              }
+              catalogNewColorDrafts = drafts
+              if (selectedCatalogMediumId != null && !med.some((x) => x.id === selectedCatalogMediumId)) {
+                selectedCatalogMediumId = med[0]?.id ?? null
+              } else if (selectedCatalogMediumId == null && med[0]) {
+                selectedCatalogMediumId = med[0].id
+              }
+              if (!materialForm.location_id && l[0]) {
+                materialForm.location_id = String(l.find((x) => x.name === 'Hamburg')?.id || l[0].id)
+              }
+              if (!productForm.location_id && l[0]) {
+                productForm.location_id = String(l.find((x) => x.name === 'Hamburg')?.id || l[0].id)
+              }
+              loadedBuckets.catalog = true
+            },
+          ),
+        )
       }
-      catalogNewColorDrafts = drafts
-      if (selectedCatalogMediumId != null && !med.some((x) => x.id === selectedCatalogMediumId)) {
-        selectedCatalogMediumId = med[0]?.id ?? null
-      } else if (selectedCatalogMediumId == null && med[0]) {
-        selectedCatalogMediumId = med[0].id
+      if (t !== 'users' && !loadedBuckets.inventory) {
+        jobs.push(
+          Promise.all([api.materials.list(filter), api.products.list(filter)]).then(([m, p]) => {
+            materials = m
+            products = p
+            loadedBuckets.inventory = true
+          }),
+        )
       }
-      if (!materialForm.location_id && l[0]) materialForm.location_id = String(l.find((x) => x.name === 'Hamburg')?.id || l[0].id)
-      if (!productForm.location_id && l[0]) productForm.location_id = String(l.find((x) => x.name === 'Hamburg')?.id || l[0].id)
-      await loadImportQueue()
-      if (tab === 'users') await loadUsers()
+      if (['overview', 'orders', 'todos'].includes(t) && !loadedBuckets.orders) {
+        jobs.push(
+          Promise.all([api.orders.list(), api.todos.list()]).then(([o, td]) => {
+            orders = o
+            todos = td
+            loadedBuckets.orders = true
+          }),
+        )
+      }
+      if (['sets', 'import'].includes(t) && !loadedBuckets.sets) {
+        jobs.push(
+          api.sets.list().then((s) => {
+            sets = s
+            loadedBuckets.sets = true
+          }),
+        )
+      }
+      if (!loadedBuckets.queue) {
+        jobs.push(
+          loadImportQueue().then(() => {
+            loadedBuckets.queue = true
+          }),
+        )
+      }
+      await Promise.all(jobs)
+      if (t === 'users') await loadUsers()
     } catch (error) {
       if (error.status === 401) {
         authUser = null
@@ -1305,6 +1369,9 @@
   )
   const negativeMaterials = $derived(materials.filter((item) => item.is_negative))
   const negativeProducts = $derived(products.filter((item) => item.is_negative))
+  const currentOrders = $derived(orders.filter((o) => o.status === 'open' || o.status === 'ready'))
+  const shippedOrders = $derived(orders.filter((o) => o.status === 'shipped'))
+  const overviewOpenTodos = $derived(todos.filter((t) => t.status === 'open'))
   const hasProductTemplates = $derived(products.some((p) => p.is_template))
   const hasMaterialTemplates = $derived(materials.some((m) => m.is_template))
   const productsForBomTemplate = $derived(
@@ -2332,13 +2399,16 @@
   }
 
   function setStatus(setItem) {
-    const mapped = setItem.option_mappings?.length || 0
+    const mapped = setItem.option_mappings?.length || setItem.mapping_count || 0
     const withBom = setItem.variants?.filter((v) => v.bom?.length)?.length || 0
     const buildable = setItem.variants?.filter((v) => v.buildable_quantity > 0)?.length || 0
     if (!setItem.variant_count) return 'Noch keine Varianten'
     if (!mapped) return 'Schritt 2: Farben zuordnen'
-    if (!withBom) return 'Schritt 2: Zuordnung anwenden'
-    return `${buildable} von ${setItem.variant_count} baubar`
+    if (setItem.variants?.length) {
+      if (!withBom) return 'Schritt 2: Zuordnung anwenden'
+      return `${buildable} von ${setItem.variant_count} baubar`
+    }
+    return `${setItem.variant_count} Varianten`
   }
 
   async function onImportFile(event) {
@@ -2746,21 +2816,166 @@
 </script>
 
 <div class="app-shell">
-  <header class="brand">
-    <h1>Holzlinge</h1>
-    <p>Inventar, Standorte, Stücklisten und baubare Sets.</p>
-    {#if authUser}
-      <div class="auth-bar">
-        <span class="empty">{authUser.username} ({authUser.role === 'admin' ? 'Admin' : 'Mitarbeiter'})</span>
-        <button type="button" class="btn secondary" onclick={() => (passwordModal = true)}>Passwort</button>
-        <button type="button" class="btn secondary" onclick={doLogout}>Abmelden</button>
-      </div>
-    {/if}
-  </header>
+  {#if !authChecked || (loading && !authUser)}
+    <header class="brand">
+      <h1>Holzlinge</h1>
+    </header>
+  {:else if !authUser}
+    <header class="brand">
+      <h1>Holzlinge</h1>
+      <p>Inventar, Standorte, Stücklisten und baubare Sets.</p>
+    </header>
+  {:else}
+    <div class="app-chrome">
+      <header class="brand">
+        <h1>Holzlinge</h1>
+        <div class="auth-bar">
+          <span class="empty">{authUser.username}</span>
+          <button type="button" class="btn secondary compact" onclick={() => (passwordModal = true)}>Passwort</button>
+          <button type="button" class="btn secondary compact" onclick={doLogout}>Abmelden</button>
+        </div>
+      </header>
+      <nav class="tabs" aria-label="Hauptnavigation">
+        {#if authUser.role === 'admin'}
+          <button class="tab" class:active={tab === 'overview'} onclick={() => selectTab('overview')}>Übersicht</button>
+          <button class="tab" class:active={tab === 'materials'} onclick={() => selectTab('materials')}>Materialien</button>
+          <button class="tab" class:active={tab === 'products'} onclick={() => selectTab('products')}>Produkte</button>
+          <button class="tab" class:active={tab === 'orders'} onclick={() => selectTab('orders')}>Bestellungen</button>
+          <button class="tab" class:active={tab === 'todos'} onclick={() => selectTab('todos')}>
+            Todos{#if openTodoCount()} ({openTodoCount()}){/if}
+          </button>
+          <button class="tab" class:active={tab === 'staff'} onclick={() => selectTab('staff')}>
+            Bei Mitarbeitern{#if staffQueueProducts.length} ({staffQueueProducts.length}){/if}
+          </button>
+          <button class="tab" class:active={tab === 'catalogs'} onclick={() => selectTab('catalogs')}>Kataloge</button>
+          <button class="tab" class:active={tab === 'import'} onclick={() => selectTab('import')}>
+            Import{#if importQueueOpenCount()} ({importQueueOpenCount()}){/if}
+          </button>
+          <button class="tab" class:active={tab === 'sets'} onclick={() => selectTab('sets')}>Sets</button>
+          <button class="tab" class:active={tab === 'users'} onclick={() => selectTab('users')}>Benutzer</button>
+        {:else}
+          <button class="tab" class:active={tab === 'staff'} onclick={() => selectTab('staff')}>
+            Bei Mitarbeitern{#if staffQueueProducts.length} ({staffQueueProducts.length}){/if}
+          </button>
+        {/if}
+      </nav>
+    </div>
+  {/if}
 
   {#if flash}
     <div class={`flash ${flash.type}`}>{flash.message}</div>
   {/if}
+
+  {#snippet todosMarkup(rows, emptyText)}
+    <div class="table-wrap desktop-only">
+      <table>
+        <thead>
+          <tr>
+            <th>Todo</th>
+            <th>Bestellung</th>
+            <th>Menge</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each rows as todo}
+            <tr class:empty={todo.status === 'done'}>
+              <td><strong>{todoKindLabel(todo.kind)}</strong> · {todo.title}</td>
+              <td>{todo.order_label || `#${todo.order_id}`}</td>
+              <td>{formatQty(todo.quantity)}</td>
+              <td>{todo.status === 'done' ? 'erledigt' : 'offen'}</td>
+              <td class="col-actions">
+                {#if todo.status === 'open'}
+                  <button type="button" class="btn" onclick={() => startTodo(todo)}>Los</button>
+                {/if}
+              </td>
+            </tr>
+          {:else}
+            <tr><td colspan="5" class="empty">{emptyText}</td></tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-list mobile-only">
+      {#each rows as todo}
+        <article class="card" class:empty={todo.status === 'done'}>
+          <h3>{todoKindLabel(todo.kind)}</h3>
+          <p>{todo.title}</p>
+          <p class="empty">{todo.order_label} · {formatQty(todo.quantity)}</p>
+          {#if todo.status === 'open'}
+            <div class="row-actions"><button type="button" class="btn" onclick={() => startTodo(todo)}>Los</button></div>
+          {/if}
+        </article>
+      {:else}
+        <p class="empty">{emptyText}</p>
+      {/each}
+    </div>
+  {/snippet}
+
+  {#snippet ordersMarkup(rows, emptyText)}
+    <div class="table-wrap desktop-only">
+      <table>
+        <thead>
+          <tr>
+            <th>Datum</th>
+            <th>Kunde / Nummer</th>
+            <th>Positionen</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each rows as order}
+            <tr class:empty={order.status === 'shipped'}>
+              <td>{formatDateTime(order.ordered_on)}</td>
+              <td>
+                <strong>{order.customer_name || '—'}</strong>
+                <div class="empty" style="margin:0">{order.external_number || `#${order.id}`}</div>
+              </td>
+              <td>
+                {#each order.lines as ln}
+                  <div>{formatQty(ln.quantity)}× {ln.label}</div>
+                {/each}
+              </td>
+              <td>{orderStatusLabel(order.status)}</td>
+              <td class="col-actions">
+                {#if order.status === 'ready'}
+                  <button type="button" class="btn" onclick={() => markOrderShipped(order)}>Versendet</button>
+                {/if}
+                {#if order.status !== 'shipped'}
+                  <button type="button" class="btn secondary" onclick={() => deleteOrder(order)}>Löschen</button>
+                {/if}
+              </td>
+            </tr>
+          {:else}
+            <tr><td colspan="5" class="empty">{emptyText}</td></tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-list mobile-only">
+      {#each rows as order}
+        <article class="card" class:empty={order.status === 'shipped'}>
+          <h3>{order.customer_name || order.external_number || `Bestellung ${order.id}`}</h3>
+          <p class="empty">{formatDateTime(order.ordered_on)} · {orderStatusLabel(order.status)}</p>
+          {#each order.lines as ln}
+            <p>{formatQty(ln.quantity)}× {ln.label}</p>
+          {/each}
+          <div class="row-actions">
+            {#if order.status === 'ready'}
+              <button type="button" class="btn" onclick={() => markOrderShipped(order)}>Versendet</button>
+            {/if}
+            {#if order.status !== 'shipped'}
+              <button type="button" class="btn secondary" onclick={() => deleteOrder(order)}>Löschen</button>
+            {/if}
+          </div>
+        </article>
+      {:else}
+        <p class="empty">{emptyText}</p>
+      {/each}
+    </div>
+  {/snippet}
 
   {#if !authChecked || (loading && !authUser)}
     <div class="panel"><p class="empty">Lade…</p></div>
@@ -2780,30 +2995,6 @@
       </form>
     </section>
   {:else}
-  <nav class="tabs" aria-label="Hauptnavigation">
-    {#if authUser.role === 'admin'}
-      <button class="tab" class:active={tab === 'overview'} onclick={() => (tab = 'overview')}>Übersicht</button>
-      <button class="tab" class:active={tab === 'materials'} onclick={() => (tab = 'materials')}>Materialien</button>
-      <button class="tab" class:active={tab === 'products'} onclick={() => (tab = 'products')}>Produkte</button>
-      <button class="tab" class:active={tab === 'orders'} onclick={() => (tab = 'orders')}>
-        Bestellungen{#if openTodoCount()} ({openTodoCount()}){/if}
-      </button>
-      <button class="tab" class:active={tab === 'staff'} onclick={() => (tab = 'staff')}>
-        Bei Mitarbeitern{#if staffQueueProducts.length} ({staffQueueProducts.length}){/if}
-      </button>
-      <button class="tab" class:active={tab === 'catalogs'} onclick={() => (tab = 'catalogs')}>Kataloge</button>
-      <button class="tab" class:active={tab === 'import'} onclick={() => (tab = 'import')}>
-        Import{#if importQueueOpenCount()} ({importQueueOpenCount()}){/if}
-      </button>
-      <button class="tab" class:active={tab === 'sets'} onclick={() => (tab = 'sets')}>Sets</button>
-      <button class="tab" class:active={tab === 'users'} onclick={() => { tab = 'users'; loadUsers() }}>Benutzer</button>
-    {:else}
-      <button class="tab" class:active={tab === 'staff'} onclick={() => (tab = 'staff')}>
-        Bei Mitarbeitern{#if staffQueueProducts.length} ({staffQueueProducts.length}){/if}
-      </button>
-    {/if}
-  </nav>
-
   {#if loading}
     <div class="panel"><p class="empty">Lade…</p></div>
   {:else if tab === 'users' && authUser.role === 'admin'}
@@ -2881,7 +3072,7 @@
   {:else if tab === 'overview'}
     <section class="panel">
       <div class="panel-header">
-        <h2>Kritische Bestände</h2>
+        <h2>Übersicht</h2>
         <button class="btn secondary" onclick={refresh}>Aktualisieren</button>
       </div>
       {#if negativeMaterials.length || negativeProducts.length}
@@ -2889,9 +3080,25 @@
           Negativbestand vorhanden — Details in den Listen prüfen.
         </div>
       {/if}
+
+      <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewOrdersOpen = !overviewOrdersOpen)}>
+        {overviewOrdersOpen ? '▼' : '▶'} Aktuelle Bestellungen
+        <span class="empty">({currentOrders.length})</span>
+      </button>
+      {#if overviewOrdersOpen}
+        {@render ordersMarkup(currentOrders, 'Keine aktuellen Bestellungen.')}
+      {/if}
+
+      <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewTodosOpen = !overviewTodosOpen)}>
+        {overviewTodosOpen ? '▼' : '▶'} Offene Todos
+        <span class="empty">({overviewOpenTodos.length})</span>
+      </button>
+      {#if overviewTodosOpen}
+        {@render todosMarkup(overviewOpenTodos, 'Keine offenen Todos.')}
+      {/if}
+
       <p class="empty">
-        Zuerst kritische Produkte, darunter kritische Materialien (Gesamt ≤ 0 oder unter Mindestbestand).
-        Einzelne Einträge können dauerhaft ausgeblendet werden.
+        Kritische Bestände (Gesamt ≤ 0 oder unter Mindestbestand). Einzelne Einträge können dauerhaft ausgeblendet werden.
       </p>
 
       <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewProductsOpen = !overviewProductsOpen)}>
@@ -3071,13 +3278,13 @@
       </div>
       <div class="filter-bar form-grid filter-bar-end">
         <label>Filter Tag
-          <select bind:value={filterTag} onchange={refresh}>
+          <select bind:value={filterTag} onchange={() => { loadedBuckets.inventory = false; ensureTabData({ silent: true }) }}>
             <option value="">alle</option>
             {#each allTags as t}<option value={t.name}>{t.name}</option>{/each}
           </select>
         </label>
         <label>Filter Farbe
-          <select bind:value={filterColorId} onchange={refresh}>
+          <select bind:value={filterColorId} onchange={() => { loadedBuckets.inventory = false; ensureTabData({ silent: true }) }}>
             <option value="">alle</option>
             {#each colors as c}<option value={c.id}>{c.label}</option>{/each}
           </select>
@@ -3205,13 +3412,13 @@
       </div>
       <div class="filter-bar form-grid filter-bar-end">
         <label>Filter Tag
-          <select bind:value={filterTag} onchange={refresh}>
+          <select bind:value={filterTag} onchange={() => { loadedBuckets.inventory = false; ensureTabData({ silent: true }) }}>
             <option value="">alle</option>
             {#each allTags as t}<option value={t.name}>{t.name}</option>{/each}
           </select>
         </label>
         <label>Filter Farbe
-          <select bind:value={filterColorId} onchange={refresh}>
+          <select bind:value={filterColorId} onchange={() => { loadedBuckets.inventory = false; ensureTabData({ silent: true }) }}>
             <option value="">alle</option>
             {#each colors as c}<option value={c.id}>{c.label}</option>{/each}
           </select>
@@ -3333,19 +3540,25 @@
         <h2>Bestellungen</h2>
       </div>
       <p class="empty" style="margin-top:0">
-        Schnellerfassung → Todos nur bei echter Arbeit (Artikel anlegen oder Fertigen). Lagerndes Produkt ohne Unterdeckung erzeugt kein Todo. Versandbereit bleibt sichtbar, bis du <strong>Versendet</strong> klickst.
+        Oben aktuelle Aufträge (offen und versandbereit). Darunter Schnellerfassung. Versendete Aufträge unten ausklappbar.
       </p>
-      <h3>Neue Bestellung</h3>
+
+      <h3>Aktuelle Bestellungen</h3>
+      {@render ordersMarkup(currentOrders, 'Keine aktuellen Bestellungen.')}
+
+      <h3 style="margin-top:1.5rem">Neue Bestellung</h3>
       <form class="form-grid" onsubmit={(e) => { e.preventDefault(); submitOrder() }}>
-        <label>Datum<input type="date" bind:value={orderForm.ordered_on} required /></label>
+        <label>Datum und Uhrzeit<input type="datetime-local" bind:value={orderForm.ordered_on} required /></label>
         <label>Kunde (optional)<input bind:value={orderForm.customer_name} placeholder="Name" /></label>
         <label>Nummer (optional)<input bind:value={orderForm.external_number} placeholder="später Shopify/Etsy" /></label>
         {#each orderForm.lines as line, i}
           <label>Produkt
-            <select bind:value={line.product_id}>
-              <option value="">Freitext / später anlegen</option>
-              {#each products as p}<option value={String(p.id)}>{p.name}</option>{/each}
-            </select>
+            <FamilySelect
+              value={line.product_id}
+              items={products}
+              emptyLabel="Freitext / später anlegen"
+              onchange={(v) => onOrderProductPicked(i, v)}
+            />
           </label>
           <label>Freitext (wenn kein Produkt)
             <input bind:value={line.label} placeholder="z. B. Schild Mia 2026" disabled={!!line.product_id} />
@@ -3363,7 +3576,22 @@
         </div>
       </form>
 
-      <h3 style="margin-top:1.5rem">Todos</h3>
+      <button type="button" class="group-toggle overview-section-toggle" style="margin-top:1.5rem" onclick={() => (shippedOrdersOpen = !shippedOrdersOpen)}>
+        {shippedOrdersOpen ? '▼' : '▶'} Versendete Bestellungen
+        <span class="empty">({shippedOrders.length})</span>
+      </button>
+      {#if shippedOrdersOpen}
+        {@render ordersMarkup(shippedOrders, 'Keine versendeten Bestellungen.')}
+      {/if}
+    </section>
+  {:else if tab === 'todos'}
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Todos</h2>
+      </div>
+      <p class="empty" style="margin-top:0">
+        Werkstatt zuerst. Einkauf-Todos aus Mindestbestand kommen im nächsten Schritt — der Filter ist schon da.
+      </p>
       <div class="filter-bar form-grid">
         <label>Art
           <select bind:value={todoCategoryFilter}>
@@ -3380,113 +3608,7 @@
           </select>
         </label>
       </div>
-      <div class="table-wrap desktop-only">
-        <table>
-          <thead>
-            <tr>
-              <th>Todo</th>
-              <th>Bestellung</th>
-              <th>Menge</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each displayedTodos() as todo}
-              <tr class:empty={todo.status === 'done'}>
-                <td><strong>{todoKindLabel(todo.kind)}</strong> · {todo.title}</td>
-                <td>{todo.order_label || `#${todo.order_id}`}</td>
-                <td>{formatQty(todo.quantity)}</td>
-                <td>{todo.status === 'done' ? 'erledigt' : 'offen'}</td>
-                <td class="col-actions">
-                  {#if todo.status === 'open'}
-                    <button type="button" class="btn" onclick={() => startTodo(todo)}>Los</button>
-                  {/if}
-                </td>
-              </tr>
-            {:else}
-              <tr><td colspan="5" class="empty">{todoCategoryFilter === 'purchase' ? 'Einkauf-Todos kommen im nächsten Schritt (Mindestbestand).' : 'Keine Todos.'}</td></tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-      <div class="card-list mobile-only">
-        {#each displayedTodos() as todo}
-          <article class="card" class:empty={todo.status === 'done'}>
-            <h3>{todoKindLabel(todo.kind)}</h3>
-            <p>{todo.title}</p>
-            <p class="empty">{todo.order_label} · {formatQty(todo.quantity)}</p>
-            {#if todo.status === 'open'}
-              <div class="row-actions"><button type="button" class="btn" onclick={() => startTodo(todo)}>Los</button></div>
-            {/if}
-          </article>
-        {:else}
-          <p class="empty">Keine Todos.</p>
-        {/each}
-      </div>
-
-      <h3 style="margin-top:1.5rem">Aufträge</h3>
-      <div class="table-wrap desktop-only">
-        <table>
-          <thead>
-            <tr>
-              <th>Datum</th>
-              <th>Kunde / Nummer</th>
-              <th>Positionen</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each orders as order}
-              <tr class:empty={order.status === 'shipped'}>
-                <td>{order.ordered_on}</td>
-                <td>
-                  <strong>{order.customer_name || '—'}</strong>
-                  <div class="empty" style="margin:0">{order.external_number || `#${order.id}`}</div>
-                </td>
-                <td>
-                  {#each order.lines as ln}
-                    <div>{formatQty(ln.quantity)}× {ln.label}</div>
-                  {/each}
-                </td>
-                <td>{orderStatusLabel(order.status)}</td>
-                <td class="col-actions">
-                  {#if order.status === 'ready'}
-                    <button type="button" class="btn" onclick={() => markOrderShipped(order)}>Versendet</button>
-                  {/if}
-                  {#if order.status !== 'shipped'}
-                    <button type="button" class="btn secondary" onclick={() => deleteOrder(order)}>Löschen</button>
-                  {/if}
-                </td>
-              </tr>
-            {:else}
-              <tr><td colspan="5" class="empty">Noch keine Bestellungen.</td></tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-      <div class="card-list mobile-only">
-        {#each orders as order}
-          <article class="card" class:empty={order.status === 'shipped'}>
-            <h3>{order.customer_name || order.external_number || `Bestellung ${order.id}`}</h3>
-            <p class="empty">{order.ordered_on} · {orderStatusLabel(order.status)}</p>
-            {#each order.lines as ln}
-              <p>{formatQty(ln.quantity)}× {ln.label}</p>
-            {/each}
-            <div class="row-actions">
-              {#if order.status === 'ready'}
-                <button type="button" class="btn" onclick={() => markOrderShipped(order)}>Versendet</button>
-              {/if}
-              {#if order.status !== 'shipped'}
-                <button type="button" class="btn secondary" onclick={() => deleteOrder(order)}>Löschen</button>
-              {/if}
-            </div>
-          </article>
-        {:else}
-          <p class="empty">Noch keine Bestellungen.</p>
-        {/each}
-      </div>
+      {@render todosMarkup(displayedTodos(), todoCategoryFilter === 'purchase' ? 'Einkauf-Todos kommen im nächsten Schritt (Mindestbestand).' : 'Keine Todos.')}
     </section>
   {:else if tab === 'staff'}
     <section class="panel">
@@ -4132,12 +4254,11 @@
           </label>
         {/if}
         <label>Wird zu (Umwandlung)
-          <select bind:value={productForm.transform_target_id}>
-            <option value="">keins</option>
-            {#each products.filter((p) => !productModal.product || p.id !== productModal.product.id) as p}
-              <option value={p.id}>{p.name}</option>
-            {/each}
-          </select>
+          <FamilySelect
+            bind:value={productForm.transform_target_id}
+            items={products.filter((p) => !productModal.product || p.id !== productModal.product.id)}
+            emptyLabel="keins"
+          />
         </label>
         <label>Medium
           <select
@@ -4253,17 +4374,16 @@
             </label>
             {#if bomForm.kind === 'product'}
               <label>Produkt
-                <select bind:value={bomForm.product_id}>
-                  <option value="">wählen…</option>
-                  {#each availableBomProducts as p}<option value={p.id}>{p.name}</option>{/each}
-                </select>
+                <FamilySelect bind:value={bomForm.product_id} items={availableBomProducts} emptyLabel="wählen…" />
               </label>
             {:else}
               <label>Material
-                <select bind:value={bomForm.material_id}>
-                  <option value="">wählen…</option>
-                  {#each availableBomMaterials as m}<option value={m.id}>{m.name} ({m.unit})</option>{/each}
-                </select>
+                <FamilySelect
+                  bind:value={bomForm.material_id}
+                  items={availableBomMaterials}
+                  emptyLabel="wählen…"
+                  formatItem={(m) => `${m.name} (${m.unit})`}
+                />
               </label>
             {/if}
             <label>Menge pro Produkteinheit
@@ -4534,10 +4654,12 @@
             </label>
             {#if getSetOptionConfig(mappingForm.option_name).kind === 'product'}
               <label>Vorlage
-                <select
+                <FamilySelect
                   value={getSetOptionConfig(mappingForm.option_name).templateId}
-                  onchange={(e) => {
-                    const tid = e.currentTarget.value
+                  items={productsForBomTemplate}
+                  emptyLabel="ohne"
+                  formatItem={(p) => p.is_template ? `Vorlage: ${p.name}` : p.name}
+                  onchange={(tid) => {
                     const t = products.find((p) => p.id === Number(tid))
                     const series = t ? templateSeriesPrefix(t, colors) : ''
                     patchSetOptionConfig(mappingForm.option_name, {
@@ -4545,12 +4667,7 @@
                       baseName: series || t?.family || getSetOptionConfig(mappingForm.option_name).baseName,
                     })
                   }}
-                >
-                  <option value="">ohne</option>
-                  {#each productsForBomTemplate as p}
-                    <option value={p.id}>{p.is_template ? `Vorlage: ${p.name}` : p.name}</option>
-                  {/each}
-                </select>
+                />
               </label>
               <label>Basisname / Familie
                 <input
@@ -4853,12 +4970,13 @@
           </select>
         </label>
         <label>Vorlage
-          <select bind:value={bulkForm.template_material_id} onchange={onBulkMaterialTemplateChange}>
-            <option value="">keine</option>
-            {#each materialsForSeriesTemplate as m}
-              <option value={m.id}>Vorlage: {m.name}</option>
-            {/each}
-          </select>
+          <FamilySelect
+            bind:value={bulkForm.template_material_id}
+            items={materialsForSeriesTemplate}
+            emptyLabel="keine"
+            formatItem={(m) => `Vorlage: ${m.name}`}
+            onchange={() => onBulkMaterialTemplateChange()}
+          />
         </label>
         <label>Einheit
           <select bind:value={bulkForm.unit}>{#each units as u}<option value={u.value}>{u.label}</option>{/each}</select>
@@ -4973,12 +5091,13 @@
           </select>
         </label>
         <label>Stücklisten-Vorlage
-          <select bind:value={bulkForm.template_product_id} onchange={onBulkTemplateChange}>
-            <option value="">keine</option>
-            {#each productsForBomTemplate as p}
-              <option value={p.id}>{p.is_template ? `Vorlage: ${p.name}` : p.name}</option>
-            {/each}
-          </select>
+          <FamilySelect
+            bind:value={bulkForm.template_product_id}
+            items={productsForBomTemplate}
+            emptyLabel="keine"
+            formatItem={(p) => p.is_template ? `Vorlage: ${p.name}` : p.name}
+            onchange={() => onBulkTemplateChange()}
+          />
         </label>
         <label>Mindestbestand (optional)
           <input type="number" step="0.001" min="0" bind:value={bulkForm.min_stock} placeholder="leer = keiner" />
@@ -5140,10 +5259,7 @@
               {#if bulkEditForm.setBom}
                 <div class="bulk-block-body bulk-block-nested">
                   <label class="bulk-field">Material
-                    <select bind:value={bulkEditForm.bom_material_id}>
-                      <option value="">wählen…</option>
-                      {#each materials as m}<option value={m.id}>{m.name}</option>{/each}
-                    </select>
+                    <FamilySelect bind:value={bulkEditForm.bom_material_id} items={materials} emptyLabel="wählen…" />
                   </label>
                   <label class="bulk-field">Menge pro Produkteinheit
                     <input type="number" step="0.001" min="0.001" bind:value={bulkEditForm.bom_quantity} />
@@ -5245,7 +5361,7 @@
 
 {#if shopifyAssistant}
   <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (shopifyAssistant = null)}>
-    <div class="modal modal-bulk" role="dialog" aria-modal="true" style="max-width:52rem">
+    <div class="modal modal-bulk modal-assistant" role="dialog" aria-modal="true">
       <h3>Shopify-CSV Assistent</h3>
       <p class="empty" style="margin-top:0">
         Pro Artikel wählen: Set (Zusammenstellung), Serie, On-Demand oder ignorieren.

@@ -1,12 +1,11 @@
 import enum
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
-    Date,
     DateTime,
     Enum,
     ForeignKey,
@@ -402,7 +401,7 @@ class CustomerOrder(Base):
     __tablename__ = "orders"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    ordered_on: Mapped[date] = mapped_column(Date, nullable=False)
+    ordered_on: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     customer_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     external_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")  # open | ready | shipped

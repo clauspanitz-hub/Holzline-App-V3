@@ -394,7 +394,7 @@ def migrate_orders_todos(engine) -> None:
                     """
                     CREATE TABLE orders (
                         id INTEGER NOT NULL PRIMARY KEY,
-                        ordered_on DATE NOT NULL,
+                        ordered_on DATETIME NOT NULL,
                         customer_name VARCHAR(200),
                         external_number VARCHAR(80),
                         status VARCHAR(20) NOT NULL DEFAULT 'open',

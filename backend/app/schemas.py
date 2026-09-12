@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -425,6 +425,7 @@ class ProductSetRead(BaseModel):
     handle: str
     count_materials_in_buildability: bool
     variant_count: int
+    mapping_count: int = 0
     variants: list[SetVariantRead] = []
     option_mappings: list[OptionMappingRead] = []
 
@@ -708,7 +709,7 @@ class OrderLineRead(BaseModel):
 
 
 class OrderCreate(BaseModel):
-    ordered_on: date | None = None
+    ordered_on: datetime | None = None
     customer_name: str | None = Field(default=None, max_length=200)
     external_number: str | None = Field(default=None, max_length=80)
     lines: list[OrderLineCreate] = Field(min_length=1)
@@ -722,7 +723,7 @@ class OrderUpdate(BaseModel):
 
 class OrderRead(BaseModel):
     id: int
-    ordered_on: date
+    ordered_on: datetime
     customer_name: str | None = None
     external_number: str | None = None
     status: Literal["open", "ready", "shipped"]
