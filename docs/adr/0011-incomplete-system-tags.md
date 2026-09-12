@@ -1,6 +1,6 @@
 # System-Tags für Unvollständigkeit
 
-Unvollständige Stammdatenfelder erzeugen filterbare Katalog-Tags `fehlt Mindestbestand`, `fehlt Stückliste`, `fehlt Einkaufspreis`, `fehlt Verkaufspreis` (automatisch setzen beim Speichern; manuell entfernen = ignorieren bis erneut vollständig→unvollständig). Tags sind kataloggeschützt; das Listen-„!“ folgt nur noch gesetzten `fehlt …`-Tags. Einmaliger Backfill beim ersten Anlegen der System-Tags.
+Unvollständige Stammdatenfelder erzeugen filterbare Katalog-Tags `fehlt Mindestbestand`, `fehlt Stückliste`, `fehlt Einkaufspreis`, `fehlt Verkaufspreis` (automatisch setzen beim Anlegen/wenn das Feld neu unvollständig wird). Der Tag bleibt, bis das Feld vollständig ist oder man ihn bewusst im Tag-Picker abwählt (= ignorieren bis erneut vollständig→unvollständig). Speichern anderer Dialogfelder sendet die Tag-Liste nicht mit und darf `fehlt …` nicht entfernen. Tags sind kataloggeschützt; das Listen-„!“ folgt nur noch gesetzten `fehlt …`-Tags. Einmaliger Backfill beim ersten Anlegen der System-Tags.
 
 **Status:** accepted
 

@@ -1173,6 +1173,19 @@
     return members.every((row) => (row.tags || []).some((t) => t.id === tagId))
   }
 
+  function tagIdKey(ids) {
+    return [...new Set((ids || []).map(Number).filter((id) => Number.isFinite(id)))]
+      .sort((a, b) => a - b)
+      .join(',')
+  }
+
+  /** Tag-Liste nur mitsenden, wenn sie sich gegenüber dem geladenen Artikel geändert hat. */
+  function tagIdsIfChanged(originalTags, currentIds) {
+    const originalIds = (originalTags || []).map((t) => t.id)
+    if (tagIdKey(originalIds) === tagIdKey(currentIds)) return null
+    return currentIds
+  }
+
   async function toggleTagId(form, tagId, kind = null) {
     const id = Number(tagId)
     const adding = !form.tagIds.includes(id)
@@ -2325,7 +2338,13 @@
     try {
       const colorPayload = {
         color_id: materialForm.color_id ? Number(materialForm.color_id) : null,
-        tag_ids: materialForm.tagIds,
+      }
+      const nextMaterialTags = tagIdsIfChanged(
+        materialModal.mode === 'edit' ? materialModal.material?.tags : null,
+        materialForm.tagIds,
+      )
+      if (materialModal.mode === 'create' || nextMaterialTags) {
+        colorPayload.tag_ids = materialModal.mode === 'create' ? materialForm.tagIds : nextMaterialTags
       }
       if (materialModal.mode === 'create') {
         const created = await api.materials.create({
@@ -2456,7 +2475,13 @@
         transform_target_id: productForm.transform_target_id
           ? Number(productForm.transform_target_id)
           : null,
-        tag_ids: productForm.tagIds,
+      }
+      const nextProductTags = tagIdsIfChanged(
+        productModal.mode === 'edit' ? productModal.product?.tags : null,
+        productForm.tagIds,
+      )
+      if (productModal.mode === 'create' || nextProductTags) {
+        colorPayload.tag_ids = productModal.mode === 'create' ? productForm.tagIds : nextProductTags
       }
       if (productModal.mode === 'create') {
         const created = await api.products.create({
