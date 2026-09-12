@@ -400,7 +400,7 @@ class ShopifyImportQueueItem(Base):
 
 
 class CustomerOrder(Base):
-    """Kundenauftrag (manuelle Schnellerfassung; Shop-Nummern später)."""
+    """Kundenauftrag (Schnellerfassung oder Shop-Eingang)."""
 
     __tablename__ = "orders"
 
@@ -408,7 +408,8 @@ class CustomerOrder(Base):
     ordered_on: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     customer_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     external_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")  # open | ready | shipped
+    origin: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")  # manual | shopify | etsy
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")  # review | open | ready | shipped
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 

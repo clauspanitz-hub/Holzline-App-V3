@@ -68,9 +68,9 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 ### Phase 2: Bestellverwaltung & Eingangskanäle — in Arbeit
 - [x] Benutzer mit Rechten (App-Login Admin/Mitarbeiter, ADR `0010`) — Teilumsetzung Auth
 - [x] Manuelle Schnellerfassung + Todo-Liste (Artikel anlegen / Fertigen; kein Set-Zusammenstellen in diesem Schnitt)
-- [ ] Shopify-API-Integration (Nummern/Versendet später)
-- [ ] Etsy-CSV-Import
-- [ ] Zusammenstellen bei Set-Bestellung
+- [x] Shopify-API → Bestellungen (bezahlt, nicht voll erfüllt; Match → offen+Todos, sonst **zur Prüfung**; Polling; Token `SHOPIFY_STORE` / `SHOPIFY_ADMIN_TOKEN`; Versendet manuell)
+- [ ] Etsy-Mail + Gemini (Hintergrund) → dieselben Bestellungen **zur Prüfung**; Etsy-API falls/wenn Freigabe; kein CSV-Bestellexport
+- [ ] Zusammenstellen bei Set-Bestellung (nach hinten)
 - [ ] Einkauf-Todos aus Mindestbestand (Liste/Filter schon vorbereitet)
 
 ### Phase 3: Optimierung & Einkauf (GEPLANT — vorgemerkt aus Grill)

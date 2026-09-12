@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     admin_user: str | None = None
     admin_password: str | None = None
     session_idle_hours: int = 12
+    shopify_store: str | None = None
+    shopify_admin_token: str | None = None
+    shopify_api_version: str = "2026-01"
+    shopify_poll_seconds: int = 300
 
 
 settings = Settings()

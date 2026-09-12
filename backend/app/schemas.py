@@ -708,6 +708,15 @@ class OrderLineCreate(BaseModel):
 class OrderLineLink(BaseModel):
     product_id: int | None = None
     material_id: int | None = None
+    quantity: Quantity | None = None
+    unassign: bool = False
+
+
+class ShopifyOrderSyncResult(BaseModel):
+    created: int = 0
+    skipped: int = 0
+    claimed: int = 0
+    errors: list[str] = []
 
 
 class TodoRead(BaseModel):
@@ -757,7 +766,8 @@ class OrderRead(BaseModel):
     ordered_on: datetime
     customer_name: str | None = None
     external_number: str | None = None
-    status: Literal["open", "ready", "shipped"]
+    origin: Literal["manual", "shopify", "etsy"] = "manual"
+    status: Literal["review", "open", "ready", "shipped"]
     lines: list[OrderLineRead] = []
     todos: list[TodoRead] = []
     created_at: datetime | None = None

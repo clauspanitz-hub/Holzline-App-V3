@@ -2735,12 +2735,14 @@ def _line_read(line: OrderLine, include_todos: bool = True) -> "OrderLineRead":
 def _order_read(order: CustomerOrder, include_line_todos: bool = True) -> "OrderRead":
     from app.schemas import OrderRead
 
-    status = order.status if order.status in ("open", "ready", "shipped") else "open"
+    status = order.status if order.status in ("review", "open", "ready", "shipped") else "open"
+    origin = order.origin if order.origin in ("manual", "shopify", "etsy") else "manual"
     return OrderRead(
         id=order.id,
         ordered_on=order.ordered_on,
         customer_name=order.customer_name,
         external_number=order.external_number,
+        origin=origin,
         status=status,
         lines=[_line_read(ln, include_todos=include_line_todos) for ln in order.lines],
         todos=[_todo_read(t) for t in order.todos],
@@ -2769,7 +2771,7 @@ def _order_load(db: Session, order_id: int) -> CustomerOrder:
 
 
 def _refresh_order_status(order: CustomerOrder) -> None:
-    if order.status == "shipped":
+    if order.status in ("shipped", "review"):
         return
     has_open = any(t.status == "open" for t in order.todos)
     order.status = "open" if has_open else "ready"
@@ -2832,6 +2834,7 @@ def create_order(db: Session, payload: "OrderCreate") -> "OrderRead":
         ordered_on=ordered_on,
         customer_name=(payload.customer_name or "").strip() or None,
         external_number=(payload.external_number or "").strip() or None,
+        origin="manual",
         status="open",
     )
     db.add(order)
@@ -2871,7 +2874,7 @@ def list_orders(db: Session, status: str | None = None) -> list["OrderRead"]:
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.order),
         )
     )
-    if status in ("open", "ready", "shipped"):
+    if status in ("review", "open", "ready", "shipped"):
         stmt = stmt.where(CustomerOrder.status == status)
     rows = db.scalars(stmt).unique().all()
     return [_order_read(row, include_line_todos=False) for row in rows]
@@ -2921,7 +2924,10 @@ def link_order_line(db: Session, order_id: int, line_id: int, payload: "OrderLin
     line = next((ln for ln in order.lines if ln.id == line_id), None)
     if line is None:
         raise HTTPException(status_code=404, detail="Position nicht gefunden")
-    if payload.product_id:
+    if payload.unassign:
+        line.product_id = None
+        line.material_id = None
+    elif payload.product_id:
         product = _load_product(db, payload.product_id)
         line.product_id = product.id
         line.material_id = None
@@ -2931,14 +2937,46 @@ def link_order_line(db: Session, order_id: int, line_id: int, payload: "OrderLin
         line.material_id = material.id
         line.product_id = None
         line.label = material.name
+    elif payload.quantity is None:
+        raise HTTPException(status_code=400, detail="Produkt, Material oder Menge angeben")
+    if payload.quantity is not None:
+        line.quantity = _q(payload.quantity)
+    if order.status != "review":
+        _sync_line_todos(db, line)
+        db.flush()
+        order = _order_load(db, order_id)
+        _refresh_order_status(order)
     else:
-        raise HTTPException(status_code=400, detail="Produkt oder Material angeben")
-    _sync_line_todos(db, line)
+        db.flush()
+    db.commit()
+    return _order_read(_order_load(db, order_id))
+
+
+def approve_order(db: Session, order_id: int) -> "OrderRead":
+    order = _order_load(db, order_id)
+    if order.status != "review":
+        raise HTTPException(status_code=400, detail="Nur Bestellungen zur Prüfung können abgenickt werden")
+    for line in order.lines:
+        _sync_line_todos(db, line)
     db.flush()
     order = _order_load(db, order_id)
+    order.status = "open"
     _refresh_order_status(order)
     db.commit()
     return _order_read(_order_load(db, order_id))
+
+
+def import_shopify_orders(db: Session) -> "ShopifyOrderSyncResult":
+    from app.schemas import ShopifyOrderSyncResult
+    from app.shopify_orders import shopify_configured, sync_shopify_orders
+
+    if not shopify_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="Shopify nicht konfiguriert (SHOPIFY_STORE, SHOPIFY_ADMIN_TOKEN)",
+        )
+    result = sync_shopify_orders(db)
+    return ShopifyOrderSyncResult.model_validate(result)
 
 
 def list_todos(

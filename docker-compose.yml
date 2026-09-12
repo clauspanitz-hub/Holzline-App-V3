@@ -9,6 +9,10 @@ services:
       ADMIN_USER: ${ADMIN_USER:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       SESSION_IDLE_HOURS: ${SESSION_IDLE_HOURS:-12}
+      SHOPIFY_STORE: ${SHOPIFY_STORE:-}
+      SHOPIFY_ADMIN_TOKEN: ${SHOPIFY_ADMIN_TOKEN:-}
+      SHOPIFY_API_VERSION: ${SHOPIFY_API_VERSION:-2026-01}
+      SHOPIFY_POLL_SECONDS: ${SHOPIFY_POLL_SECONDS:-300}
     volumes:
       - holzlinge_data:/data
     restart: unless-stopped

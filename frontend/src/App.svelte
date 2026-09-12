@@ -251,9 +251,16 @@
   }
 
   function orderStatusLabel(status) {
+    if (status === 'review') return 'zur Prüfung'
     if (status === 'ready') return 'versandbereit'
     if (status === 'shipped') return 'versendet'
     return 'offen'
+  }
+
+  function orderOriginLabel(origin) {
+    if (origin === 'shopify') return 'Shopify'
+    if (origin === 'etsy') return 'Etsy'
+    return 'Manuell'
   }
 
   function todoKindLabel(kind) {
@@ -738,6 +745,56 @@
       await api.orders.remove(order.id)
       await refresh()
       showFlash('ok', 'Bestellung gelöscht.')
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function syncShopifyOrders() {
+    saving = true
+    try {
+      const result = await api.orders.syncShopify()
+      loadedBuckets.orders = false
+      await refresh()
+      const bits = []
+      if (result.created) bits.push(`${result.created} neu`)
+      if (result.claimed) bits.push(`${result.claimed} übernommen`)
+      if (result.skipped) bits.push(`${result.skipped} übersprungen`)
+      showFlash('ok', bits.length ? `Shopify: ${bits.join(', ')}.` : 'Shopify: keine neuen Aufträge.')
+      if (result.errors?.length) showFlash('error', result.errors[0])
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function approveOrder(order) {
+    saving = true
+    try {
+      await api.orders.approve(order.id)
+      loadedBuckets.orders = false
+      await refresh()
+      showFlash('ok', 'Bestellung abgenickt.')
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function setReviewLineProduct(order, line, productId) {
+    saving = true
+    try {
+      if (productId) {
+        await api.orders.linkLine(order.id, line.id, { product_id: Number(productId) })
+      } else {
+        await api.orders.linkLine(order.id, line.id, { unassign: true })
+      }
+      loadedBuckets.orders = false
+      await refresh()
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -1511,6 +1568,7 @@
   const negativeMaterials = $derived(materials.filter((item) => item.is_negative))
   const negativeProducts = $derived(products.filter((item) => item.is_negative))
   const currentOrders = $derived(orders.filter((o) => o.status === 'open' || o.status === 'ready'))
+  const reviewOrders = $derived(orders.filter((o) => o.status === 'review'))
   const shippedOrders = $derived(orders.filter((o) => o.status === 'shipped'))
   const overviewOpenTodos = $derived(
     todos.filter((t) => t.status === 'open' && t.category !== 'purchase' && t.order_id),
@@ -3308,7 +3366,7 @@
               </td>
             </tr>
           {:else}
-            <tr><td colspan="5" class="empty">{emptyText}</td></tr>
+            <tr><td colspan="6" class="empty">{emptyText}</td></tr>
           {/each}
         </tbody>
       </table>
@@ -3336,6 +3394,7 @@
           <tr>
             <th>Datum</th>
             <th>Kunde / Nummer</th>
+            <th>Herkunft</th>
             <th>Positionen</th>
             <th>Status</th>
             <th></th>
@@ -3349,6 +3408,7 @@
                 <strong>{order.customer_name || '—'}</strong>
                 <div class="empty" style="margin:0">{order.external_number || `#${order.id}`}</div>
               </td>
+              <td>{orderOriginLabel(order.origin)}</td>
               <td>
                 {#each order.lines as ln}
                   <div>{formatQty(ln.quantity)}× {ln.label}</div>
@@ -3365,7 +3425,7 @@
               </td>
             </tr>
           {:else}
-            <tr><td colspan="5" class="empty">{emptyText}</td></tr>
+            <tr><td colspan="6" class="empty">{emptyText}</td></tr>
           {/each}
         </tbody>
       </table>
@@ -3374,7 +3434,7 @@
       {#each rows as order}
         <article class="card" class:empty={order.status === 'shipped'}>
           <h3>{order.customer_name || order.external_number || `Bestellung ${order.id}`}</h3>
-          <p class="empty">{formatDateTime(order.ordered_on)} · {orderStatusLabel(order.status)}</p>
+          <p class="empty">{formatDateTime(order.ordered_on)} · {orderOriginLabel(order.origin)} · {orderStatusLabel(order.status)}</p>
           {#each order.lines as ln}
             <p>{formatQty(ln.quantity)}× {ln.label}</p>
           {/each}
@@ -3503,6 +3563,9 @@
         <button class="btn secondary" onclick={refresh}>Aktualisieren</button>
       </div>
       {#if overviewOrdersOpen}
+        {#if reviewOrders.length}
+          <p class="empty">Zur Prüfung: {reviewOrders.length} — unter Bestellungen zuordnen und abnicken.</p>
+        {/if}
         {@render ordersMarkup(currentOrders, 'Keine aktuellen Bestellungen.')}
       {/if}
     </section>
@@ -4014,12 +4077,44 @@
     <section class="panel">
       <div class="panel-header">
         <h2>Bestellungen</h2>
+        <button type="button" class="btn secondary" onclick={syncShopifyOrders} disabled={saving}>Shopify abrufen</button>
       </div>
       <p class="empty" style="margin-top:0">
-        Oben aktuelle Aufträge (offen und versandbereit). Darunter Schnellerfassung. Versendete Aufträge unten ausklappbar.
+        Oben Aufträge zur Prüfung (Shop, unklare Zuordnung). Dann aktuelle Aufträge (offen und versandbereit). Darunter Schnellerfassung. Versendete unten ausklappbar.
       </p>
 
-      <h3>Aktuelle Bestellungen</h3>
+      <h3>Zur Prüfung {#if reviewOrders.length}<span class="empty">({reviewOrders.length})</span>{/if}</h3>
+      {#if reviewOrders.length}
+        <div class="table-wrap">
+          {#each reviewOrders as order}
+            <article class="card" style="margin-bottom:1rem">
+              <h3>{order.customer_name || order.external_number || `Bestellung ${order.id}`}</h3>
+              <p class="empty">{formatDateTime(order.ordered_on)} · {orderOriginLabel(order.origin)} · {order.external_number || ''}</p>
+              {#each order.lines as ln}
+                <div class="order-line" style="margin-top:0.6rem">
+                  <p style="margin:0 0 0.3rem">{formatQty(ln.quantity)}× {ln.label}</p>
+                  <label>Produkt
+                    <FamilySelect
+                      value={ln.product_id || ''}
+                      items={products}
+                      emptyLabel="unzugeordnet"
+                      onchange={(v) => setReviewLineProduct(order, ln, v)}
+                    />
+                  </label>
+                </div>
+              {/each}
+              <div class="row-actions" style="margin-top:0.8rem">
+                <button type="button" class="btn" onclick={() => approveOrder(order)} disabled={saving}>Abnicken</button>
+                <button type="button" class="btn secondary" onclick={() => deleteOrder(order)} disabled={saving}>Löschen</button>
+              </div>
+            </article>
+          {/each}
+        </div>
+      {:else}
+        <p class="empty">Keine Bestellungen zur Prüfung.</p>
+      {/if}
+
+      <h3 style="margin-top:1.5rem">Aktuelle Bestellungen</h3>
       {@render ordersMarkup(currentOrders, 'Keine aktuellen Bestellungen.')}
 
       <h3 style="margin-top:1.5rem">Neue Bestellung</h3>

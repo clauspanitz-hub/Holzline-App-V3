@@ -160,6 +160,17 @@ environment:
 
 Nach dem Seed: Login in der App, weitere Benutzer unter Tab **Benutzer**. `ADMIN_PASSWORD` danach aus Compose entfernen oder belassen (wird ignoriert, sobald User existieren).
 
+### C6b. Shopify-Bestelleingang
+
+Custom App im Shop (Admin API, Leserecht Orders). In der Compose-`.env` auf CT 131:
+
+```
+SHOPIFY_STORE=dein-shop.myshopify.com
+SHOPIFY_ADMIN_TOKEN=shpat_…
+```
+
+Die App holt alle 5 Minuten (und per Knopf **Shopify abrufen**) bezahlte, noch nicht vollständig erfüllte Aufträge. Versendet bleibt manuell. Ohne Token startet der Poller nicht; der Knopf meldet die fehlende Konfiguration.
+
 ### C7. Externer Zugang (MyFRITZ + Caddy HTTPS)
 
 Auf dem Proxmox-Host läuft Caddy. Holzlinge:

@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app.database import init_db
 from app.middleware_auth import AuthMiddleware
 from app.routers import router
+from app.shopify_orders import shopify_configured, shopify_poll_loop
 
 app = FastAPI(title="Holzlinge Inventar", version="1.0.0")
 
@@ -28,6 +29,10 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    if shopify_configured():
+        import threading
+
+        threading.Thread(target=shopify_poll_loop, name="shopify-poll", daemon=True).start()
 
 
 if STATIC_DIR.exists():

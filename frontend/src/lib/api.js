@@ -222,6 +222,8 @@ export const api = {
     create: (body) => request('/api/orders', { method: 'POST', body: JSON.stringify(body) }),
     update: (id, body) => request(`/api/orders/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     remove: (id) => request(`/api/orders/${id}`, { method: 'DELETE' }),
+    approve: (id) => request(`/api/orders/${id}/approve`, { method: 'POST' }),
+    syncShopify: () => request('/api/orders/shopify-sync', { method: 'POST' }),
     linkLine: (orderId, lineId, body) =>
       request(`/api/orders/${orderId}/lines/${lineId}`, { method: 'PATCH', body: JSON.stringify(body) }),
   },

@@ -183,6 +183,7 @@ def init_db() -> None:
         migrate_product_is_on_demand(engine)
         migrate_shopify_import_queue(engine)
         migrate_orders_todos(engine)
+        migrate_order_origin(engine)
         migrate_color_hex(engine, db)
         migrate_material_decimal_places(engine)
         seed_admin_user(db)
@@ -412,6 +413,7 @@ def migrate_orders_todos(engine) -> None:
                         ordered_on DATETIME NOT NULL,
                         customer_name VARCHAR(200),
                         external_number VARCHAR(80),
+                        origin VARCHAR(20) NOT NULL DEFAULT 'manual',
                         status VARCHAR(20) NOT NULL DEFAULT 'open',
                         created_at DATETIME NOT NULL,
                         updated_at DATETIME NOT NULL
@@ -455,6 +457,25 @@ def migrate_orders_todos(engine) -> None:
                     """
                 )
             )
+
+
+def migrate_order_origin(engine) -> None:
+    """Herkunft am Auftrag (manual / shopify / etsy)."""
+    insp = inspect(engine)
+    if "orders" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("orders")}
+    with engine.begin() as conn:
+        if "origin" not in cols:
+            conn.execute(text("ALTER TABLE orders ADD COLUMN origin VARCHAR(20) NOT NULL DEFAULT 'manual'"))
+        conn.execute(
+            text(
+                """
+                UPDATE orders SET origin = 'manual'
+                WHERE origin IS NULL OR origin = ''
+                """
+            )
+        )
 
 
 def migrate_color_hex(engine, db: Session) -> None:

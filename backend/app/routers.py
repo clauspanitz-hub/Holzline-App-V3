@@ -67,6 +67,7 @@ from app.schemas import (
     OrderLineLink,
     OrderRead,
     OrderUpdate,
+    ShopifyOrderSyncResult,
     TodoRead,
     StockAdjustRequest,
     StockDeltaRequest,
@@ -551,7 +552,7 @@ def delete_import_queue_item(handle: str, db: Session = Depends(get_db)) -> None
 
 @router.get("/orders", response_model=list[OrderRead])
 def list_orders(
-    status: Literal["open", "ready", "shipped"] | None = None,
+    status: Literal["review", "open", "ready", "shipped"] | None = None,
     db: Session = Depends(get_db),
 ) -> list[OrderRead]:
     return services.list_orders(db, status=status)
@@ -560,6 +561,16 @@ def list_orders(
 @router.post("/orders", response_model=OrderRead)
 def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderRead:
     return services.create_order(db, payload)
+
+
+@router.post("/orders/shopify-sync", response_model=ShopifyOrderSyncResult)
+def sync_shopify_orders(db: Session = Depends(get_db)) -> ShopifyOrderSyncResult:
+    return services.import_shopify_orders(db)
+
+
+@router.post("/orders/{order_id}/approve", response_model=OrderRead)
+def approve_order(order_id: int, db: Session = Depends(get_db)) -> OrderRead:
+    return services.approve_order(db, order_id)
 
 
 @router.get("/orders/{order_id}", response_model=OrderRead)
