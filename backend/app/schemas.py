@@ -4,6 +4,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.color_hex import normalize_hex
 from app.models import Unit
 
 Quantity = Annotated[Decimal, Field(max_digits=14, decimal_places=3)]
@@ -61,11 +62,23 @@ class TagRead(BaseModel):
 class ColorCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     medium_id: int
+    hex: str | None = Field(default=None, max_length=7)
+
+    @field_validator("hex")
+    @classmethod
+    def normalize_color_hex(cls, value: str | None) -> str | None:
+        return normalize_hex(value)
 
 
 class ColorUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     medium_id: int | None = None
+    hex: str | None = Field(default=None, max_length=7)
+
+    @field_validator("hex")
+    @classmethod
+    def normalize_color_hex(cls, value: str | None) -> str | None:
+        return normalize_hex(value)
 
 
 class ColorRead(BaseModel):
@@ -73,6 +86,7 @@ class ColorRead(BaseModel):
 
     id: int
     name: str
+    hex: str | None = None
     medium_id: int
     medium: MediumRead
     label: str = ""
@@ -110,6 +124,7 @@ class MaterialBase(BaseModel):
     min_stock: Quantity | None = None
     family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
+    decimal_places: int = Field(default=0, ge=0, le=3)
     tag_ids: list[int] = []
 
     @field_validator("family")
@@ -133,6 +148,7 @@ class MaterialUpdate(BaseModel):
     purchase_price: Money | None = None
     min_stock: Quantity | None = None
     is_template: bool | None = None
+    decimal_places: int | None = Field(default=None, ge=0, le=3)
     family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     tag_ids: list[int] | None = None
@@ -158,6 +174,7 @@ class MaterialRead(BaseModel):
     cost_per_unit: UnitCost
     min_stock: Quantity | None = None
     is_template: bool = False
+    decimal_places: int = 0
     family: str | None = None
     overview_ignored: bool = False
     color_id: int | None = None
@@ -198,6 +215,7 @@ class BomLineRead(BaseModel):
     material_unit: Unit | None = None
     quantity_required: Quantity
     line_cost: Money
+    decimal_places: int = 0
 
 
 class ProductBase(BaseModel):

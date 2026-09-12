@@ -182,6 +182,8 @@ def init_db() -> None:
         migrate_product_is_on_demand(engine)
         migrate_shopify_import_queue(engine)
         migrate_orders_todos(engine)
+        migrate_color_hex(engine, db)
+        migrate_material_decimal_places(engine)
         seed_admin_user(db)
         from app.services import backfill_incomplete_tags, ensure_system_incomplete_tags
 
@@ -241,7 +243,6 @@ def migrate_audit_timestamps(engine) -> None:
 
 
 def migrate_min_stock(engine) -> None:
-    """Add optional min_stock to materials and products."""
     insp = inspect(engine)
     with engine.begin() as conn:
         for table in ("materials", "products"):
@@ -440,6 +441,39 @@ def migrate_orders_todos(engine) -> None:
                     """
                 )
             )
+
+
+def migrate_color_hex(engine, db: Session) -> None:
+    """Hex am Farbkatalog; leere Werte aus dem Namen zuweisen."""
+    from app.color_hex import hex_for_color_name
+    from app.models import Color
+
+    insp = inspect(engine)
+    if "colors" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("colors")}
+    if "hex" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE colors ADD COLUMN hex VARCHAR(7)"))
+        db.expire_all()
+    for color in db.scalars(select(Color)).all():
+        if color.hex:
+            continue
+        guessed = hex_for_color_name(color.name)
+        if guessed:
+            color.hex = guessed
+    db.commit()
+
+
+def migrate_material_decimal_places(engine) -> None:
+    """Nachkommastellen am Material (0–3), Default 0."""
+    insp = inspect(engine)
+    if "materials" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("materials")}
+    if "decimal_places" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE materials ADD COLUMN decimal_places INTEGER NOT NULL DEFAULT 0"))
 
 
 def migrate_product_bom_components(engine) -> None:

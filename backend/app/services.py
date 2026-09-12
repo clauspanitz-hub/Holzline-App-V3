@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app.color_hex import hex_for_color_name
 from app.database import AUSSCHUSS_LOCATION_NAME
 from app.models import (
     Color,
@@ -171,6 +172,7 @@ def color_read(color: Color | None) -> ColorRead | None:
     return ColorRead(
         id=color.id,
         name=color.name,
+        hex=color.hex,
         medium_id=color.medium_id,
         medium=MediumRead.model_validate(color.medium),
     )
@@ -385,7 +387,12 @@ def list_colors(db: Session, medium_id: int | None = None) -> list[ColorRead]:
 
 def create_color(db: Session, payload: ColorCreate) -> ColorRead:
     medium = get_medium(db, payload.medium_id)
-    color = Color(name=payload.name.strip(), medium_id=medium.id)
+    name = payload.name.strip()
+    color = Color(
+        name=name,
+        medium_id=medium.id,
+        hex=payload.hex or hex_for_color_name(name),
+    )
     db.add(color)
     try:
         db.commit()
@@ -410,6 +417,8 @@ def update_color(db: Session, color_id: int, payload: ColorUpdate) -> ColorWrite
     if "medium_id" in data and data["medium_id"] is not None:
         medium = get_medium(db, data["medium_id"])
         color.medium_id = medium.id
+    if "hex" in data:
+        color.hex = data["hex"]
     warnings: list[str] = []
     try:
         db.flush()
@@ -752,6 +761,7 @@ def bom_line_read(line: ProductMaterial, *, db: Session | None = None) -> BomLin
             material_unit=line.material.unit,
             quantity_required=line.quantity_required,
             line_cost=line_cost,
+            decimal_places=int(getattr(line.material, "decimal_places", 0) or 0),
         )
     component = line.component_product
     if component is None and db is not None and line.component_product_id is not None:
@@ -767,6 +777,7 @@ def bom_line_read(line: ProductMaterial, *, db: Session | None = None) -> BomLin
         material_unit=None,
         quantity_required=line.quantity_required,
         line_cost=_m(qty * Decimal(nested_cost)),
+        decimal_places=0,
     )
 
 
@@ -817,6 +828,7 @@ def material_read(material: Material) -> MaterialRead:
         cost_per_unit=material.cost_per_unit,
         min_stock=material.min_stock,
         is_template=bool(getattr(material, "is_template", False)),
+        decimal_places=int(getattr(material, "decimal_places", 0) or 0),
         family=material.family,
         overview_ignored=bool(getattr(material, "overview_ignored", False)),
         color_id=material.color_id,
@@ -923,6 +935,7 @@ def create_material(db: Session, payload: MaterialCreate) -> MaterialRead:
         min_stock=_q(payload.min_stock) if payload.min_stock is not None else None,
         family=(payload.family.strip() if payload.family else None),
         color_id=color.id if color else None,
+        decimal_places=int(payload.decimal_places or 0),
     )
     material.tags = resolve_tags(db, payload.tag_ids)
     db.add(material)
@@ -1015,6 +1028,7 @@ def create_materials_from_colors(db: Session, payload: MaterialsFromColorsReques
         series_min_stock = _q(template.min_stock)
     else:
         series_min_stock = None
+    series_decimals = int(template.decimal_places or 0) if template is not None else 0
 
     seen: set[int] = set()
     for color_id in payload.color_ids:
@@ -1044,6 +1058,7 @@ def create_materials_from_colors(db: Session, payload: MaterialsFromColorsReques
             min_stock=series_min_stock,
             family=base,
             color_id=color.id,
+            decimal_places=series_decimals,
         )
         material.tags = list(tags)
         db.add(material)

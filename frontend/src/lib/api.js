@@ -237,11 +237,31 @@ export const api = {
   },
 }
 
-export function formatQty(value) {
-  return Number(value).toLocaleString('de-DE', {
+/** Nachkommastellen eines Artikels (Produkte immer 0, Material laut Feld). */
+export function itemDecimals(item) {
+  if (item == null) return 0
+  const n = Number(item.decimal_places)
+  if (!Number.isFinite(n)) return 0
+  return Math.max(0, Math.min(3, Math.trunc(n)))
+}
+
+export function qtyStep(decimals = 0) {
+  const d = itemDecimals({ decimal_places: decimals })
+  if (d === 0) return '1'
+  return (10 ** -d).toFixed(d)
+}
+
+export function formatQty(value, decimals = 0) {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return '0'
+  return n.toLocaleString('de-DE', {
     minimumFractionDigits: 0,
-    maximumFractionDigits: 3,
+    maximumFractionDigits: itemDecimals({ decimal_places: decimals }),
   })
+}
+
+export function formatItemQty(item, value = item?.stock_total) {
+  return formatQty(value, itemDecimals(item))
 }
 
 export function formatMoney(value) {
@@ -275,5 +295,5 @@ export function formatActor(value) {
 
 export function stockSummary(stocks = []) {
   if (!stocks.length) return '—'
-  return stocks.map((s) => `${s.location_name}: ${formatQty(s.quantity)}`).join(' · ')
+  return stocks.map((s) => `${s.location_name}: ${formatQty(s.quantity, 0)}`).join(' · ')
 }

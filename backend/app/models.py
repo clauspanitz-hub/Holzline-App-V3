@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Integer,
     JSON,
     Numeric,
     String,
@@ -84,6 +85,7 @@ class Color(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
+    hex: Mapped[str | None] = mapped_column(String(7), nullable=True)
     medium_id: Mapped[int] = mapped_column(
         ForeignKey("color_media.id", ondelete="CASCADE"),
         nullable=False,
@@ -105,6 +107,7 @@ class Material(Base):
     cost_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False, default=Decimal("0"))
     min_stock: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    decimal_places: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     family: Mapped[str | None] = mapped_column(String(200), nullable=True)
     overview_ignored: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     color_id: Mapped[int | None] = mapped_column(ForeignKey("colors.id", ondelete="SET NULL"), nullable=True)

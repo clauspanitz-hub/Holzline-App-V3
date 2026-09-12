@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { api, formatMoney, formatQty, formatUnitCost, formatDateTime, formatActor } from './lib/api.js'
+  import { api, formatMoney, formatQty, formatUnitCost, formatDateTime, formatActor, itemDecimals, qtyStep } from './lib/api.js'
   import { filterRows, sortRows, nextSortState, sortMark, prepareRows } from './lib/tableUtils.js'
   import { productFamilyKey, collectProductFamilies, groupProductsByFamily } from './lib/productFamily.js'
   import {
@@ -8,10 +8,11 @@
     resolveSetComponents as resolveSetComponentsLib,
     templateSeriesPrefix,
   } from './lib/setOptionMatch.js'
-  import FamilyFilter from './lib/components/FamilyFilter.svelte'
   import FamilySelect from './lib/components/FamilySelect.svelte'
   import ProductGroupSection from './lib/components/ProductGroupSection.svelte'
   import BackupPanel from './lib/components/BackupPanel.svelte'
+  import FilterBar from './lib/components/FilterBar.svelte'
+  import { applyCatalogFilter, emptyCatalogFilter } from './lib/catalogFilter.js'
 
   let tab = $state('overview')
   let authUser = $state(null)
@@ -29,12 +30,9 @@
   let media = $state([])
   let colors = $state([])
   let allTags = $state([])
-  let filterTag = $state('')
-  let filterColorId = $state('')
-  let filterFamily = $state('')
-  let filterMaterialFamily = $state('')
-  let overviewProductsOpen = $state(false)
-  let overviewMaterialsOpen = $state(false)
+  let catalogFilter = $state(emptyCatalogFilter())
+  let overviewCriticalOpen = $state(false)
+  let overviewIncompleteOpen = $state(false)
   let overviewIgnoredOpen = $state(false)
   let overviewOrdersOpen = $state(false)
   let overviewTodosOpen = $state(false)
@@ -180,6 +178,7 @@
       purchase_price: '0',
       min_stock: '',
       is_template: false,
+      decimal_places: 0,
       family: '',
       location_id: '',
       medium_id: '',
@@ -275,6 +274,7 @@
       purchase_price: '0',
       stock_quantity: '0',
       location_id: String(locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || ''),
+      decimal_places: 0,
     }
   }
 
@@ -471,6 +471,7 @@
     bulkForm.unit = template.unit
     bulkForm.purchase_quantity = String(template.purchase_quantity ?? 1)
     bulkForm.purchase_price = String(template.purchase_price ?? 0)
+    bulkForm.decimal_places = itemDecimals(template)
     if (bulkForm.min_stock === '') {
       bulkForm.min_stock = materialTemplateMinStock(bulkForm.template_material_id)
     }
@@ -1136,10 +1137,6 @@
         return
       }
       const t = tab
-      const filter = {
-        tag: filterTag || undefined,
-        color_id: filterColorId || undefined,
-      }
       const jobs = []
       if (!loadedBuckets.catalog) {
         jobs.push(
@@ -1173,7 +1170,7 @@
       }
       if (t !== 'users' && !loadedBuckets.inventory) {
         jobs.push(
-          Promise.all([api.materials.list(filter), api.products.list(filter)]).then(([m, p]) => {
+          Promise.all([api.materials.list(), api.products.list()]).then(([m, p]) => {
             materials = m
             products = p
             loadedBuckets.inventory = true
@@ -1371,7 +1368,15 @@
   const negativeProducts = $derived(products.filter((item) => item.is_negative))
   const currentOrders = $derived(orders.filter((o) => o.status === 'open' || o.status === 'ready'))
   const shippedOrders = $derived(orders.filter((o) => o.status === 'shipped'))
-  const overviewOpenTodos = $derived(todos.filter((t) => t.status === 'open'))
+  const overviewOpenTodos = $derived(
+    todos.filter((t) => t.status === 'open' && t.category !== 'purchase' && t.order_id),
+  )
+  const incompleteMaterials = $derived(
+    materials.filter((item) => Array.isArray(item.incomplete_fields) && item.incomplete_fields.length),
+  )
+  const incompleteProducts = $derived(
+    products.filter((item) => Array.isArray(item.incomplete_fields) && item.incomplete_fields.length),
+  )
   const hasProductTemplates = $derived(products.some((p) => p.is_template))
   const hasMaterialTemplates = $derived(materials.some((m) => m.is_template))
   const productsForBomTemplate = $derived(
@@ -1408,9 +1413,9 @@
       colorTagMeta(item),
       item.unit,
       formatMinStock(item) ? `Min. ${formatMinStock(item)}` : '',
-      formatQty(item.stock_total),
+      formatQty(item.stock_total, itemDecimals(item)),
       item.is_negative ? 'negativ' : '',
-      ...locs.map((loc) => `${loc.name} ${formatQty(stockAt(item, loc.id))}`),
+      ...locs.map((loc) => `${loc.name} ${formatQty(stockAt(item, loc.id), itemDecimals(item))}`),
     ]
     return parts.filter(Boolean).join(' ')
   }
@@ -1439,8 +1444,8 @@
   function variantBomSearchText(variant) {
     const bom = (variant.bom || [])
       .map((line) => {
-        const stock = line.stock_total != null ? ` Lager ${formatQty(line.stock_total)}` : ''
-        return `${line.component_name} ${formatQty(line.quantity_required)}${stock}`
+        const stock = line.stock_total != null ? ` Lager ${formatQty(line.stock_total, line.decimal_places ?? 0)}` : ''
+        return `${line.component_name} ${formatQty(line.quantity_required, line.decimal_places ?? 0)}${stock}`
       })
       .join(' ')
     return [variant.label, String(variant.buildable_quantity ?? ''), bom || 'keine Stückliste'].join(' ')
@@ -1456,57 +1461,69 @@
   }
 
   const displayedOverviewMaterials = $derived.by(() => {
-    const familyFiltered = filterMaterialFamily
-      ? criticalMaterials.filter((m) => productFamilyKey(m) === filterMaterialFamily)
-      : criticalMaterials
     return prepareRows(
-      familyFiltered,
-      listUi.overviewMaterials,
+      applyCatalogFilter(criticalMaterials, catalogFilter, colors),
+      { ...listUi.overviewMaterials, q: catalogFilter.q },
       (m) => stockRowSearchText(m, materialLocations),
       stockSortGetter(listUi.overviewMaterials.sortKey),
     )
   })
   const overviewMaterialGroups = $derived(groupProductsByFamily(displayedOverviewMaterials))
-  const familyFilteredOverviewProducts = $derived(
-    filterFamily
-      ? criticalProducts.filter((p) => productFamilyKey(p) === filterFamily)
-      : criticalProducts,
-  )
   const displayedOverviewProducts = $derived(
     prepareRows(
-      familyFilteredOverviewProducts,
-      listUi.overviewProducts,
+      applyCatalogFilter(criticalProducts, catalogFilter, colors),
+      { ...listUi.overviewProducts, q: catalogFilter.q },
       (p) => stockRowSearchText(p, orderedLocations),
       stockSortGetter(listUi.overviewProducts.sortKey),
     ),
   )
   const overviewProductGroups = $derived(groupProductsByFamily(displayedOverviewProducts))
   const displayedMaterials = $derived.by(() => {
-    const familyFiltered = filterMaterialFamily
-      ? materials.filter((m) => productFamilyKey(m) === filterMaterialFamily)
-      : materials
     return prepareRows(
-      familyFiltered,
-      listUi.materials,
+      applyCatalogFilter(materials, catalogFilter, colors),
+      { ...listUi.materials, q: catalogFilter.q },
       (m) => stockRowSearchText(m, materialLocations),
       stockSortGetter(listUi.materials.sortKey),
     )
   })
   const materialFamilies = $derived(collectProductFamilies(materials))
   const materialGroups = $derived(groupProductsByFamily(displayedMaterials))
-  const familyFilteredProducts = $derived(
-    filterFamily ? products.filter((p) => productFamilyKey(p) === filterFamily) : products,
-  )
   const displayedProducts = $derived(
     prepareRows(
-      familyFilteredProducts,
-      listUi.products,
+      applyCatalogFilter(products, catalogFilter, colors),
+      { ...listUi.products, q: catalogFilter.q },
       (p) => stockRowSearchText(p, orderedLocations),
       stockSortGetter(listUi.products.sortKey),
     ),
   )
   /** Vorhandene Produktfamilien für den Filter (ohne Leerwerte). */
   const productFamilies = $derived(collectProductFamilies(products))
+  const catalogFilterFamilies = $derived(
+    [...new Set([...productFamilies, ...materialFamilies])].sort((a, b) => a.localeCompare(b, 'de')),
+  )
+  const displayedIncompleteProducts = $derived(
+    prepareRows(
+      applyCatalogFilter(incompleteProducts, catalogFilter, colors),
+      { ...listUi.overviewProducts, q: catalogFilter.q },
+      (p) => stockRowSearchText(p, orderedLocations),
+      stockSortGetter('name'),
+    ),
+  )
+  const displayedIncompleteMaterials = $derived(
+    prepareRows(
+      applyCatalogFilter(incompleteMaterials, catalogFilter, colors),
+      { ...listUi.overviewMaterials, q: catalogFilter.q },
+      (m) => stockRowSearchText(m, materialLocations),
+      stockSortGetter('name'),
+    ),
+  )
+  const incompleteProductGroups = $derived(groupProductsByFamily(displayedIncompleteProducts))
+  const incompleteMaterialGroups = $derived(groupProductsByFamily(displayedIncompleteMaterials))
+  const bomQtyStep = $derived.by(() => {
+    if (bomForm.kind === 'product') return qtyStep(0)
+    const mat = materials.find((m) => String(m.id) === String(bomForm.material_id))
+    return qtyStep(itemDecimals(mat))
+  })
   const productGroups = $derived(groupProductsByFamily(displayedProducts))
   const staffQueueProducts = $derived.by(() => {
     const maLocs = locations.filter((l) => STAFF_LOCATION_NAMES.includes(l.name))
@@ -1559,7 +1576,7 @@
 
   function formatMinStock(item) {
     if (item.min_stock == null || item.min_stock === '') return ''
-    return formatQty(item.min_stock)
+    return formatQty(item.min_stock, itemDecimals(item))
   }
 
   function initStockDrafts(item) {
@@ -1589,6 +1606,7 @@
         purchase_price: String(template.purchase_price ?? template.cost_per_unit ?? 0),
         min_stock: template.min_stock != null ? String(template.min_stock) : '',
         family: template.family || '',
+        decimal_places: itemDecimals(template),
         stock_quantity: '0',
         medium_id: mid,
         color_id: template.color_id ? String(template.color_id) : '',
@@ -1609,6 +1627,7 @@
       purchase_price: String(material.purchase_price ?? material.cost_per_unit ?? 0),
       min_stock: material.min_stock != null ? String(material.min_stock) : '',
       is_template: !!material.is_template,
+      decimal_places: itemDecimals(material),
       family: material.family || '',
       location_id: '',
       medium_id: mid,
@@ -1771,6 +1790,21 @@
     } finally {
       saving = false
       catalogSavingKey = ''
+    }
+  }
+
+  async function saveColorHex(color, hex) {
+    const next = String(hex || '').trim().toUpperCase()
+    const prev = String(color.hex || '').trim().toUpperCase()
+    if (next === prev || saving) return
+    saving = true
+    try {
+      await api.colors.update(color.id, { hex: next || null })
+      await refresh({ silent: true })
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
     }
   }
 
@@ -2009,6 +2043,7 @@
           purchase_price: materialForm.purchase_price,
           min_stock: parseOptionalQty(materialForm.min_stock),
           family: materialForm.family.trim() || null,
+          decimal_places: itemDecimals(materialForm),
           stock_quantity: materialForm.stock_quantity,
           location_id: Number(materialForm.location_id),
           ...colorPayload,
@@ -2029,6 +2064,7 @@
           min_stock: parseOptionalQty(materialForm.min_stock),
           is_template: !!materialForm.is_template,
           family: materialForm.family.trim() || null,
+          decimal_places: itemDecimals(materialForm),
           ...colorPayload,
         })
         showFlash('ok', 'Material gespeichert.')
@@ -2310,6 +2346,7 @@
         purchase_price: inlineMaterialForm.purchase_price,
         stock_quantity: inlineMaterialForm.stock_quantity,
         location_id: Number(inlineMaterialForm.location_id),
+        decimal_places: itemDecimals(inlineMaterialForm),
       })
       await refresh()
       bomForm = { kind: 'material', material_id: String(created.id), product_id: '', quantity_required: bomForm.quantity_required || '' }
@@ -2859,6 +2896,15 @@
           </button>
         {/if}
       </nav>
+      {#if authUser.role === 'admin' && (tab === 'overview' || tab === 'materials' || tab === 'products')}
+        <FilterBar
+          {media}
+          {colors}
+          families={catalogFilterFamilies}
+          tags={allTags}
+          bind:filter={catalogFilter}
+        />
+      {/if}
     </div>
   {/if}
 
@@ -3090,28 +3136,22 @@
       {/if}
 
       <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewTodosOpen = !overviewTodosOpen)}>
-        {overviewTodosOpen ? '▼' : '▶'} Offene Todos
+        {overviewTodosOpen ? '▼' : '▶'} Offene Todos aus Bestellungen
         <span class="empty">({overviewOpenTodos.length})</span>
       </button>
       {#if overviewTodosOpen}
-        {@render todosMarkup(overviewOpenTodos, 'Keine offenen Todos.')}
+        {@render todosMarkup(overviewOpenTodos, 'Keine offenen Werkstatt-Todos aus Bestellungen.')}
       {/if}
 
-      <p class="empty">
-        Kritische Bestände (Gesamt ≤ 0 oder unter Mindestbestand). Einzelne Einträge können dauerhaft ausgeblendet werden.
-      </p>
-
-      <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewProductsOpen = !overviewProductsOpen)}>
-        {overviewProductsOpen ? '▼' : '▶'} Produkte
-        <span class="empty">({criticalProducts.length})</span>
+      <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewCriticalOpen = !overviewCriticalOpen)}>
+        {overviewCriticalOpen ? '▼' : '▶'} Kritische Artikel
+        <span class="empty">({criticalProducts.length + criticalMaterials.length})</span>
       </button>
-      {#if overviewProductsOpen}
-        <div class="filter-bar form-grid filter-bar-end">
-          <FamilyFilter families={productFamilies} bind:value={filterFamily} />
-          <label class="list-search">Suche
-            <input type="search" placeholder="Name, Standort, Meta…" bind:value={listUi.overviewProducts.q} />
-          </label>
-        </div>
+      {#if overviewCriticalOpen}
+        <p class="empty">
+          Produkte und Materialien mit Gesamt ≤ 0 oder unter Mindestbestand. Einträge können dauerhaft ignoriert werden.
+        </p>
+        <h3>Produkte</h3>
         <div class="table-wrap stock-table-wrap">
           <table class="stock-table">
             <thead>
@@ -3153,10 +3193,10 @@
                       {/if}
                     </td>
                     {#each orderedLocations as loc}
-                      <td class="num" class:neg={stockAt(product, loc.id) < 0}>{formatQty(stockAt(product, loc.id))}</td>
+                      <td class="num" class:neg={stockAt(product, loc.id) < 0}>{formatQty(stockAt(product, loc.id), 0)}</td>
                     {/each}
                     <td class="num" class:neg={Number(product.stock_total) <= 0 || product.is_negative}>
-                      {formatQty(product.stock_total)}
+                      {formatQty(product.stock_total, 0)}
                     </td>
                     <td onclick={(e) => e.stopPropagation()}>
                       <div class="row-actions">
@@ -3170,19 +3210,8 @@
             </tbody>
           </table>
         </div>
-      {/if}
 
-      <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewMaterialsOpen = !overviewMaterialsOpen)}>
-        {overviewMaterialsOpen ? '▼' : '▶'} Materialien
-        <span class="empty">({criticalMaterials.length})</span>
-      </button>
-      {#if overviewMaterialsOpen}
-        <div class="filter-bar form-grid filter-bar-end">
-          <FamilyFilter families={materialFamilies} bind:value={filterMaterialFamily} />
-          <label class="list-search">Suche
-            <input type="search" placeholder="Name, Standort, Meta…" bind:value={listUi.overviewMaterials.q} />
-          </label>
-        </div>
+        <h3>Materialien</h3>
         <div class="table-wrap stock-table-wrap">
           <table class="stock-table">
             <thead>
@@ -3224,10 +3253,10 @@
                       {/if}
                     </td>
                     {#each materialLocations as loc}
-                      <td class="num" class:neg={stockAt(material, loc.id) < 0}>{formatQty(stockAt(material, loc.id))}</td>
+                      <td class="num" class:neg={stockAt(material, loc.id) < 0}>{formatQty(stockAt(material, loc.id), itemDecimals(material))}</td>
                     {/each}
                     <td class="num" class:neg={Number(material.stock_total) <= 0 || material.is_negative}>
-                      {formatQty(material.stock_total)} {material.unit}
+                      {formatQty(material.stock_total, itemDecimals(material))} {material.unit}
                     </td>
                     <td onclick={(e) => e.stopPropagation()}>
                       <div class="row-actions">
@@ -3241,30 +3270,89 @@
             </tbody>
           </table>
         </div>
-      {/if}
 
-      {#if ignoredCriticalProducts.length || ignoredCriticalMaterials.length}
-        <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewIgnoredOpen = !overviewIgnoredOpen)}>
-          {overviewIgnoredOpen ? '▼' : '▶'} Ignorierte Engpässe
-          <span class="empty">({ignoredCriticalProducts.length + ignoredCriticalMaterials.length})</span>
-        </button>
-        {#if overviewIgnoredOpen}
-          <ul class="plain-list">
-            {#each ignoredCriticalProducts as product}
-              <li class="bom-line">
-                <div>Produkt <strong>{product.name}</strong></div>
-                <button class="btn secondary" disabled={saving} onclick={() => setOverviewIgnored('product', product, false)}>Wieder anzeigen</button>
-              </li>
-            {/each}
-            {#each ignoredCriticalMaterials as material}
-              <li class="bom-line">
-                <div>Material <strong>{material.name}</strong></div>
-                <button class="btn secondary" disabled={saving} onclick={() => setOverviewIgnored('material', material, false)}>Wieder anzeigen</button>
-              </li>
-            {/each}
-          </ul>
+        {#if ignoredCriticalProducts.length || ignoredCriticalMaterials.length}
+          <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewIgnoredOpen = !overviewIgnoredOpen)}>
+            {overviewIgnoredOpen ? '▼' : '▶'} Ignorierte Engpässe
+            <span class="empty">({ignoredCriticalProducts.length + ignoredCriticalMaterials.length})</span>
+          </button>
+          {#if overviewIgnoredOpen}
+            <ul class="plain-list">
+              {#each ignoredCriticalProducts as product}
+                <li class="bom-line">
+                  <div>Produkt <strong>{product.name}</strong></div>
+                  <button class="btn secondary" disabled={saving} onclick={() => setOverviewIgnored('product', product, false)}>Wieder anzeigen</button>
+                </li>
+              {/each}
+              {#each ignoredCriticalMaterials as material}
+                <li class="bom-line">
+                  <div>Material <strong>{material.name}</strong></div>
+                  <button class="btn secondary" disabled={saving} onclick={() => setOverviewIgnored('material', material, false)}>Wieder anzeigen</button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
         {/if}
       {/if}
+
+      <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewIncompleteOpen = !overviewIncompleteOpen)}>
+        {overviewIncompleteOpen ? '▼' : '▶'} Unvollständigkeit
+        <span class="empty">({incompleteProducts.length + incompleteMaterials.length})</span>
+      </button>
+      {#if overviewIncompleteOpen}
+        <p class="empty">Fehlende Stammdaten (System-Tags „fehlt …“).</p>
+        <h3>Produkte</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Name</th><th>Fehlt</th><th></th></tr></thead>
+            <tbody>
+              <ProductGroupSection
+                groups={incompleteProductGroups}
+                {collapsedFamilies}
+                colSpan={3}
+                emptyMessage="Keine unvollständigen Produkte."
+                onToggleCollapse={toggleFamilyCollapse}
+              >
+                {#snippet row({ product })}
+                  <tr class="row-click" onclick={() => openEditProduct(product)}>
+                    <td>{product.name}</td>
+                    <td>{incompleteHint(product) || '—'}</td>
+                    <td onclick={(e) => e.stopPropagation()}>
+                      <button class="btn secondary" onclick={() => openEditProduct(product)}>Bearbeiten</button>
+                    </td>
+                  </tr>
+                {/snippet}
+              </ProductGroupSection>
+            </tbody>
+          </table>
+        </div>
+        <h3>Materialien</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Name</th><th>Fehlt</th><th></th></tr></thead>
+            <tbody>
+              <ProductGroupSection
+                groups={incompleteMaterialGroups}
+                {collapsedFamilies}
+                colSpan={3}
+                emptyMessage="Keine unvollständigen Materialien."
+                onToggleCollapse={toggleFamilyCollapse}
+              >
+                {#snippet row({ item: material })}
+                  <tr class="row-click" onclick={() => openEditMaterial(material)}>
+                    <td>{material.name}</td>
+                    <td>{incompleteHint(material) || '—'}</td>
+                    <td onclick={(e) => e.stopPropagation()}>
+                      <button class="btn secondary" onclick={() => openEditMaterial(material)}>Bearbeiten</button>
+                    </td>
+                  </tr>
+                {/snippet}
+              </ProductGroupSection>
+            </tbody>
+          </table>
+        </div>
+      {/if}
+
     </section>
     <BackupPanel onFlash={showFlash} onImported={refresh} />
   {:else if tab === 'materials'}
@@ -3275,24 +3363,6 @@
           <button class="btn secondary" onclick={() => openBulkMaterials()}>Aus Farben…</button>
           <button class="btn" onclick={openCreateMaterial}>Neu</button>
         </div>
-      </div>
-      <div class="filter-bar form-grid filter-bar-end">
-        <label>Filter Tag
-          <select bind:value={filterTag} onchange={() => { loadedBuckets.inventory = false; ensureTabData({ silent: true }) }}>
-            <option value="">alle</option>
-            {#each allTags as t}<option value={t.name}>{t.name}</option>{/each}
-          </select>
-        </label>
-        <label>Filter Farbe
-          <select bind:value={filterColorId} onchange={() => { loadedBuckets.inventory = false; ensureTabData({ silent: true }) }}>
-            <option value="">alle</option>
-            {#each colors as c}<option value={c.id}>{c.label}</option>{/each}
-          </select>
-        </label>
-        <FamilyFilter families={materialFamilies} bind:value={filterMaterialFamily} />
-        <label class="list-search">Suche
-          <input type="search" placeholder="Name, Standort, Farbe, Tags…" bind:value={listUi.materials.q} />
-        </label>
       </div>
       {#if selectedMaterialIds.length}
         <div class="bulk-bar">
@@ -3377,10 +3447,10 @@
                     {/if}
                   </td>
                   {#each materialLocations as loc}
-                    <td class="num" class:neg={stockAt(material, loc.id) < 0}>{formatQty(stockAt(material, loc.id))}</td>
+                    <td class="num" class:neg={stockAt(material, loc.id) < 0}>{formatQty(stockAt(material, loc.id), itemDecimals(material))}</td>
                   {/each}
                   <td class="num" class:neg={Number(material.stock_total) <= 0 || material.is_negative}>
-                    {formatQty(material.stock_total)} {material.unit}
+                    {formatQty(material.stock_total, itemDecimals(material))} {material.unit}
                   </td>
                   <td class="meta-cell">
                     <div>{formatDateTime(material.updated_at)}</div>
@@ -3409,24 +3479,6 @@
           <button class="btn secondary" onclick={() => openBulkProducts()}>Aus Farben…</button>
           <button class="btn" onclick={openCreateProduct}>Neu</button>
         </div>
-      </div>
-      <div class="filter-bar form-grid filter-bar-end">
-        <label>Filter Tag
-          <select bind:value={filterTag} onchange={() => { loadedBuckets.inventory = false; ensureTabData({ silent: true }) }}>
-            <option value="">alle</option>
-            {#each allTags as t}<option value={t.name}>{t.name}</option>{/each}
-          </select>
-        </label>
-        <label>Filter Farbe
-          <select bind:value={filterColorId} onchange={() => { loadedBuckets.inventory = false; ensureTabData({ silent: true }) }}>
-            <option value="">alle</option>
-            {#each colors as c}<option value={c.id}>{c.label}</option>{/each}
-          </select>
-        </label>
-        <FamilyFilter families={productFamilies} bind:value={filterFamily} />
-        <label class="list-search">Suche
-          <input type="search" placeholder="Name, Standort, Farbe, Tags…" bind:value={listUi.products.q} />
-        </label>
       </div>
       {#if selectedProductIds.length}
         <div class="bulk-bar">
@@ -3506,10 +3558,10 @@
                     {/if}
                   </td>
                   {#each orderedLocations as loc}
-                    <td class="num" class:neg={stockAt(product, loc.id) < 0}>{formatQty(stockAt(product, loc.id))}</td>
+                    <td class="num" class:neg={stockAt(product, loc.id) < 0}>{formatQty(stockAt(product, loc.id), 0)}</td>
                   {/each}
                   <td class="num" class:neg={Number(product.stock_total) <= 0 || product.is_negative}>
-                    {formatQty(product.stock_total)}
+                    {formatQty(product.stock_total, 0)}
                   </td>
                   <td class="meta-cell">
                     <div>{formatDateTime(product.updated_at)}</div>
@@ -3552,21 +3604,25 @@
         <label>Kunde (optional)<input bind:value={orderForm.customer_name} placeholder="Name" /></label>
         <label>Nummer (optional)<input bind:value={orderForm.external_number} placeholder="später Shopify/Etsy" /></label>
         {#each orderForm.lines as line, i}
-          <label>Produkt
-            <FamilySelect
-              value={line.product_id}
-              items={products}
-              emptyLabel="Freitext / später anlegen"
-              onchange={(v) => onOrderProductPicked(i, v)}
-            />
-          </label>
-          <label>Freitext (wenn kein Produkt)
-            <input bind:value={line.label} placeholder="z. B. Schild Mia 2026" disabled={!!line.product_id} />
-          </label>
-          <label>Menge<input type="number" step="0.001" min="0.001" bind:value={line.quantity} required /></label>
-          <div class="row-actions">
-            {#if orderForm.lines.length > 1}
-              <button type="button" class="btn secondary" onclick={() => { orderForm.lines = orderForm.lines.filter((_, j) => j !== i) }}>Zeile weg</button>
+          <div class="order-line" style="grid-column:1/-1">
+            <label>Produkt
+              <FamilySelect
+                value={line.product_id}
+                items={products}
+                emptyLabel="Freitext / später anlegen"
+                onchange={(v) => onOrderProductPicked(i, v)}
+              />
+            </label>
+            <label>Menge<input type="number" step={qtyStep(0)} min="1" bind:value={line.quantity} required /></label>
+            <div class="row-actions">
+              {#if orderForm.lines.length > 1}
+                <button type="button" class="btn secondary" onclick={() => { orderForm.lines = orderForm.lines.filter((_, j) => j !== i) }}>Entfernen</button>
+              {/if}
+            </div>
+            {#if !line.product_id}
+              <label class="order-line-free">Freitext
+                <input bind:value={line.label} placeholder="z. B. Schild Mia 2026" />
+              </label>
             {/if}
           </div>
         {/each}
@@ -3648,7 +3704,7 @@
                 </td>
                 <td>{product.transform_target_name || '—'}</td>
                 {#each locations.filter((l) => STAFF_LOCATION_NAMES.includes(l.name)) as loc}
-                  <td class="num" class:neg={stockAt(product, loc.id) < 0}>{formatQty(stockAt(product, loc.id))}</td>
+                  <td class="num" class:neg={stockAt(product, loc.id) < 0}>{formatQty(stockAt(product, loc.id), 0)}</td>
                 {/each}
                 <td>
                   <div class="row-actions">
@@ -3759,6 +3815,7 @@
                         Farbe{sortMark(listUi.catalogColors.sortKey, 'name', listUi.catalogColors.sortDir)}
                       </button>
                     </th>
+                    <th>Hex</th>
                     <th class="col-actions"></th>
                   </tr>
                 </thead>
@@ -3781,6 +3838,17 @@
                           aria-label={`Farbe ${c.name}`}
                         />
                       </td>
+                      <td>
+                        <input
+                          class="catalog-hex"
+                          type="color"
+                          value={c.hex || '#9AA0A6'}
+                          title={c.hex || 'kein Hex — grau'}
+                          aria-label={`Hex ${c.name}`}
+                          disabled={saving}
+                          onchange={(e) => saveColorHex(c, e.currentTarget.value)}
+                        />
+                      </td>
                       <td class="col-actions">
                         <button
                           type="button"
@@ -3794,7 +3862,7 @@
                     </tr>
                   {:else}
                     <tr>
-                      <td colspan="2" class="empty">Noch keine Farben — unten eintragen.</td>
+                      <td colspan="3" class="empty">Noch keine Farben — unten eintragen.</td>
                     </tr>
                   {/each}
                   <tr class="catalog-new-row">
@@ -3812,6 +3880,7 @@
                         aria-label={`Neue Farbe für ${m.name}`}
                       />
                     </td>
+                    <td></td>
                     <td class="col-actions"></td>
                   </tr>
                 </tbody>
@@ -4125,8 +4194,16 @@
         <label>Einheit
           <select bind:value={materialForm.unit}>{#each units as u}<option value={u.value}>{u.label}</option>{/each}</select>
         </label>
+        <label>Nachkommastellen
+          <select bind:value={materialForm.decimal_places}>
+            <option value={0}>0 (ganze Zahlen)</option>
+            <option value={1}>1</option>
+            <option value={2}>2</option>
+            <option value={3}>3</option>
+          </select>
+        </label>
         <label>Einkaufsmenge (Packung in Einheit)
-          <input type="number" step="0.001" min="0.001" bind:value={materialForm.purchase_quantity} required />
+          <input type="number" step={qtyStep(materialForm.decimal_places)} min={qtyStep(materialForm.decimal_places)} bind:value={materialForm.purchase_quantity} required />
         </label>
         <label>Einkaufspreis für diese Menge (€)
           <input type="number" step="0.01" bind:value={materialForm.purchase_price} required />
@@ -4136,7 +4213,7 @@
           (z. B. 750 ml für 30 € → 0,04 €/ml)
         </p>
         <label>Mindestbestand (optional)
-          <input type="number" step="0.001" min="0" bind:value={materialForm.min_stock} placeholder="leer = keiner" />
+          <input type="number" step={qtyStep(materialForm.decimal_places)} min="0" bind:value={materialForm.min_stock} placeholder="leer = keiner" />
         </label>
         <label>Materialfamilie
           <input list="material-family-suggestions" bind:value={materialForm.family} placeholder="optional" />
@@ -4192,7 +4269,7 @@
           <label>Anfangsbestand-Standort
             <select bind:value={materialForm.location_id}>{#each materialLocations as l}<option value={l.id}>{l.name}</option>{/each}</select>
           </label>
-          <label>Anfangsbestand<input type="number" step="0.001" bind:value={materialForm.stock_quantity} required /></label>
+          <label>Anfangsbestand<input type="number" step={qtyStep(materialForm.decimal_places)} bind:value={materialForm.stock_quantity} required /></label>
         {/if}
         <div class="modal-actions">
           <button type="button" class="btn secondary" onclick={() => (materialModal = null)}>Abbrechen</button>
@@ -4201,17 +4278,17 @@
       </form>
       {#if materialModal.mode === 'edit'}
         <div class="bom-block">
-          <h4>Bestand je Standort (Gesamt {formatQty(materialModal.material?.stock_total ?? 0)})</h4>
+          <h4>Bestand je Standort (Gesamt {formatQty(materialModal.material?.stock_total ?? 0, itemDecimals(materialModal.material))})</h4>
           {#each materialLocations as loc}
             {#if stockDrafts[loc.id]}
             <div class="stock-row">
               <strong>{loc.name}</strong>
               <label>Setzen
-                <input type="number" step="0.001" bind:value={stockDrafts[loc.id].setValue} />
+                <input type="number" step={qtyStep(itemDecimals(materialModal.material))} bind:value={stockDrafts[loc.id].setValue} />
               </label>
               <button type="button" class="btn secondary" disabled={saving} onclick={() => setMaterialStock(loc.id)}>Setzen</button>
               <label>+/− Menge
-                <input type="number" step="0.001" min="0.001" bind:value={stockDrafts[loc.id].deltaValue} />
+                <input type="number" step={qtyStep(itemDecimals(materialModal.material))} min={qtyStep(itemDecimals(materialModal.material))} bind:value={stockDrafts[loc.id].deltaValue} />
               </label>
               <div class="row-actions">
                 <button type="button" class="btn secondary" disabled={saving} onclick={() => deltaMaterialStock(loc.id, 1)}>+</button>
@@ -4245,7 +4322,7 @@
           {#each productFamilies as f}<option value={f}></option>{/each}
         </datalist>
         <label>Mindestbestand (optional)
-          <input type="number" step="0.001" min="0" bind:value={productForm.min_stock} placeholder="leer = keiner" />
+          <input type="number" step={qtyStep(0)} min="0" bind:value={productForm.min_stock} placeholder="leer = keiner" />
         </label>
         {#if productModal.mode === 'edit'}
           <label class="tag-check">
@@ -4305,7 +4382,7 @@
           <label>Anfangsbestand-Standort
             <select bind:value={productForm.location_id}>{#each locations as l}<option value={l.id}>{l.name}</option>{/each}</select>
           </label>
-          <label>Anfangsbestand<input type="number" step="0.001" bind:value={productForm.stock_quantity} required /></label>
+          <label>Anfangsbestand<input type="number" step={qtyStep(0)} bind:value={productForm.stock_quantity} required /></label>
         {/if}
         <div class="modal-actions">
           <button type="button" class="btn secondary" onclick={() => (productModal = null)}>Schließen</button>
@@ -4314,17 +4391,17 @@
       </form>
       {#if productModal.product}
         <div class="bom-block">
-          <h4>Bestand je Standort (Gesamt {formatQty(productModal.product.stock_total)})</h4>
+          <h4>Bestand je Standort (Gesamt {formatQty(productModal.product.stock_total, 0)})</h4>
           {#each orderedLocations as loc}
             {#if stockDrafts[loc.id]}
             <div class="stock-row">
               <strong>{loc.name}</strong>
               <label>Setzen
-                <input type="number" step="0.001" bind:value={stockDrafts[loc.id].setValue} />
+                <input type="number" step={qtyStep(0)} bind:value={stockDrafts[loc.id].setValue} />
               </label>
               <button type="button" class="btn secondary" disabled={saving} onclick={() => setProductStock(loc.id)}>Setzen</button>
               <label>+/− Menge
-                <input type="number" step="0.001" min="0.001" bind:value={stockDrafts[loc.id].deltaValue} />
+                <input type="number" step={qtyStep(0)} min="1" bind:value={stockDrafts[loc.id].deltaValue} />
               </label>
               <div class="row-actions">
                 <button type="button" class="btn secondary" disabled={saving} onclick={() => deltaProductStock(loc.id, 1)}>+</button>
@@ -4357,7 +4434,7 @@
               <div>
                 {line.component_kind === 'product' ? 'Produkt' : 'Material'}:
                 {line.component_name || line.material_name}
-                · {formatQty(line.quantity_required)}{line.material_unit ? ` ${line.material_unit}` : ''}
+                · {formatQty(line.quantity_required, line.decimal_places ?? 0)}{line.material_unit ? ` ${line.material_unit}` : ''}
                 · {formatMoney(line.line_cost)}
               </div>
               <button class="btn danger" onclick={() => removeBomLine(line)}>Entfernen</button>
@@ -4387,7 +4464,7 @@
               </label>
             {/if}
             <label>Menge pro Produkteinheit
-              <input type="number" step="0.001" min="0.001" bind:value={bomForm.quantity_required} placeholder="z. B. 0,056" required />
+              <input type="number" step={bomQtyStep} min={bomQtyStep} bind:value={bomForm.quantity_required} placeholder="z. B. 1" required />
             </label>
             <div class="row-actions">
               <button
@@ -4420,7 +4497,15 @@
                 <label>Einheit
                   <select bind:value={inlineMaterialForm.unit}>{#each units as u}<option value={u.value}>{u.label}</option>{/each}</select>
                 </label>
-                <label>Einkaufsmenge<input type="number" step="0.001" min="0.001" bind:value={inlineMaterialForm.purchase_quantity} /></label>
+                <label>Nachkommastellen
+                  <select bind:value={inlineMaterialForm.decimal_places}>
+                    <option value={0}>0</option>
+                    <option value={1}>1</option>
+                    <option value={2}>2</option>
+                    <option value={3}>3</option>
+                  </select>
+                </label>
+                <label>Einkaufsmenge<input type="number" step={qtyStep(inlineMaterialForm.decimal_places)} min={qtyStep(inlineMaterialForm.decimal_places)} bind:value={inlineMaterialForm.purchase_quantity} /></label>
                 <label>Einkaufspreis (€)<input type="number" step="0.01" bind:value={inlineMaterialForm.purchase_price} /></label>
                 <p class="empty" style="margin:0">
                   → {formatUnitCost(computedUnitCost(inlineMaterialForm.purchase_price, inlineMaterialForm.purchase_quantity))} / Einheit
@@ -4428,7 +4513,7 @@
                 <label>Standort
                   <select bind:value={inlineMaterialForm.location_id}>{#each locations as l}<option value={l.id}>{l.name}</option>{/each}</select>
                 </label>
-                <label>Anfangsbestand<input type="number" step="0.001" bind:value={inlineMaterialForm.stock_quantity} /></label>
+                <label>Anfangsbestand<input type="number" step={qtyStep(inlineMaterialForm.decimal_places)} bind:value={inlineMaterialForm.stock_quantity} /></label>
                 <button class="btn" disabled={saving || !inlineMaterialForm.name.trim()} onclick={createInlineMaterial}>
                   Material anlegen & auswählen
                 </button>
@@ -4446,7 +4531,7 @@
     <div class="modal" role="dialog" aria-modal="true">
       <h3>Fertigen: {manufactureModal.name}</h3>
       <form class="form-grid" onsubmit={(e) => { e.preventDefault(); runManufacture() }}>
-        <label>Menge<input type="number" step="0.001" min="0.001" bind:value={manufactureForm.quantity} required /></label>
+        <label>Menge<input type="number" step={qtyStep(0)} min="1" bind:value={manufactureForm.quantity} required /></label>
         <label>Standort
           <select bind:value={manufactureForm.location_id}>{#each locations as l}<option value={l.id}>{l.name}</option>{/each}</select>
         </label>
@@ -4466,7 +4551,7 @@
       <form class="form-grid" onsubmit={(e) => { e.preventDefault(); runTransfer() }}>
         <label>Von<select bind:value={transferForm.from_location_id}>{#each locations as l}<option value={l.id}>{l.name}</option>{/each}</select></label>
         <label>Nach<select bind:value={transferForm.to_location_id}>{#each locations as l}<option value={l.id}>{l.name}</option>{/each}</select></label>
-        <label>Menge<input type="number" step="0.001" min="0.001" bind:value={transferForm.quantity} required /></label>
+        <label>Menge<input type="number" step={transferModal.kind === 'material' ? qtyStep(itemDecimals(transferModal.item)) : qtyStep(0)} min={transferModal.kind === 'material' ? qtyStep(itemDecimals(transferModal.item)) : '1'} bind:value={transferForm.quantity} required /></label>
         <label>Notiz (optional)<input bind:value={transferForm.note} placeholder="z. B. Ausschuss / zurück" /></label>
         <div class="modal-actions">
           <button type="button" class="btn secondary" onclick={() => (transferModal = null)}>Abbrechen</button>
@@ -4487,7 +4572,7 @@
             {#each locations as l}<option value={l.id}>{l.name}</option>{/each}
           </select>
         </label>
-        <label>Menge<input type="number" step="0.001" min="0.001" bind:value={transformForm.quantity} required /></label>
+        <label>Menge<input type="number" step={qtyStep(0)} min="1" bind:value={transformForm.quantity} required /></label>
         <label>Notiz (optional)<input bind:value={transformForm.note} /></label>
         <div class="modal-actions">
           <button type="button" class="btn secondary" onclick={() => (transformModal = null)}>Abbrechen</button>

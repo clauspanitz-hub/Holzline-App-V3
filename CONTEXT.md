@@ -65,8 +65,8 @@ Bestellungen mit Status **offen** oder **versandbereit** (nicht versendet). Eige
 _Avoid_: Aktuell = nur heute; aktuelle Bestellungen = nur offene Todos ohne Versandbereit; Schnellerfassung über der Auftragsliste
 
 **Bestellposition**:
-Eine Zeile einer Bestellung: zugeordnetes **Produkt**, **Set-Variante** (sobald Sets im Bestellfluss), oder **unzugeordnet** (Freitext), bis ein **Artikel** verknüpft ist. Unzugeordnet erzeugt ein Todo **Artikel anlegen** (wählen: Produkt oder Material; bei Bestellung Standard Produkt). Nach dem Anlegen: Position **verknüpfen**, Todos neu bewerten.
-_Avoid_: Pflicht, dass der Artikel vor der Bestellung existiert; Freitext ohne Folge-Todo; Set als einzige Positionsart; Anlegen ohne Verknüpfung an die Position
+Eine Zeile einer Bestellung: zugeordnetes **Produkt**, **Set-Variante** (sobald Sets im Bestellfluss), oder **unzugeordnet** (Freitext), bis ein **Artikel** verknüpft ist. Erfassung kompakt: Produktwahl, Menge, **Entfernen**. Freitext nur sichtbar, wenn kein Produkt gewählt ist — dann nicht nötig, sobald ein Produkt gesetzt ist. Unzugeordnet erzeugt ein Todo **Artikel anlegen** (wählen: Produkt oder Material; bei Bestellung Standard Produkt). Nach dem Anlegen: Position **verknüpfen**, Todos neu bewerten.
+_Avoid_: Pflicht, dass der Artikel vor der Bestellung existiert; Freitext ohne Folge-Todo; Freitext-Pflicht neben gewähltem Produkt; Set als einzige Positionsart; Anlegen ohne Verknüpfung an die Position; „Zeile weg“ als Label
 
 **Todo**:
 Eine abarbeitbare Werkstatt- oder Beschaffungsaufgabe. **Eigene Menüseite** (nicht nur unter Bestellungen). Filterbar nach Art (Werkstatt vs. Einkauf); Standardansicht Werkstatt. Pro **Bestellposition** höchstens die nötigen Todos — **nicht** über Bestellungen hinweg zusammenfassen (zwei Aufträge, gleiches Produkt → zwei Fertigen-Todos). Set-Position → **Zusammenstellen**; **Fertigen** nur bei On-Demand oder fehlender Fertigware; lagerndes Produkt ohne Unterdeckung → **kein** Werkstatt-Todo; unzugeordnete Position → **Artikel anlegen**. Aus Bestand (unter Mindestbestand / negativ) → Einkauf-Todo (Erzeugung nach dem ersten Bestell-Schnitt; Filter Werkstatt/Einkauf gilt trotzdem). Abhaken öffnet den bestehenden Dialog (Fertigen, Zusammenstellen oder Anlegen); erst Speichern dort erledigt das Todo.
@@ -81,6 +81,10 @@ _Avoid_: Selbstkosten, Verkaufspreis, Deckungsbeitrag
 **Einheit**:
 Die Maßeinheit eines Materials aus einer festen, im Code gepflegten Liste (Stk, m, kg, g, m², l, ml).
 _Avoid_: Freitext-Einheit, Unit als UI-Begriff
+
+**Mengengenauigkeit**:
+Wie fein eine Menge erfasst und angezeigt wird. **Produkte** immer ganzzahlig. **Materialien:** Feld **Nachkommastellen** (0–3) am Material; Standard **0** (ganze Zahlen). Abweichend z. B. Leimholz **2**. Dieselbe Genauigkeit für Bestand, Einkauf, Verbrauch und Stücklistenzeile dieses Materials.
+_Avoid_: Drei Nachkommastellen als App-Default; 0,345 eines Produkts; Filament in 0,001 g; alle Materialien automatisch eine Nachkommastelle; Genauigkeit nur an der Einheit oder nur an der Familie
 
 **Standort**:
 Ein Ort, an dem Material- oder Produktbestand liegt. Physisch: Hamburg, Dahlenburg; virtuell: In Bearbeitung, MA1, MA2 (bei Mitarbeitern), Ausschuss (verworfen). Material-UI zeigt nur die physischen Standorte (+ Gesamt); Produkte alle Standorte inkl. virtueller.
@@ -103,8 +107,8 @@ Fehlende Pflicht-Infos an Material oder Produkt: Material **Mindestbestand** / *
 _Avoid_: Unvollständigkeit nur als unsichtbare Berechnung ohne Filter; Katalog-Umbenennen/Löschen der `fehlt …`-Tags; Familien-Propagierung für System-Tags
 
 **Farbe**:
-Ein benannter Farbeintrag im Katalog (z. B. Rot, Salbeigrün), jeweils mit einem Medium. Material und Produkt können je eine Farbe haben. In der UI: Medium zuerst, dann Farbe/Option.
-_Avoid_: Farb-Tag statt Katalogeintrag; „Variante“ oder „Art“ für Farboptionen (Variante = Set; Art nicht mehr als UI-Alias)
+Ein benannter Farbeintrag im Katalog (z. B. Rot, Salbeigrün), jeweils mit einem Medium und einem optionalen **Hex-Wert** für die Darstellung (Filter-Kästchen, Hover = Name). Ohne Hex: graues Kästchen. Erstzuweisung der Hex-Werte aus den Farbnamen; danach im Katalog änderbar. Material und Produkt können je eine Farbe haben. In der UI: Medium zuerst, dann Farbe/Option.
+_Avoid_: Farb-Tag statt Katalogeintrag; „Variante“ oder „Art“ für Farboptionen (Variante = Set; Art nicht mehr als UI-Alias); Farbe nur als Name ohne darstellbaren Wert wo Kästchen gemeint sind
 
 **Medium** (Farbe):
 Die Art der Farbgebung aus einem pflegbaren Katalog (Start: Lack, PLA). Am Artikel und in Katalogen erscheint **Medium** oberhalb der Farbe; im Katalog je Medium eine eigene Farb-Tabelle. Vorschläge und Matching nur innerhalb desselben Mediums. Katalog-Bereich: **Medien**.
@@ -164,16 +168,16 @@ Vollständiger App-Stand als eine JSON-Datei zum Herunterladen und Wiederherstel
 _Avoid_: Stiller Import ohne Moduswahl; Merge über interne IDs als Normalfall; Bestände beim Merge addieren; nur Excel-CSVs als einzige Sicherung
 
 **Übersicht** (Listen):
-Zuerst **aktuelle Bestellungen**, darunter offene **Todos**, darunter die bisherigen kritischen **Produkte** und **Materialien** — alle drei Folgeblöcke **zugeklappt**. Kritische Listen nach Familie gruppiert (Standard geschlossen). Einzelne kritische Einträge können **ignoriert** werden: sie bleiben dauerhaft aus der Warnliste, bis man sie manuell wieder einblendet. UI-Struktur: Listen/Ansichten als eigene Komponenten, ohne Design-System.
-_Avoid_: Übersicht als komplette Material-/Produktverwaltung; Ignorieren nur bis zur nächsten Buchung; befristetes Ausblenden ohne manuelles Wiedereinblenden; Übersicht ohne Bestellungen/Todos; alle Blöcke standardmäßig aufgeklappt
+Vier Blöcke, alle Folgeblöcke **zugeklappt**: **Aktuelle Bestellungen**; darunter offene **Todos** aus Bestellungen (Werkstatt: Fertigen, Artikel anlegen, später Zusammenstellen); darunter **kritische Artikel** (**Produkte** und **Materialien** mit Gesamt ≤ 0 oder unter Mindestbestand, nach Familie gruppiert, Standard geschlossen); darunter **Unvollständigkeit** (fehlende Stammdaten, System-Tags `fehlt …`). Einzelne kritische Einträge können **ignoriert** werden: sie bleiben dauerhaft aus der Warnliste, bis man sie manuell wieder einblendet. UI-Struktur: Listen/Ansichten als eigene Komponenten, ohne Design-System.
+_Avoid_: „fehlender Artikel“ als Synonym für Todo Artikel anlegen; Übersicht als komplette Material-/Produktverwaltung; Ignorieren nur bis zur nächsten Buchung; befristetes Ausblenden ohne manuelles Wiedereinblenden; Übersicht ohne Bestellungen/Todos/Unvollständigkeit; alle Blöcke standardmäßig aufgeklappt
 
 **Speichern-Feedback**:
 Nach erfolgreichem Speichern erscheint ein kurzer, selbst verschwindender Hinweis (Toast) und der Speichern-Button zeigt kurz „✓ Gespeichert“. Kein blockierender Dialog nur wegen Erfolg.
 _Avoid_: Alert/Modal nur für „Gespeichert“; Feedback, das Wegklicken erzwingt
 
 **Filter-Leiste**:
-Filter auf den Listen-Seiten stehen oben, rechtsbündig und mit kompakteren Controls — gleiches Verhalten wie bisher, weniger Platzverbrauch. Keine eigene dauerhafte rechte Sidebar und kein nur-per-Icon ausgeklapptes Filterpanel als Pflicht.
-_Avoid_: Filter als dominante linke Spalte; Filter verstecken hinter Icon als einzigem Zugang ohne klare Erkennbarkeit
+Unter der Hauptnavigation, **nur** auf Übersicht, Materialien und Produkte. Eine Zeile (notfalls zwei): **Farbe** immer **mit Medium**, aufklappbar — mehrere Medien gleichzeitig möglich; nach Wahl eines Mediums dessen Farben als Kästchen (Hover = Name); keine Farbe = alle Farben dieses Mediums; eine oder mehrere Farben = nur die. **Familie** und **Tag** als Mehrfach-Auswahl; plus **Freitext**. Innerhalb einer Filterart **ODER**, zwischen den Arten **UND**. **Ein gemeinsamer Filterstand** über diese drei Seiten. Sichtbarer Hinweis, wenn Filter aktiv sind, und eine Aktion **alle Filter entfernen**. Nicht auf Bestellungen/Todos/Sets/Import.
+_Avoid_: Filter als dominante linke Spalte; Filter verstecken hinter Icon als einzigem Zugang; Filterleiste auf jeder Seite inkl. Bestellungen; Filter ohne Hinweis/Reset bei aktivem Stand; flache Farbliste über alle Medien; Farbe ohne Medium im Filter; nur ein Medium gleichzeitig im Filter
 
 **Bewegungs-Historie**:
 Eine nachvollziehbare Umbuchung oder Umwandlung, relevant vor allem mit virtuellen Standorten (MA1, MA2, In Bearbeitung, Ausschuss) und für Umwandlungen — Grundlage für den Überblick „wer hat was / was wurde daraus“.

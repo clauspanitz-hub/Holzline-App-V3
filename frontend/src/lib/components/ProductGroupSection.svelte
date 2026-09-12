@@ -34,7 +34,7 @@
     </td>
   </tr>
   {#if collapsedFamilies[group.key] === false}
-    {#each group.rows as item (item.id)}
+    {#each group.rows as item (item.uid ?? item.id)}
       {@render row({ item, product: item, group })}
     {/each}
   {/if}

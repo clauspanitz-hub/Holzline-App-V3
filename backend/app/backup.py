@@ -150,7 +150,7 @@ def export_backup(db: Session, include_movements: bool = False) -> dict[str, Any
             for row in db.scalars(select(ColorMedium).order_by(ColorMedium.name)).all()
         ],
         "colors": [
-            {"name": row.name, "medium": row.medium.name}
+            {"name": row.name, "medium": row.medium.name, "hex": row.hex}
             for row in db.scalars(select(Color).order_by(Color.name)).all()
         ],
         "tags": [
@@ -188,6 +188,7 @@ def _export_material(material: Material) -> dict[str, Any]:
         "cost_per_unit": _num(material.cost_per_unit),
         "min_stock": _num(material.min_stock),
         "is_template": bool(getattr(material, "is_template", False)),
+        "decimal_places": int(getattr(material, "decimal_places", 0) or 0),
         "family": material.family,
         "overview_ignored": bool(getattr(material, "overview_ignored", False)),
         "color": _color_ref(material.color),
@@ -503,6 +504,8 @@ def _import_media(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
 
 
 def _import_colors(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
+    from app.color_hex import hex_for_color_name, normalize_hex
+
     for entry in entries:
         name = _str_field(entry, "name", context="Farbe")
         medium_name = _str_field(entry, "medium", context=f"Farbe „{name}“")
@@ -513,10 +516,21 @@ def _import_colors(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
             ctx.db.flush()
             ctx.media[_key(medium_name)] = medium
             ctx.created["color_media"] += 1
+        try:
+            hex_val = normalize_hex(_opt_str(entry, "hex"))
+        except ValueError:
+            ctx.warn(f"Farbe „{name}“: Hex ungültig — ignoriert")
+            hex_val = None
+        if not hex_val:
+            hex_val = hex_for_color_name(name)
         key = (_key(name), _key(medium_name))
-        if key in ctx.colors:
+        existing = ctx.colors.get(key)
+        if existing is not None:
+            if hex_val and not existing.hex:
+                existing.hex = hex_val
+                ctx.updated["colors"] += 1
             continue
-        color = Color(name=name, medium_id=medium.id)
+        color = Color(name=name, medium_id=medium.id, hex=hex_val)
         ctx.db.add(color)
         ctx.db.flush()
         ctx.colors[key] = color
@@ -605,6 +619,12 @@ def _import_materials(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
         min_stock = _dec_field(entry, "min_stock", context=context)
         material.min_stock = services._q(min_stock) if min_stock is not None else None
         material.is_template = _bool_field(entry, "is_template")
+        raw_decimals = entry.get("decimal_places", 0)
+        try:
+            decimals = int(raw_decimals if raw_decimals is not None else 0)
+        except (TypeError, ValueError):
+            decimals = 0
+        material.decimal_places = max(0, min(3, decimals))
         material.family = _opt_str(entry, "family")
         material.overview_ignored = bool(entry.get("overview_ignored") or False)
         color = ctx.resolve_color(entry.get("color"), context=context)
