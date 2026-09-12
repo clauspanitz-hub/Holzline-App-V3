@@ -1,5 +1,5 @@
 <script>
-  import { itemDecimals, qtyStep } from '../api.js'
+  import { itemDecimals, qtyInputValue, qtyStep } from '../api.js'
 
   let {
     kind = 'product',
@@ -137,8 +137,8 @@
                 class="gap-cell"
                 type="number"
                 min="0"
-                step="0.001"
-                value={item.min_stock ?? ''}
+                step={qtyStep(itemDecimals(item))}
+                value={qtyInputValue(item.min_stock, itemDecimals(item))}
                 disabled={saving}
                 onblur={(e) => blurNumber(item, 'min_stock', e, true)}
               />

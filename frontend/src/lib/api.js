@@ -251,6 +251,16 @@ export function qtyStep(decimals = 0) {
   return (10 ** -d).toFixed(d)
 }
 
+/** Wert für number-Inputs: 1 statt 1.000; Brüche nur wenn Nachkommastellen erlaubt. */
+export function qtyInputValue(value, decimals = 0) {
+  if (value === '' || value == null) return ''
+  const n = Number(String(value).replace(',', '.'))
+  if (!Number.isFinite(n)) return ''
+  const d = itemDecimals({ decimal_places: decimals })
+  if (d === 0) return String(Math.round(n))
+  return String(Number(n.toFixed(d)))
+}
+
 export function formatQty(value, decimals = 0) {
   const n = Number(value)
   if (!Number.isFinite(n)) return '0'

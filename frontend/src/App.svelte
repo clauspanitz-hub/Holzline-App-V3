@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { api, formatMoney, formatQty, formatUnitCost, formatDateTime, formatActor, itemDecimals, qtyStep } from './lib/api.js'
+  import { api, formatMoney, formatQty, formatUnitCost, formatDateTime, formatActor, itemDecimals, qtyInputValue, qtyStep } from './lib/api.js'
   import { filterRows, sortRows, nextSortState, sortMark, prepareRows } from './lib/tableUtils.js'
   import { productFamilyKey, collectProductFamilies, groupProductsByFamily } from './lib/productFamily.js'
   import {
@@ -466,12 +466,12 @@
   function templateMinStock(templateProductId) {
     if (!templateProductId) return ''
     const template = products.find((p) => p.id === Number(templateProductId))
-    return template?.min_stock != null ? String(template.min_stock) : ''
+    return template?.min_stock != null ? qtyInputValue(template.min_stock, 0) : ''
   }
 
   function materialTemplateMinStock(templateMaterialId) {
     const template = materialTemplateById(templateMaterialId)
-    return template?.min_stock != null ? String(template.min_stock) : ''
+    return template?.min_stock != null ? qtyInputValue(template.min_stock, itemDecimals(template)) : ''
   }
 
   /** Vorlage im Material-Serien-Dialog: Basis + Stammdaten aus Vorlage. */
@@ -1727,7 +1727,7 @@
         unit: template.unit,
         purchase_quantity: String(template.purchase_quantity ?? 1),
         purchase_price: String(template.purchase_price ?? template.cost_per_unit ?? 0),
-        min_stock: template.min_stock != null ? String(template.min_stock) : '',
+        min_stock: template.min_stock != null ? qtyInputValue(template.min_stock, itemDecimals(template)) : '',
         family: template.family || '',
         decimal_places: itemDecimals(template),
         stock_quantity: '0',
@@ -1748,7 +1748,7 @@
       stock_quantity: '0',
       purchase_quantity: String(material.purchase_quantity ?? 1),
       purchase_price: String(material.purchase_price ?? material.cost_per_unit ?? 0),
-      min_stock: material.min_stock != null ? String(material.min_stock) : '',
+      min_stock: material.min_stock != null ? qtyInputValue(material.min_stock, itemDecimals(material)) : '',
       is_template: !!material.is_template,
       decimal_places: itemDecimals(material),
       family: material.family || '',
@@ -1776,7 +1776,7 @@
         sku: '',
         selling_price: template.selling_price != null ? String(template.selling_price) : '0',
         stock_quantity: '0',
-        min_stock: template.min_stock != null ? String(template.min_stock) : '',
+        min_stock: template.min_stock != null ? qtyInputValue(template.min_stock, 0) : '',
         family: template.family || '',
         medium_id: mid,
         color_id: template.color_id ? String(template.color_id) : '',
@@ -1795,7 +1795,7 @@
       sku: product.sku || '',
       selling_price: product.selling_price != null ? String(product.selling_price) : '0',
       stock_quantity: '0',
-      min_stock: product.min_stock != null ? String(product.min_stock) : '',
+      min_stock: product.min_stock != null ? qtyInputValue(product.min_stock, 0) : '',
       is_template: !!product.is_template,
       family: product.family || '',
       location_id: '',
@@ -5260,7 +5260,7 @@
           <input type="number" step="0.01" bind:value={bulkForm.purchase_price} />
         </label>
         <label>Mindestbestand (optional)
-          <input type="number" step="0.001" min="0" bind:value={bulkForm.min_stock} placeholder="leer = Vorlage / keiner" />
+          <input type="number" step={qtyStep(bulkForm.decimal_places)} min="0" bind:value={bulkForm.min_stock} placeholder="leer = Vorlage / keiner" />
         </label>
         {#if !hasMaterialTemplates}
           <p class="empty" style="grid-column:1/-1;margin:0">
@@ -5372,7 +5372,7 @@
           />
         </label>
         <label>Mindestbestand (optional)
-          <input type="number" step="0.001" min="0" bind:value={bulkForm.min_stock} placeholder="leer = keiner" />
+          <input type="number" step={qtyStep(0)} min="0" bind:value={bulkForm.min_stock} placeholder="leer = keiner" />
         </label>
         {#if !hasProductTemplates}
           <p class="empty" style="grid-column:1/-1;margin:0">
@@ -5487,7 +5487,7 @@
               <label class="bulk-field">Wert setzen
                 <input
                   type="number"
-                  step="0.001"
+                  step={bulkEditModal.kind === 'product' ? qtyStep(0) : 'any'}
                   min="0"
                   bind:value={bulkEditForm.min_stock}
                   placeholder="leer = nicht ändern"
