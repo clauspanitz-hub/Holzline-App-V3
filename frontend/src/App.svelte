@@ -69,6 +69,13 @@
   let importQueue = $state([])
   let importQueueFilter = $state('open') // open | done | all
   let queueAxisModal = $state(null) // { item, axes, colorAxis }
+  let orders = $state([])
+  let todos = $state([])
+  let todoCategoryFilter = $state('workshop')
+  let todoStatusFilter = $state('open')
+  let orderForm = $state(emptyOrderForm())
+  let manufactureTodoId = $state(null)
+  let articleChoiceTodo = $state(null)
   let ignoredHandlesModal = $state(false)
   let ignoredHandles = $state([])
   let setCleanupModal = $state(false)
@@ -189,6 +196,38 @@
       transform_target_id: '',
       tagIds: [],
     }
+  }
+
+  function todayISO() {
+    const d = new Date()
+    const pad = (n) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  }
+
+  function emptyOrderLine() {
+    return { product_id: '', label: '', quantity: '1' }
+  }
+
+  function emptyOrderForm() {
+    return {
+      ordered_on: todayISO(),
+      customer_name: '',
+      external_number: '',
+      lines: [emptyOrderLine()],
+    }
+  }
+
+  function orderStatusLabel(status) {
+    if (status === 'ready') return 'versandbereit'
+    if (status === 'shipped') return 'versendet'
+    return 'offen'
+  }
+
+  function todoKindLabel(kind) {
+    if (kind === 'manufacture') return 'Fertigen'
+    if (kind === 'create_article') return 'Artikel anlegen'
+    if (kind === 'purchase') return 'Einkauf'
+    return kind
   }
 
   function emptyBulkEditForm() {
@@ -566,6 +605,103 @@
 
   function importQueueOpenCount() {
     return importQueue.filter((r) => r.status === 'open').length
+  }
+
+  function displayedTodos() {
+    return todos.filter((t) => {
+      if (todoCategoryFilter !== 'all' && t.category !== todoCategoryFilter) return false
+      if (todoStatusFilter !== 'all' && t.status !== todoStatusFilter) return false
+      return true
+    })
+  }
+
+  function openTodoCount() {
+    return todos.filter((t) => t.status === 'open' && t.category === 'workshop').length
+  }
+
+  function startTodo(todo) {
+    if (todo.kind === 'manufacture') {
+      const product = products.find((p) => p.id === todo.product_id)
+      if (!product) {
+        showFlash('error', 'Produkt nicht gefunden.')
+        return
+      }
+      openManufacture(product, { quantity: todo.quantity, todoId: todo.id })
+      return
+    }
+    if (todo.kind === 'create_article') {
+      articleChoiceTodo = todo
+    }
+  }
+
+  function todoLabelForCreate(todo) {
+    return String(todo.title || '').replace(/^Artikel anlegen:\s*/i, '').trim()
+  }
+
+  function chooseArticleKind(kind) {
+    const todo = articleChoiceTodo
+    if (!todo) return
+    articleChoiceTodo = null
+    const name = todoLabelForCreate(todo)
+    const orderLink = { orderId: todo.order_id, lineId: todo.order_line_id }
+    if (kind === 'material') openCreateMaterial(null, { name, orderLink })
+    else openCreateProduct(null, { name, orderLink })
+  }
+
+  async function submitOrder() {
+    const lines = orderForm.lines
+      .map((ln) => ({
+        quantity: ln.quantity,
+        product_id: ln.product_id ? Number(ln.product_id) : null,
+        label: (ln.label || '').trim() || null,
+      }))
+      .filter((ln) => ln.product_id || ln.label)
+    if (!lines.length) {
+      showFlash('error', 'Mindestens eine Position (Produkt oder Freitext).')
+      return
+    }
+    saving = true
+    try {
+      await api.orders.create({
+        ordered_on: orderForm.ordered_on || null,
+        customer_name: orderForm.customer_name.trim() || null,
+        external_number: orderForm.external_number.trim() || null,
+        lines,
+      })
+      orderForm = emptyOrderForm()
+      await refresh()
+      showFlash('ok', 'Bestellung angelegt.')
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function markOrderShipped(order) {
+    saving = true
+    try {
+      await api.orders.update(order.id, { status: 'shipped' })
+      await refresh()
+      showFlash('ok', 'Als versendet markiert.')
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function deleteOrder(order) {
+    if (!confirm('Bestellung löschen?')) return
+    saving = true
+    try {
+      await api.orders.remove(order.id)
+      await refresh()
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
   }
 
   function startQueueSeries(item) {
@@ -970,7 +1106,7 @@
         tag: filterTag || undefined,
         color_id: filterColorId || undefined,
       }
-      const [m, p, u, l, s, med, c, t] = await Promise.all([
+      const [m, p, u, l, s, med, c, t, o, td] = await Promise.all([
         api.materials.list(filter),
         api.products.list(filter),
         api.units(),
@@ -979,6 +1115,8 @@
         api.media.list(),
         api.colors.list(),
         api.tags.list(),
+        api.orders.list(),
+        api.todos.list(),
       ])
       materials = m
       products = p
@@ -988,6 +1126,8 @@
       media = med
       colors = c
       allTags = t
+      orders = o
+      todos = td
       const drafts = { ...catalogNewColorDrafts }
       for (const row of med) {
         if (drafts[row.id] == null) drafts[row.id] = ''
@@ -1367,10 +1507,11 @@
     stockDrafts = drafts
   }
 
-  function openCreateMaterial(template = null) {
+  function openCreateMaterial(template = null, { name = '', orderLink = null } = {}) {
     materialForm = emptyMaterial()
     materialForm.location_id = String(locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || '')
     showMaterialTags = false
+    if (name) materialForm.name = name
     if (template) {
       const mid = mediumIdFromColor(template.color_id)
       materialForm = {
@@ -1388,7 +1529,7 @@
       }
       showMaterialTags = materialForm.tagIds.length > 0
     }
-    materialModal = { mode: 'create' }
+    materialModal = { mode: 'create', orderLink }
   }
 
   function openEditMaterial(material) {
@@ -1412,7 +1553,7 @@
     materialModal = { mode: 'edit', id: material.id, material }
   }
 
-  function openCreateProduct(template = null) {
+  function openCreateProduct(template = null, { name = '', orderLink = null } = {}) {
     productForm = emptyProduct()
     productForm.location_id = String(locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || '')
     inlineMaterialForm = null
@@ -1433,7 +1574,8 @@
       }
       showProductTags = productForm.tagIds.length > 0
     }
-    productModal = { mode: 'create', product: null, templateBom: template?.bom ? [...template.bom] : [] }
+    if (name) productForm.name = name
+    productModal = { mode: 'create', product: null, templateBom: template?.bom ? [...template.bom] : [], orderLink }
   }
 
   function openEditProduct(product) {
@@ -1729,11 +1871,12 @@
     }
   }
 
-  function openManufacture(product) {
+  function openManufacture(product, { quantity = null, todoId = null } = {}) {
     manufactureForm = {
-      quantity: '1',
+      quantity: quantity != null ? String(quantity) : '1',
       location_id: String(locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || ''),
     }
+    manufactureTodoId = todoId
     manufactureModal = product
   }
 
@@ -1792,7 +1935,7 @@
         tag_ids: materialForm.tagIds,
       }
       if (materialModal.mode === 'create') {
-        await api.materials.create({
+        const created = await api.materials.create({
           name: materialForm.name.trim(),
           unit: materialForm.unit,
           purchase_quantity: materialForm.purchase_quantity,
@@ -1803,6 +1946,11 @@
           location_id: Number(materialForm.location_id),
           ...colorPayload,
         })
+        if (materialModal.orderLink) {
+          await api.orders.linkLine(materialModal.orderLink.orderId, materialModal.orderLink.lineId, {
+            material_id: created.id,
+          })
+        }
         showFlash('ok', 'Material angelegt.')
         markSaved()
       } else {
@@ -1922,6 +2070,11 @@
         }
         showFlash('ok', 'Produkt angelegt — Stückliste prüfen/ergänzen.')
         markSaved()
+        if (productModal.orderLink) {
+          await api.orders.linkLine(productModal.orderLink.orderId, productModal.orderLink.lineId, {
+            product_id: created.id,
+          })
+        }
         await refresh()
         const fresh = products.find((p) => p.id === created.id)
         productModal = { mode: 'edit', product: fresh || created }
@@ -2115,6 +2268,10 @@
         quantity: manufactureForm.quantity,
         location_id: Number(manufactureForm.location_id),
       })
+      if (manufactureTodoId) {
+        await api.todos.complete(manufactureTodoId)
+        manufactureTodoId = null
+      }
       manufactureModal = null
       await refresh()
       showFlash(result.warnings?.length ? 'warn' : 'ok', result.warnings?.join(' ') || 'Fertigung gebucht.')
@@ -2628,6 +2785,9 @@
       <button class="tab" class:active={tab === 'overview'} onclick={() => (tab = 'overview')}>Übersicht</button>
       <button class="tab" class:active={tab === 'materials'} onclick={() => (tab = 'materials')}>Materialien</button>
       <button class="tab" class:active={tab === 'products'} onclick={() => (tab = 'products')}>Produkte</button>
+      <button class="tab" class:active={tab === 'orders'} onclick={() => (tab = 'orders')}>
+        Bestellungen{#if openTodoCount()} ({openTodoCount()}){/if}
+      </button>
       <button class="tab" class:active={tab === 'staff'} onclick={() => (tab = 'staff')}>
         Bei Mitarbeitern{#if staffQueueProducts.length} ({staffQueueProducts.length}){/if}
       </button>
@@ -3165,6 +3325,167 @@
             </ProductGroupSection>
           </tbody>
         </table>
+      </div>
+    </section>
+  {:else if tab === 'orders'}
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Bestellungen</h2>
+      </div>
+      <p class="empty" style="margin-top:0">
+        Schnellerfassung → Todos nur bei echter Arbeit (Artikel anlegen oder Fertigen). Lagerndes Produkt ohne Unterdeckung erzeugt kein Todo. Versandbereit bleibt sichtbar, bis du <strong>Versendet</strong> klickst.
+      </p>
+      <h3>Neue Bestellung</h3>
+      <form class="form-grid" onsubmit={(e) => { e.preventDefault(); submitOrder() }}>
+        <label>Datum<input type="date" bind:value={orderForm.ordered_on} required /></label>
+        <label>Kunde (optional)<input bind:value={orderForm.customer_name} placeholder="Name" /></label>
+        <label>Nummer (optional)<input bind:value={orderForm.external_number} placeholder="später Shopify/Etsy" /></label>
+        {#each orderForm.lines as line, i}
+          <label>Produkt
+            <select bind:value={line.product_id}>
+              <option value="">Freitext / später anlegen</option>
+              {#each products as p}<option value={String(p.id)}>{p.name}</option>{/each}
+            </select>
+          </label>
+          <label>Freitext (wenn kein Produkt)
+            <input bind:value={line.label} placeholder="z. B. Schild Mia 2026" disabled={!!line.product_id} />
+          </label>
+          <label>Menge<input type="number" step="0.001" min="0.001" bind:value={line.quantity} required /></label>
+          <div class="row-actions">
+            {#if orderForm.lines.length > 1}
+              <button type="button" class="btn secondary" onclick={() => { orderForm.lines = orderForm.lines.filter((_, j) => j !== i) }}>Zeile weg</button>
+            {/if}
+          </div>
+        {/each}
+        <div class="row-actions" style="grid-column:1/-1">
+          <button type="button" class="btn secondary" onclick={() => { orderForm.lines = [...orderForm.lines, emptyOrderLine()] }}>Position hinzufügen</button>
+          <button class="btn" type="submit" disabled={saving}>Bestellung anlegen</button>
+        </div>
+      </form>
+
+      <h3 style="margin-top:1.5rem">Todos</h3>
+      <div class="filter-bar form-grid">
+        <label>Art
+          <select bind:value={todoCategoryFilter}>
+            <option value="workshop">Werkstatt</option>
+            <option value="purchase">Einkauf</option>
+            <option value="all">Alle</option>
+          </select>
+        </label>
+        <label>Status
+          <select bind:value={todoStatusFilter}>
+            <option value="open">Offen</option>
+            <option value="done">Erledigt</option>
+            <option value="all">Alle</option>
+          </select>
+        </label>
+      </div>
+      <div class="table-wrap desktop-only">
+        <table>
+          <thead>
+            <tr>
+              <th>Todo</th>
+              <th>Bestellung</th>
+              <th>Menge</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each displayedTodos() as todo}
+              <tr class:empty={todo.status === 'done'}>
+                <td><strong>{todoKindLabel(todo.kind)}</strong> · {todo.title}</td>
+                <td>{todo.order_label || `#${todo.order_id}`}</td>
+                <td>{formatQty(todo.quantity)}</td>
+                <td>{todo.status === 'done' ? 'erledigt' : 'offen'}</td>
+                <td class="col-actions">
+                  {#if todo.status === 'open'}
+                    <button type="button" class="btn" onclick={() => startTodo(todo)}>Los</button>
+                  {/if}
+                </td>
+              </tr>
+            {:else}
+              <tr><td colspan="5" class="empty">{todoCategoryFilter === 'purchase' ? 'Einkauf-Todos kommen im nächsten Schritt (Mindestbestand).' : 'Keine Todos.'}</td></tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-list mobile-only">
+        {#each displayedTodos() as todo}
+          <article class="card" class:empty={todo.status === 'done'}>
+            <h3>{todoKindLabel(todo.kind)}</h3>
+            <p>{todo.title}</p>
+            <p class="empty">{todo.order_label} · {formatQty(todo.quantity)}</p>
+            {#if todo.status === 'open'}
+              <div class="row-actions"><button type="button" class="btn" onclick={() => startTodo(todo)}>Los</button></div>
+            {/if}
+          </article>
+        {:else}
+          <p class="empty">Keine Todos.</p>
+        {/each}
+      </div>
+
+      <h3 style="margin-top:1.5rem">Aufträge</h3>
+      <div class="table-wrap desktop-only">
+        <table>
+          <thead>
+            <tr>
+              <th>Datum</th>
+              <th>Kunde / Nummer</th>
+              <th>Positionen</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each orders as order}
+              <tr class:empty={order.status === 'shipped'}>
+                <td>{order.ordered_on}</td>
+                <td>
+                  <strong>{order.customer_name || '—'}</strong>
+                  <div class="empty" style="margin:0">{order.external_number || `#${order.id}`}</div>
+                </td>
+                <td>
+                  {#each order.lines as ln}
+                    <div>{formatQty(ln.quantity)}× {ln.label}</div>
+                  {/each}
+                </td>
+                <td>{orderStatusLabel(order.status)}</td>
+                <td class="col-actions">
+                  {#if order.status === 'ready'}
+                    <button type="button" class="btn" onclick={() => markOrderShipped(order)}>Versendet</button>
+                  {/if}
+                  {#if order.status !== 'shipped'}
+                    <button type="button" class="btn secondary" onclick={() => deleteOrder(order)}>Löschen</button>
+                  {/if}
+                </td>
+              </tr>
+            {:else}
+              <tr><td colspan="5" class="empty">Noch keine Bestellungen.</td></tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-list mobile-only">
+        {#each orders as order}
+          <article class="card" class:empty={order.status === 'shipped'}>
+            <h3>{order.customer_name || order.external_number || `Bestellung ${order.id}`}</h3>
+            <p class="empty">{order.ordered_on} · {orderStatusLabel(order.status)}</p>
+            {#each order.lines as ln}
+              <p>{formatQty(ln.quantity)}× {ln.label}</p>
+            {/each}
+            <div class="row-actions">
+              {#if order.status === 'ready'}
+                <button type="button" class="btn" onclick={() => markOrderShipped(order)}>Versendet</button>
+              {/if}
+              {#if order.status !== 'shipped'}
+                <button type="button" class="btn secondary" onclick={() => deleteOrder(order)}>Löschen</button>
+              {/if}
+            </div>
+          </article>
+        {:else}
+          <p class="empty">Noch keine Bestellungen.</p>
+        {/each}
       </div>
     </section>
   {:else if tab === 'staff'}
@@ -4001,7 +4322,7 @@
 {/if}
 
 {#if manufactureModal}
-  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (manufactureModal = null)}>
+  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (manufactureModal = null, manufactureTodoId = null)}>
     <div class="modal" role="dialog" aria-modal="true">
       <h3>Fertigen: {manufactureModal.name}</h3>
       <form class="form-grid" onsubmit={(e) => { e.preventDefault(); runManufacture() }}>
@@ -4010,7 +4331,7 @@
           <select bind:value={manufactureForm.location_id}>{#each locations as l}<option value={l.id}>{l.name}</option>{/each}</select>
         </label>
         <div class="modal-actions">
-          <button type="button" class="btn secondary" onclick={() => (manufactureModal = null)}>Abbrechen</button>
+          <button type="button" class="btn secondary" onclick={() => { manufactureModal = null; manufactureTodoId = null }}>Abbrechen</button>
           <button class="btn" disabled={saving}>Fertigen</button>
         </div>
       </form>
@@ -4873,6 +5194,22 @@
           {/if}
         </div>
       </form>
+    </div>
+  </div>
+{/if}
+
+{#if articleChoiceTodo}
+  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (articleChoiceTodo = null)}>
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Artikel anlegen</h3>
+      <p class="empty" style="margin-top:0">
+        Bestellzeile „{todoLabelForCreate(articleChoiceTodo)}“ — Produkt oder Material? Bei Bestellungen ist Produkt der Normalfall.
+      </p>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" onclick={() => (articleChoiceTodo = null)}>Abbrechen</button>
+        <button type="button" class="btn secondary" onclick={() => chooseArticleKind('material')}>Material</button>
+        <button type="button" class="btn" onclick={() => chooseArticleKind('product')}>Produkt</button>
+      </div>
     </div>
   </div>
 {/if}

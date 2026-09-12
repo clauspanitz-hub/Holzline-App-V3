@@ -34,6 +34,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **set_variants:** Option1–3 Name/Value (Shopify-CSV-Assistent: Set / Serie / On-Demand / ignorieren; kein stilles Anlegen aller Varianten als Sets)
 - **shopify_ignored_handles:** dauerhaft ignorierte Shopify-Handles im Assistenten
 - **shopify_import_queue:** Import-Warteschlange (Serie/On-Demand → Serienanlage); Produkte `is_on_demand`
+- **orders / order_lines / todos:** manuelle Bestellung → Werkstatt-Todos (Artikel anlegen / Fertigen); Status offen / versandbereit / versendet
 - **set_bom_lines:** Varianten-Stückliste → Material **oder** Produkt + Menge
 - **option_mappings:** Regel Option+Wert → Material/Produkt+Menge; Overrides je Variante möglich
 - **Baubare Menge:** `min(floor(sum_stock/qty))` über relevante Zeilen; Summe über Standorte **ohne Ausschuss**
@@ -64,14 +65,16 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Produkt-Stückliste Material oder Komponenten-Produkt; Fertigen/Kosten/Serie (ADR `0012`)
 - [x] Shopify-CSV-Assistent + Ignorieren-Liste; Import-Warteschlange → Serienanlage (Medium/Farb-Match); `is_on_demand`
 
-### Phase 2: Bestellverwaltung & Eingangskanäle (GEPLANT)
+### Phase 2: Bestellverwaltung & Eingangskanäle — in Arbeit
 - [x] Benutzer mit Rechten (App-Login Admin/Mitarbeiter, ADR `0010`) — Teilumsetzung Auth
-- [ ] Shopify-API-Integration
+- [x] Manuelle Schnellerfassung + Todo-Liste (Artikel anlegen / Fertigen; kein Set-Zusammenstellen in diesem Schnitt)
+- [ ] Shopify-API-Integration (Nummern/Versendet später)
 - [ ] Etsy-CSV-Import
-- [ ] Manuelle Schnellerfassung / Zusammenstellen bei Bestellung
+- [ ] Zusammenstellen bei Set-Bestellung
+- [ ] Einkauf-Todos aus Mindestbestand (Liste/Filter schon vorbereitet)
 
 ### Phase 3: Optimierung & Einkauf (GEPLANT — vorgemerkt aus Grill)
-- [ ] Todo-Liste (offene Bestellungen/Todos) + Einkaufsliste aus fehlenden Materialien
+- [ ] Einkaufsliste aus fehlenden Materialien (Todo-Art Einkauf)
 - [ ] Einkaufsquellen + Alternativen am Material
 - [x] Mindestbestand je Material/Produkt → Warnungen in Übersicht (vorgezogen in 1.5)
 

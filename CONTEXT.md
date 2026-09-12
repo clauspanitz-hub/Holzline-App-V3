@@ -18,7 +18,11 @@ _Avoid_: Stückpreis (das ist Preis/Einheit)
 
 **Produkt**:
 Ein lagergeführtes Einzelteil der Manufaktur (z. B. Ring in einer Farbe, Kerze, Zahlenstecker), mit eigenem Bestand.
-_Avoid_: Fertigerzeugnis als Shopify-Set, Artikel (außer als SKU-Synonym), Ware, Variante (als Lagerobjekt)
+_Avoid_: Fertigerzeugnis als Shopify-Set, Ware, Variante (als Lagerobjekt); Artikel als Synonym nur für Produkt (Artikel umfasst auch Material)
+
+**Artikel**:
+Sammelbegriff für ein lagergeführtes **Produkt** oder **Material**. Kein Set, keine Bestellung, keine SKU.
+_Avoid_: Artikel = nur Produkt; Artikel = Set; Artikel = Shop-Listing; Artikel als Synonym für SKU
 
 **Set**:
 Eine nur in Shopify (o. ä.) verkaufte **Zusammenstellung aus mehreren Lagerprodukten**; hat selbst keinen Lagerbestand und wird bei Bestellung daraus zusammengestellt. Nicht jedes Shopify-Produkt mit Varianten (Farbe/Motiv) ist ein Set.
@@ -52,6 +56,20 @@ _Avoid_: Produzieren, Herstellen, Buchen (als alleiniger Begriff für diesen Vor
 Bei Bestellung eines Sets die benötigten Produkte laut Varianten-Stückliste vom Lager abbuchen (ohne Set-Bestand zu erhöhen).
 _Avoid_: Fertigen (für Sets), Kommissionieren als alleiniger UI-Begriff (optional synononym)
 
+**Bestellung**:
+Ein Kundenauftrag mit Positionen. Kein Lagerobjekt und keine Werkstattzeile. Erster Eingang: **manuelle Schnellerfassung** (Datum, mindestens eine Position; Kundenname und Nummer optional). Externe Nummern später aus Shopify/Etsy. Status: **offen** (offene Todos), **versandbereit** (alle Todos erledigt, Positionen ohne Todo gelten als erfüllt), **versendet**. **Versendet** zuerst manuell an der Bestellung; später zusätzlich aus Shopify fulfilled. Bleibt sichtbar bis versendet.
+_Avoid_: Todo als Synonym für den Shop-Auftrag; Bestellung = einzelne Position; Shop-API/CSV als Voraussetzung für die erste Todo-Liste; Pflicht-Kundenname oder Pflicht-Shopnummer zum Anlegen; nach Werkstatt-Ende ausblenden; Versenden = Fertigen/Zusammenstellen; Versand-Todo; Versendet nur über Shop ohne manuellen Weg
+
+**Bestellposition**:
+Eine Zeile einer Bestellung: zugeordnetes **Produkt**, **Set-Variante** (sobald Sets im Bestellfluss), oder **unzugeordnet** (Freitext), bis ein **Artikel** verknüpft ist. Unzugeordnet erzeugt ein Todo **Artikel anlegen** (wählen: Produkt oder Material; bei Bestellung Standard Produkt). Nach dem Anlegen: Position **verknüpfen**, Todos neu bewerten.
+_Avoid_: Pflicht, dass der Artikel vor der Bestellung existiert; Freitext ohne Folge-Todo; Set als einzige Positionsart; Anlegen ohne Verknüpfung an die Position
+
+**Todo**:
+Eine abarbeitbare Werkstatt- oder Beschaffungsaufgabe. **Eine** Todo-Liste, filterbar nach Art (Werkstatt vs. Einkauf); Standardansicht Werkstatt. Pro **Bestellposition** höchstens die nötigen Todos — **nicht** über Bestellungen hinweg zusammenfassen (zwei Aufträge, gleiches Produkt → zwei Fertigen-Todos). Set-Position → **Zusammenstellen**; **Fertigen** nur bei On-Demand oder fehlender Fertigware; lagerndes Produkt ohne Unterdeckung → **kein** Werkstatt-Todo; unzugeordnete Position → **Artikel anlegen**. Aus Bestand (unter Mindestbestand / negativ) → Einkauf-Todo (Erzeugung nach dem ersten Bestell-Schnitt; Filter Werkstatt/Einkauf gilt trotzdem). Abhaken öffnet den bestehenden Dialog (Fertigen, Zusammenstellen oder Anlegen); erst Speichern dort erledigt das Todo.
+_Avoid_: Todo = Bestellung; jede Positionszeile immer ein Todo; lagerndes Produkt als Pflicht-Todo; stilles Buchen nur durch Abhaken; Einkaufsliste als zweites, unverbundenes Konzept; eine ungeteilte Mischliste ohne Art; zwei getrennte Listen statt Filter; Fertigen-Todos über Bestellungen mergen
+
+
+
 **Materialherstellkosten**:
 Die Summe der Materialkosten pro Produkteinheit laut Stückliste (Menge × Einkaufspreis je Material).
 _Avoid_: Selbstkosten, Verkaufspreis, Deckungsbeitrag
@@ -65,8 +83,8 @@ Ein Ort, an dem Material- oder Produktbestand liegt. Physisch: Hamburg, Dahlenbu
 _Avoid_: Location als UI-Begriff, Bin, Am Waldpark 27 / Werkstatt Rissen / Lager Petra (Shopify-Namen, nicht kanonisch)
 
 **Mindestbestand**:
-Optionale Untergrenze je Material oder Produkt. Unterschreitung (oder Gesamt ≤ 0 / negativ) markiert den Artikel in der Übersicht als kritisch. Todos/Einkaufsliste daraus = spätere Phase.
-_Avoid_: Sollbestand als Pflichtfeld
+Optionale Untergrenze je Material oder Produkt. Unterschreitung (oder Gesamt ≤ 0 / negativ) markiert den Artikel in der Übersicht als kritisch und kann ein **Todo** (Einkauf) erzeugen.
+_Avoid_: Sollbestand als Pflichtfeld; kritische Übersicht als Ersatz für die Todo-Liste
 
 **Baubare Variante**:
 Eine Set-Variante, deren zusammenstellbare Stückzahl sich aus dem über alle Standorte summierten Bestand der Stücklistenzeilen ergibt (`Minimum` über `floor(Bestand/Menge)`). Ob Material-Zeilen mitzählen, ist je Set einstellbar.

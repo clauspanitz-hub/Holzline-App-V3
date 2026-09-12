@@ -63,6 +63,11 @@ from app.schemas import (
     ShopifyPreviewResult,
     ImportQueueItemRead,
     ImportQueueStatusUpdate,
+    OrderCreate,
+    OrderLineLink,
+    OrderRead,
+    OrderUpdate,
+    TodoRead,
     StockAdjustRequest,
     StockDeltaRequest,
     StockMovementRead,
@@ -542,6 +547,58 @@ def update_import_queue_status(
 @router.delete("/import-queue/{handle}", status_code=204)
 def delete_import_queue_item(handle: str, db: Session = Depends(get_db)) -> None:
     services.delete_import_queue_item(db, handle)
+
+
+@router.get("/orders", response_model=list[OrderRead])
+def list_orders(
+    status: Literal["open", "ready", "shipped"] | None = None,
+    db: Session = Depends(get_db),
+) -> list[OrderRead]:
+    return services.list_orders(db, status=status)
+
+
+@router.post("/orders", response_model=OrderRead)
+def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderRead:
+    return services.create_order(db, payload)
+
+
+@router.get("/orders/{order_id}", response_model=OrderRead)
+def get_order(order_id: int, db: Session = Depends(get_db)) -> OrderRead:
+    return services.get_order(db, order_id)
+
+
+@router.patch("/orders/{order_id}", response_model=OrderRead)
+def update_order(order_id: int, payload: OrderUpdate, db: Session = Depends(get_db)) -> OrderRead:
+    return services.update_order(db, order_id, payload)
+
+
+@router.delete("/orders/{order_id}", status_code=204)
+def delete_order(order_id: int, db: Session = Depends(get_db)) -> None:
+    services.delete_order(db, order_id)
+
+
+@router.patch("/orders/{order_id}/lines/{line_id}", response_model=OrderRead)
+def link_order_line(
+    order_id: int,
+    line_id: int,
+    payload: OrderLineLink,
+    db: Session = Depends(get_db),
+) -> OrderRead:
+    return services.link_order_line(db, order_id, line_id, payload)
+
+
+@router.get("/todos", response_model=list[TodoRead])
+def list_todos(
+    category: Literal["workshop", "purchase"] | None = None,
+    status: Literal["open", "done"] | None = None,
+    db: Session = Depends(get_db),
+) -> list[TodoRead]:
+    return services.list_todos(db, category=category, status=status)
+
+
+@router.post("/todos/{todo_id}/complete", response_model=TodoRead)
+def complete_todo(todo_id: int, db: Session = Depends(get_db)) -> TodoRead:
+    return services.complete_todo(db, todo_id)
 
 
 @router.post("/sets/bulk-delete", response_model=BulkDeleteResult)

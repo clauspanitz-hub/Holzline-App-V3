@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from math import floor
 
@@ -11,10 +11,12 @@ from app.database import AUSSCHUSS_LOCATION_NAME
 from app.models import (
     Color,
     ColorMedium,
+    CustomerOrder,
     Location,
     Material,
     MaterialStock,
     OptionMapping,
+    OrderLine,
     Product,
     ProductMaterial,
     ProductSet,
@@ -24,6 +26,7 @@ from app.models import (
     StockMovement,
     StockMovementKind,
     Tag,
+    WorkTodo,
 )
 from app.schemas import (
     BomLineCreate,
@@ -2561,3 +2564,305 @@ def bulk_delete_sets(db: Session, payload: "BulkDeleteRequest") -> "BulkDeleteRe
         deleted.append(sid)
     db.commit()
     return BulkDeleteResult(deleted_ids=deleted, skipped=skipped)
+
+
+def _order_display(order: CustomerOrder) -> str:
+    if order.customer_name:
+        return order.customer_name
+    if order.external_number:
+        return order.external_number
+    return f"Bestellung {order.id}"
+
+
+def _todo_read(todo: WorkTodo) -> "TodoRead":
+    from app.schemas import TodoRead
+
+    order = todo.order
+    return TodoRead(
+        id=todo.id,
+        order_id=todo.order_id,
+        order_line_id=todo.order_line_id,
+        kind=todo.kind if todo.kind in ("manufacture", "create_article", "purchase") else "create_article",
+        category=todo.category if todo.category in ("workshop", "purchase") else "workshop",
+        status=todo.status if todo.status in ("open", "done") else "open",
+        title=todo.title,
+        quantity=_q(todo.quantity),
+        product_id=todo.product_id,
+        material_id=todo.material_id,
+        product_name=todo.product.name if todo.product else None,
+        material_name=todo.material.name if todo.material else None,
+        order_label=_order_display(order) if order else None,
+        created_at=todo.created_at,
+        completed_at=todo.completed_at,
+    )
+
+
+def _line_read(line: OrderLine) -> "OrderLineRead":
+    from app.schemas import OrderLineRead
+
+    return OrderLineRead(
+        id=line.id,
+        quantity=_q(line.quantity),
+        label=line.label,
+        product_id=line.product_id,
+        material_id=line.material_id,
+        product_name=line.product.name if line.product else None,
+        material_name=line.material.name if line.material else None,
+        todos=[_todo_read(t) for t in line.todos],
+    )
+
+
+def _order_read(order: CustomerOrder) -> "OrderRead":
+    from app.schemas import OrderRead
+
+    status = order.status if order.status in ("open", "ready", "shipped") else "open"
+    return OrderRead(
+        id=order.id,
+        ordered_on=order.ordered_on,
+        customer_name=order.customer_name,
+        external_number=order.external_number,
+        status=status,
+        lines=[_line_read(ln) for ln in order.lines],
+        todos=[_todo_read(t) for t in order.todos],
+        created_at=order.created_at,
+        updated_at=order.updated_at,
+    )
+
+
+def _order_load(db: Session, order_id: int) -> CustomerOrder:
+    order = db.scalars(
+        select(CustomerOrder)
+        .where(CustomerOrder.id == order_id)
+        .options(
+            selectinload(CustomerOrder.lines).selectinload(OrderLine.product),
+            selectinload(CustomerOrder.lines).selectinload(OrderLine.material),
+            selectinload(CustomerOrder.lines).selectinload(OrderLine.todos).selectinload(WorkTodo.product),
+            selectinload(CustomerOrder.lines).selectinload(OrderLine.todos).selectinload(WorkTodo.material),
+            selectinload(CustomerOrder.todos).selectinload(WorkTodo.product),
+            selectinload(CustomerOrder.todos).selectinload(WorkTodo.material),
+            selectinload(CustomerOrder.todos).selectinload(WorkTodo.order),
+        )
+    ).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Bestellung nicht gefunden")
+    return order
+
+
+def _refresh_order_status(order: CustomerOrder) -> None:
+    if order.status == "shipped":
+        return
+    has_open = any(t.status == "open" for t in order.todos)
+    order.status = "open" if has_open else "ready"
+    order.updated_at = _utcnow()
+
+
+def _needs_manufacture(db: Session, product: Product, qty: Decimal) -> bool:
+    if bool(getattr(product, "is_on_demand", False)):
+        return True
+    loaded = product
+    if not product.stocks:
+        loaded = _load_product(db, product.id)
+    return _product_stock_available(loaded) < _q(qty)
+
+
+def _sync_line_todos(db: Session, line: OrderLine) -> None:
+    for todo in list(line.todos):
+        if todo.status == "open":
+            db.delete(todo)
+    db.flush()
+
+    qty = _q(line.quantity)
+    if line.product_id is None and line.material_id is None:
+        db.add(
+            WorkTodo(
+                order_id=line.order_id,
+                order_line_id=line.id,
+                kind="create_article",
+                category="workshop",
+                status="open",
+                title=f"Artikel anlegen: {line.label}",
+                quantity=qty,
+            )
+        )
+        return
+    if line.product_id is not None:
+        product = line.product or _load_product(db, line.product_id)
+        if _needs_manufacture(db, product, qty):
+            db.add(
+                WorkTodo(
+                    order_id=line.order_id,
+                    order_line_id=line.id,
+                    kind="manufacture",
+                    category="workshop",
+                    status="open",
+                    title=f"Fertigen: {product.name}",
+                    quantity=qty,
+                    product_id=product.id,
+                )
+            )
+
+
+def create_order(db: Session, payload: "OrderCreate") -> "OrderRead":
+    from app.schemas import OrderCreate
+
+    if not isinstance(payload, OrderCreate):
+        payload = OrderCreate.model_validate(payload)
+    ordered_on = payload.ordered_on or date.today()
+    order = CustomerOrder(
+        ordered_on=ordered_on,
+        customer_name=(payload.customer_name or "").strip() or None,
+        external_number=(payload.external_number or "").strip() or None,
+        status="open",
+    )
+    db.add(order)
+    db.flush()
+    for item in payload.lines:
+        label = (item.label or "").strip()
+        product = _load_product(db, item.product_id) if item.product_id else None
+        material = _load_material(db, item.material_id) if item.material_id else None
+        if not label:
+            label = product.name if product else (material.name if material else "")
+        line = OrderLine(
+            order_id=order.id,
+            quantity=_q(item.quantity),
+            label=label,
+            product_id=product.id if product else None,
+            material_id=material.id if material else None,
+        )
+        db.add(line)
+        db.flush()
+        _sync_line_todos(db, line)
+    db.flush()
+    order = _order_load(db, order.id)
+    _refresh_order_status(order)
+    db.commit()
+    return _order_read(_order_load(db, order.id))
+
+
+def list_orders(db: Session, status: str | None = None) -> list["OrderRead"]:
+    stmt = (
+        select(CustomerOrder)
+        .order_by(CustomerOrder.ordered_on.desc(), CustomerOrder.id.desc())
+        .options(
+            selectinload(CustomerOrder.lines).selectinload(OrderLine.product),
+            selectinload(CustomerOrder.lines).selectinload(OrderLine.material),
+            selectinload(CustomerOrder.lines).selectinload(OrderLine.todos).selectinload(WorkTodo.product),
+            selectinload(CustomerOrder.lines).selectinload(OrderLine.todos).selectinload(WorkTodo.material),
+            selectinload(CustomerOrder.todos).selectinload(WorkTodo.product),
+            selectinload(CustomerOrder.todos).selectinload(WorkTodo.material),
+            selectinload(CustomerOrder.todos).selectinload(WorkTodo.order),
+        )
+    )
+    if status in ("open", "ready", "shipped"):
+        stmt = stmt.where(CustomerOrder.status == status)
+    rows = db.scalars(stmt).unique().all()
+    return [_order_read(row) for row in rows]
+
+
+def get_order(db: Session, order_id: int) -> "OrderRead":
+    return _order_read(_order_load(db, order_id))
+
+
+def update_order(db: Session, order_id: int, payload: "OrderUpdate") -> "OrderRead":
+    from app.schemas import OrderUpdate
+
+    if not isinstance(payload, OrderUpdate):
+        payload = OrderUpdate.model_validate(payload)
+    order = _order_load(db, order_id)
+    data = payload.model_dump(exclude_unset=True)
+    if "customer_name" in data:
+        order.customer_name = (data["customer_name"] or "").strip() or None
+    if "external_number" in data:
+        order.external_number = (data["external_number"] or "").strip() or None
+    if data.get("status") == "shipped":
+        _refresh_order_status(order)
+        if order.status == "open":
+            raise HTTPException(status_code=400, detail="Bestellung hat noch offene Todos")
+        order.status = "shipped"
+    order.updated_at = _utcnow()
+    db.commit()
+    return _order_read(_order_load(db, order_id))
+
+
+def delete_order(db: Session, order_id: int) -> None:
+    order = db.get(CustomerOrder, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Bestellung nicht gefunden")
+    if order.status == "shipped":
+        raise HTTPException(status_code=400, detail="Versendete Bestellung nicht löschen")
+    db.delete(order)
+    db.commit()
+
+
+def link_order_line(db: Session, order_id: int, line_id: int, payload: "OrderLineLink") -> "OrderRead":
+    from app.schemas import OrderLineLink
+
+    if not isinstance(payload, OrderLineLink):
+        payload = OrderLineLink.model_validate(payload)
+    order = _order_load(db, order_id)
+    line = next((ln for ln in order.lines if ln.id == line_id), None)
+    if line is None:
+        raise HTTPException(status_code=404, detail="Position nicht gefunden")
+    if payload.product_id:
+        product = _load_product(db, payload.product_id)
+        line.product_id = product.id
+        line.material_id = None
+        line.label = product.name
+    elif payload.material_id:
+        material = _load_material(db, payload.material_id)
+        line.material_id = material.id
+        line.product_id = None
+        line.label = material.name
+    else:
+        raise HTTPException(status_code=400, detail="Produkt oder Material angeben")
+    _sync_line_todos(db, line)
+    db.flush()
+    order = _order_load(db, order_id)
+    _refresh_order_status(order)
+    db.commit()
+    return _order_read(_order_load(db, order_id))
+
+
+def list_todos(
+    db: Session,
+    category: str | None = None,
+    status: str | None = None,
+) -> list["TodoRead"]:
+    stmt = (
+        select(WorkTodo)
+        .order_by(WorkTodo.status.asc(), WorkTodo.created_at.desc())
+        .options(
+            selectinload(WorkTodo.product),
+            selectinload(WorkTodo.material),
+            selectinload(WorkTodo.order),
+        )
+    )
+    if category in ("workshop", "purchase"):
+        stmt = stmt.where(WorkTodo.category == category)
+    if status in ("open", "done"):
+        stmt = stmt.where(WorkTodo.status == status)
+    rows = db.scalars(stmt).all()
+    return [_todo_read(row) for row in rows]
+
+
+def complete_todo(db: Session, todo_id: int) -> "TodoRead":
+    todo = db.get(WorkTodo, todo_id)
+    if todo is None:
+        raise HTTPException(status_code=404, detail="Todo nicht gefunden")
+    todo.status = "done"
+    todo.completed_at = _utcnow()
+    db.flush()
+    order = _order_load(db, todo.order_id)
+    _refresh_order_status(order)
+    db.commit()
+    db.refresh(todo)
+    todo = db.scalars(
+        select(WorkTodo)
+        .where(WorkTodo.id == todo_id)
+        .options(
+            selectinload(WorkTodo.product),
+            selectinload(WorkTodo.material),
+            selectinload(WorkTodo.order),
+        )
+    ).first()
+    return _todo_read(todo)

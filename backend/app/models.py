@@ -1,11 +1,12 @@
 import enum
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     Enum,
     ForeignKey,
@@ -393,3 +394,66 @@ class ShopifyImportQueueItem(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CustomerOrder(Base):
+    """Kundenauftrag (manuelle Schnellerfassung; Shop-Nummern später)."""
+
+    __tablename__ = "orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ordered_on: Mapped[date] = mapped_column(Date, nullable=False)
+    customer_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    external_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")  # open | ready | shipped
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    lines: Mapped[list["OrderLine"]] = relationship(
+        back_populates="order",
+        cascade="all, delete-orphan",
+        order_by="OrderLine.id",
+    )
+    todos: Mapped[list["WorkTodo"]] = relationship(
+        back_populates="order",
+        cascade="all, delete-orphan",
+        order_by="WorkTodo.id",
+    )
+
+
+class OrderLine(Base):
+    __tablename__ = "order_lines"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    label: Mapped[str] = mapped_column(String(300), nullable=False)
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
+    material_id: Mapped[int | None] = mapped_column(ForeignKey("materials.id", ondelete="SET NULL"), nullable=True)
+
+    order: Mapped[CustomerOrder] = relationship(back_populates="lines")
+    product: Mapped[Product | None] = relationship()
+    material: Mapped[Material | None] = relationship()
+    todos: Mapped[list["WorkTodo"]] = relationship(back_populates="line", cascade="all, delete-orphan")
+
+
+class WorkTodo(Base):
+    __tablename__ = "todos"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
+    order_line_id: Mapped[int] = mapped_column(ForeignKey("order_lines.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)  # manufacture | create_article | purchase
+    category: Mapped[str] = mapped_column(String(20), nullable=False, default="workshop")  # workshop | purchase
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")  # open | done
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False, default=Decimal("1"))
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
+    material_id: Mapped[int | None] = mapped_column(ForeignKey("materials.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    order: Mapped[CustomerOrder] = relationship(back_populates="todos")
+    line: Mapped[OrderLine] = relationship(back_populates="todos")
+    product: Mapped[Product | None] = relationship()
+    material: Mapped[Material | None] = relationship()

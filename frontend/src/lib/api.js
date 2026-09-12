@@ -214,6 +214,27 @@ export const api = {
     remove: (handle) =>
       request(`/api/import-queue/${encodeURIComponent(handle)}`, { method: 'DELETE' }),
   },
+  orders: {
+    list: (status) => {
+      const q = status ? `?status=${encodeURIComponent(status)}` : ''
+      return request(`/api/orders${q}`)
+    },
+    create: (body) => request('/api/orders', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) => request(`/api/orders/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    remove: (id) => request(`/api/orders/${id}`, { method: 'DELETE' }),
+    linkLine: (orderId, lineId, body) =>
+      request(`/api/orders/${orderId}/lines/${lineId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  },
+  todos: {
+    list: ({ category, status } = {}) => {
+      const q = new URLSearchParams()
+      if (category) q.set('category', category)
+      if (status) q.set('status', status)
+      const qs = q.toString()
+      return request(`/api/todos${qs ? `?${qs}` : ''}`)
+    },
+    complete: (id) => request(`/api/todos/${id}/complete`, { method: 'POST' }),
+  },
 }
 
 export function formatQty(value) {

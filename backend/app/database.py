@@ -181,6 +181,7 @@ def init_db() -> None:
         migrate_shopify_ignored_handles(engine)
         migrate_product_is_on_demand(engine)
         migrate_shopify_import_queue(engine)
+        migrate_orders_todos(engine)
         seed_admin_user(db)
         from app.services import backfill_incomplete_tags, ensure_system_incomplete_tags
 
@@ -380,6 +381,65 @@ def migrate_shopify_import_queue(engine) -> None:
                 """
             )
         )
+
+
+def migrate_orders_todos(engine) -> None:
+    """Bestellungen, Positionen und Todos (Phase 2 erster Schnitt)."""
+    insp = inspect(engine)
+    names = set(insp.get_table_names())
+    with engine.begin() as conn:
+        if "orders" not in names:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE orders (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        ordered_on DATE NOT NULL,
+                        customer_name VARCHAR(200),
+                        external_number VARCHAR(80),
+                        status VARCHAR(20) NOT NULL DEFAULT 'open',
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME NOT NULL
+                    )
+                    """
+                )
+            )
+        if "order_lines" not in names:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE order_lines (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+                        quantity NUMERIC(14, 3) NOT NULL,
+                        label VARCHAR(300) NOT NULL,
+                        product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+                        material_id INTEGER REFERENCES materials(id) ON DELETE SET NULL
+                    )
+                    """
+                )
+            )
+        if "todos" not in names:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE todos (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+                        order_line_id INTEGER NOT NULL REFERENCES order_lines(id) ON DELETE CASCADE,
+                        kind VARCHAR(30) NOT NULL,
+                        category VARCHAR(20) NOT NULL DEFAULT 'workshop',
+                        status VARCHAR(20) NOT NULL DEFAULT 'open',
+                        title VARCHAR(300) NOT NULL,
+                        quantity NUMERIC(14, 3) NOT NULL DEFAULT 1,
+                        product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+                        material_id INTEGER REFERENCES materials(id) ON DELETE SET NULL,
+                        created_at DATETIME NOT NULL,
+                        completed_at DATETIME
+                    )
+                    """
+                )
+            )
 
 
 def migrate_product_bom_components(engine) -> None:

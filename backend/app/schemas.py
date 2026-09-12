@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -658,3 +658,75 @@ class BulkDeleteSkip(BaseModel):
 class BulkDeleteResult(BaseModel):
     deleted_ids: list[int]
     skipped: list[BulkDeleteSkip] = []
+
+
+class OrderLineCreate(BaseModel):
+    quantity: Quantity = Field(gt=0)
+    product_id: int | None = None
+    material_id: int | None = None
+    label: str | None = Field(default=None, max_length=300)
+
+    @model_validator(mode="after")
+    def need_product_or_label(self) -> "OrderLineCreate":
+        if self.product_id is None and self.material_id is None and not (self.label or "").strip():
+            raise ValueError("Position braucht Produkt, Material oder Freitext")
+        return self
+
+
+class OrderLineLink(BaseModel):
+    product_id: int | None = None
+    material_id: int | None = None
+
+
+class TodoRead(BaseModel):
+    id: int
+    order_id: int
+    order_line_id: int
+    kind: Literal["manufacture", "create_article", "purchase"]
+    category: Literal["workshop", "purchase"]
+    status: Literal["open", "done"]
+    title: str
+    quantity: Quantity
+    product_id: int | None = None
+    material_id: int | None = None
+    product_name: str | None = None
+    material_name: str | None = None
+    order_label: str | None = None
+    created_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class OrderLineRead(BaseModel):
+    id: int
+    quantity: Quantity
+    label: str
+    product_id: int | None = None
+    material_id: int | None = None
+    product_name: str | None = None
+    material_name: str | None = None
+    todos: list[TodoRead] = []
+
+
+class OrderCreate(BaseModel):
+    ordered_on: date | None = None
+    customer_name: str | None = Field(default=None, max_length=200)
+    external_number: str | None = Field(default=None, max_length=80)
+    lines: list[OrderLineCreate] = Field(min_length=1)
+
+
+class OrderUpdate(BaseModel):
+    customer_name: str | None = Field(default=None, max_length=200)
+    external_number: str | None = Field(default=None, max_length=80)
+    status: Literal["shipped"] | None = None
+
+
+class OrderRead(BaseModel):
+    id: int
+    ordered_on: date
+    customer_name: str | None = None
+    external_number: str | None = None
+    status: Literal["open", "ready", "shipped"]
+    lines: list[OrderLineRead] = []
+    todos: list[TodoRead] = []
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
