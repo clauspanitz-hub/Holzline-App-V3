@@ -184,6 +184,7 @@ def init_db() -> None:
         migrate_shopify_import_queue(engine)
         migrate_orders_todos(engine)
         migrate_order_origin(engine)
+        migrate_shopify_order_number_unique(engine)
         migrate_color_hex(engine, db)
         migrate_material_decimal_places(engine)
         seed_admin_user(db)
@@ -457,6 +458,25 @@ def migrate_orders_todos(engine) -> None:
                     """
                 )
             )
+
+
+def migrate_shopify_order_number_unique(engine) -> None:
+    """Eine Shopify-Nummer darf nur einmal existieren (Poller + Knopf)."""
+    insp = inspect(engine)
+    if "orders" not in insp.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_shopify_external_number
+                ON orders(external_number)
+                WHERE origin = 'shopify'
+                  AND external_number IS NOT NULL
+                  AND external_number != ''
+                """
+            )
+        )
 
 
 def migrate_order_origin(engine) -> None:
