@@ -181,7 +181,7 @@ GEMINI_API_KEY=…
 GEMINI_MODEL=gemini-3.1-flash-lite
 ```
 
-`GEMINI_MODEL` = API-ID (`gemini-3.1-flash-lite`), nicht der AI-Studio-Anzeigename. Anzeigenamen mit Leerzeichen normalisiert die App beim Start; trotzdem die ID setzen.
+`GEMINI_MODEL` = API-ID (`gemini-3.1-flash-lite`), nicht der AI-Studio-Anzeigename. Anzeigenamen mit Leerzeichen normalisiert die App beim Start; trotzdem die ID setzen. Free-Tier und Modellwahl: ADR `0017`.
 
 Ohne Key bleibt manuelle Zuordnung plus gemerkte **Shop-Zuordnung**.
 

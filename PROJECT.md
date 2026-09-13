@@ -69,8 +69,8 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 ### Phase 2: Bestellverwaltung & Eingangskanäle — in Arbeit
 - [x] Benutzer mit Rechten (App-Login Admin/Mitarbeiter, ADR `0010`) — Teilumsetzung Auth
 - [x] Manuelle Schnellerfassung + Todo-Liste (Artikel anlegen / Fertigen; kein Set-Zusammenstellen in diesem Schnitt)
-- [x] Shopify-API → Bestellungen (bezahlt, nicht voll erfüllt; Match → offen+Todos, sonst **zur Prüfung**; Abruf nur Knopfdruck; Dev-Dashboard Client-Credentials `SHOPIFY_STORE` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET`; Versendet manuell)
-- [x] Shop-Zuordnung merken + Gemini-Vorschlag nach Abruf (ADR `0014`; `GEMINI_API_KEY` optional; Default-Modell `gemini-3.1-flash-lite`)
+- [x] Shopify-API → Bestellungen (bezahlt, nicht voll erfüllt; Match → offen+Todos, sonst **zur Prüfung**; Abruf nur Knopfdruck; Dev-Dashboard Client-Credentials `SHOPIFY_STORE` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET`; Versendet manuell; ADR `0013`)
+- [x] Shop-Zuordnung merken + Gemini-Vorschlag nach Abruf (ADR `0014`; `GEMINI_API_KEY` optional; Free + Default `gemini-3.1-flash-lite`, ADR `0017`)
 - [x] Prüfung: Produkt erzeugen / Auf Liste; Status an offene Todos; Hinweis (ADR `0015`)
 - [x] Übersicht: Tageslage (Kennzahlen + Gemini-Text/Spruch/Nächste Schritte, Tages-Cache; ADR `0016`)
 - [ ] Etsy-Mail + Gemini (Hintergrund) → dieselben Bestellungen **zur Prüfung**; Etsy-API falls/wenn Freigabe; kein CSV-Bestellexport
@@ -85,6 +85,8 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 ## 5. Geschäftsregeln (gültig)
 - Keine Reservierungs-/Verschnittlogik.
 - **Auth (Phase 2):** Pflicht-Login; Rollen Admin und Mitarbeiter (ADR `0010`).
+- **Shopify-Eingang:** Abruf nur auf Knopfdruck; kein Hintergrund-Poll (ADR `0013`).
+- **Gemini:** optional; Free-Tier; Default Flash-Lite; nur Vorschläge, kein Gedächtnis (ADR `0014`, `0017`).
 - Sets haben keinen Lagerbestand; Zusammenstellen bei Bestellung = Phase 2 (Bestellungen).
 - Fertigen erhöht Produktbestand an einem gewählten Standort, Materialabbuchung an gewähltem/selben Standort (Start: ein Standort pro Buchung).
 - Baubare Sets aus Summe der Standorte ohne Ausschuss (ADR `0003`, `0006`).
