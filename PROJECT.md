@@ -23,7 +23,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **product_materials:** Produkt-Stückliste — Material **oder** Komponenten-Produkt → Fertigen (ADR `0012`)
 - **Materialherstellkosten:** live aus Produkt-Stückliste
 
-### Phase 1.5 (Standorte & Sets) — AKTUELL
+### Phase 1.5 (Standorte & Sets) — umgesetzt
 - **locations:** Hamburg, Dahlenburg, In Bearbeitung, MA1, MA2, Ausschuss (virtuell)
 - **material_stocks / product_stocks:** Bestand je Standort, Negativ erlaubt + Warnung
 - **materials / products:** optionales `min_stock` (Mindestbestand) — Übersicht zeigt kritische Artikel (Gesamt ≤ 0 oder unter Mindestbestand)
@@ -34,11 +34,17 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **set_variants:** Option1–3 Name/Value (Shopify-CSV-Assistent: Set / Serie / On-Demand / ignorieren; kein stilles Anlegen aller Varianten als Sets)
 - **shopify_ignored_handles:** dauerhaft ignorierte Shopify-Handles im Assistenten
 - **shopify_import_queue:** Import-Warteschlange (Serie/On-Demand → Serienanlage); Produkte `is_on_demand`
-- **orders / order_lines / todos:** manuelle Bestellung → Werkstatt-Todos (Artikel anlegen / Fertigen); Status offen / versandbereit / versendet
-- **shop_line_maps:** gemerkte Shop-Zuordnung (Herkunft + Titel/SKU → Produkt); Gemini nur Vorschlag (ADR `0014`)
 - **set_bom_lines:** Varianten-Stückliste → Material **oder** Produkt + Menge
 - **option_mappings:** Regel Option+Wert → Material/Produkt+Menge; Overrides je Variante möglich
 - **Baubare Menge:** `min(floor(sum_stock/qty))` über relevante Zeilen; Summe über Standorte **ohne Ausschuss**
+
+### Phase 2 (Bestellungen & Auth) — in Arbeit
+- **users / auth_sessions:** App-Login; Rollen Admin / Mitarbeiter (ADR `0010`)
+- **orders:** Herkunft Shopify/Etsy/Manuell; Status **zur Prüfung** (`review`) / **offen** / **versandbereit** / **versendet**; externe Nummer; Kunde; Bestellzeit
+- **order_lines:** Menge, Label; optional `product_id`, `shop_sku`, `shop_title`, `suggested_product_id` (Gemini-Vorschlag)
+- **todos:** Arten Artikel anlegen / Fertigen (Einkauf-Filter vorbereitet); halten Bestellung auf **offen**
+- **shop_line_maps:** gemerkte Shop-Zuordnung (Herkunft + Titel/SKU → Produkt); Gemini nur Vorschlag (ADR `0014`)
+- **tageslage_cache:** ein Eintrag pro Kalendertag (Zusammenfassung, Spruch, Nächste Schritte; ADR `0016`)
 
 **Einheiten:** `Stk`, `m`, `kg`, `g`, `m²`, `l`, `ml`
 
@@ -67,7 +73,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Shopify-CSV-Assistent + Ignorieren-Liste; Import-Warteschlange → Serienanlage (Medium/Farb-Match); `is_on_demand`
 
 ### Phase 2: Bestellverwaltung & Eingangskanäle — in Arbeit
-- [x] Benutzer mit Rechten (App-Login Admin/Mitarbeiter, ADR `0010`) — Teilumsetzung Auth
+- [x] Benutzer mit Rechten (App-Login Admin/Mitarbeiter, ADR `0010`)
 - [x] Manuelle Schnellerfassung + Todo-Liste (Artikel anlegen / Fertigen; kein Set-Zusammenstellen in diesem Schnitt)
 - [x] Shopify-API → Bestellungen (bezahlt, nicht voll erfüllt; Match → offen+Todos, sonst **zur Prüfung**; Abruf nur Knopfdruck; Dev-Dashboard Client-Credentials `SHOPIFY_STORE` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET`; Versendet manuell; ADR `0013`)
 - [x] Shop-Zuordnung merken + Gemini-Vorschlag nach Abruf (ADR `0014`; `GEMINI_API_KEY` optional; Free + Default `gemini-3.1-flash-lite`, ADR `0017`)
