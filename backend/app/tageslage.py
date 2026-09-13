@@ -246,21 +246,25 @@ def get_tageslage(db: Session, *, force_refresh: bool = False) -> dict:
         }
 
     summary, quote, steps, err = _call_gemini(stats)
-    # Bei Fehler: alten Cache behalten falls vorhanden und nicht force mit Erfolg nötig
-    if err and row is not None and not (summary and quote):
+
+    # Ohne Force: bei Fehler alten, brauchbaren Cache behalten
+    if err and row is not None and not force_refresh:
         try:
             old_steps = json.loads(row.next_steps_json or "[]")
         except json.JSONDecodeError:
             old_steps = []
-        return {
-            "cache_date": today,
-            "cached": True,
-            "stats": stats,
-            "summary": row.summary or "Kurzlage nicht verfügbar.",
-            "quote": row.quote,
-            "next_steps": old_steps if isinstance(old_steps, list) else [],
-            "error": err,
-        }
+        if not isinstance(old_steps, list):
+            old_steps = []
+        if (row.summary or "").strip() and (old_steps or (row.quote or "").strip()):
+            return {
+                "cache_date": today,
+                "cached": True,
+                "stats": stats,
+                "summary": row.summary,
+                "quote": row.quote,
+                "next_steps": old_steps,
+                "error": err,
+            }
 
     now = _utcnow()
     if row is None:
