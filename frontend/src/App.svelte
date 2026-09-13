@@ -3577,6 +3577,9 @@
                 {#each order.lines as ln}
                   <div>{formatQty(ln.quantity)}× {ln.label}</div>
                 {/each}
+                {#if order.note}
+                  <div class="empty" style="margin-top:.25rem">Notiz: {order.note}</div>
+                {/if}
               </td>
               <td>
                 <div>{orderStatusLabel(order.status)}</div>
@@ -3615,6 +3618,9 @@
           {#each order.lines as ln}
             <p>{formatQty(ln.quantity)}× {ln.label}</p>
           {/each}
+          {#if order.note}
+            <p class="empty">Notiz: {order.note}</p>
+          {/if}
           <div class="row-actions">
             {#if order.status === 'ready'}
               <button type="button" class="btn" onclick={() => markOrderShipped(order)}>Versendet</button>
@@ -4372,6 +4378,9 @@
             <article class="review-order">
               <h3>{order.customer_name || order.external_number || `Bestellung ${order.id}`}</h3>
               <p class="empty">{formatDateTime(order.ordered_on)} · {orderOriginLabel(order.origin)} · {order.external_number || ''}</p>
+              {#if order.note}
+                <p class="tageslage-summary" style="margin:.4rem 0">Notiz: {order.note}</p>
+              {/if}
               {#each order.lines as ln (ln.id)}
                 <div class="review-line">
                   <p class="review-line-shop">

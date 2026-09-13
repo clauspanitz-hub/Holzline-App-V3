@@ -40,7 +40,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 
 ### Phase 2 (Bestellungen & Auth) — in Arbeit
 - **users / auth_sessions:** App-Login; Rollen Admin / Mitarbeiter (ADR `0010`)
-- **orders:** Herkunft Shopify/Etsy/Manuell; Status **zur Prüfung** (`review`) / **offen** / **versandbereit** / **versendet**; externe Nummer; Kunde; Bestellzeit
+- **orders:** Herkunft Shopify/Etsy/Manuell; Status **zur Prüfung** (`review`) / **offen** / **versandbereit** / **versendet**; externe Nummer; Kunde; Bestellzeit; optionale **Notiz** (Personalisierung)
 - **order_lines:** Menge, Label; optional `product_id`, `shop_sku`, `shop_title`, `suggested_product_id` (Gemini-Vorschlag)
 - **todos:** Arten Artikel anlegen / Fertigen (Einkauf-Filter vorbereitet); halten Bestellung auf **offen**
 - **shop_line_maps:** gemerkte Shop-Zuordnung (Herkunft + Titel/SKU → Produkt); Gemini nur Vorschlag (ADR `0014`)

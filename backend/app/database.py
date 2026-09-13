@@ -187,6 +187,7 @@ def init_db() -> None:
         migrate_shop_line_maps(engine)
         migrate_tageslage_cache(engine)
         migrate_incoming_mails(engine)
+        migrate_order_note(engine)
         migrate_color_hex(engine, db)
         migrate_material_decimal_places(engine)
         seed_admin_user(db)
@@ -574,6 +575,18 @@ def migrate_incoming_mails(engine) -> None:
                 """
             )
         )
+
+
+def migrate_order_note(engine) -> None:
+    """Bestellnotiz / Personalisierung (Shopify note, Etsy-Mail)."""
+    insp = inspect(engine)
+    if "orders" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("orders")}
+    if "note" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE orders ADD COLUMN note TEXT"))
 
 
 def migrate_color_hex(engine, db: Session) -> None:

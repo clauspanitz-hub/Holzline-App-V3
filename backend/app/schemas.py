@@ -792,6 +792,7 @@ class OrderRead(BaseModel):
     ordered_on: datetime
     customer_name: str | None = None
     external_number: str | None = None
+    note: str | None = None
     origin: Literal["manual", "shopify", "etsy"] = "manual"
     status: Literal["review", "open", "ready", "shipped"]
     lines: list[OrderLineRead] = []

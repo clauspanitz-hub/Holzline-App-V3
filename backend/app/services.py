@@ -2750,6 +2750,7 @@ def _order_read(
         ordered_on=order.ordered_on,
         customer_name=order.customer_name,
         external_number=order.external_number,
+        note=order.note,
         origin=origin,
         status=status,
         lines=[_line_read(ln, include_todos=include_line_todos) for ln in order.lines],

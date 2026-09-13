@@ -268,7 +268,11 @@ def _call_gemini_parse(mail: IncomingMail) -> tuple[dict | None, str | None]:
         '{"external_number":"<Bestellnummer>",'
         '"customer_name":"<Kunde oder null>",'
         '"ordered_on":"<ISO-Datum oder null>",'
-        '"lines":[{"title":"<Produkt/Titel>","sku":"<SKU oder null>","quantity":1}]} '
+        '"note":"<Personalisierung/Gravur/Käufernotiz oder null>",'
+        '"lines":[{"title":"<Produkt inkl. Variante/Farbe/Optionen>",'
+        '"sku":"<SKU oder null>","quantity":1}]} '
+        "Titel MUSS gewählte Varianten/Optionen/Farben enthalten (nicht nur „Color selectable“). "
+        "Personalisierung und Sonderwünsche in note. "
         "Mindestens eine Position mit Titel und Menge > 0. "
         "Keine erfundenen Positionen.\n\n"
         f"Betreff: {mail.subject or ''}\n"
@@ -403,10 +407,13 @@ def parse_pending_mails(db: Session) -> dict[str, Any]:
 
         customer = data.get("customer_name")
         customer_name = str(customer).strip()[:200] if customer else None
+        note_raw = data.get("note")
+        note = str(note_raw).strip()[:2000] if note_raw else None
         order = CustomerOrder(
             ordered_on=_parse_ordered_on(data.get("ordered_on")),
             customer_name=customer_name or None,
             external_number=number[:80],
+            note=note or None,
             origin="etsy",
             status="review",
         )

@@ -29,14 +29,21 @@ query HolzlingeOpenPaidOrders($first: Int!, $after: String, $query: String!) {
       displayFinancialStatus
       displayFulfillmentStatus
       shippingAddress { name }
+      note
       lineItems(first: 50) {
         nodes {
           title
           variantTitle
+          name
           sku
           quantity
           unfulfilledQuantity
-          variant { sku }
+          customAttributes { key value }
+          variant {
+            sku
+            title
+            selectedOptions { name value }
+          }
         }
       }
     }
@@ -177,10 +184,39 @@ def _line_qty(node: dict) -> Decimal:
 def _line_label(node: dict) -> str:
     title = (node.get("title") or "").strip()
     variant = (node.get("variantTitle") or "").strip()
-    if title and variant:
-        label = f"{title} - {variant}"
-    else:
-        label = title or variant or "Position"
+    if variant.casefold() in ("", "default title"):
+        variant = ""
+    # selectedOptions oft aussagekräftiger als variantTitle
+    opts = []
+    for opt in ((node.get("variant") or {}).get("selectedOptions")) or []:
+        name = (opt.get("name") or "").strip()
+        value = (opt.get("value") or "").strip()
+        if not value or value.casefold() == "default title":
+            continue
+        if name.casefold() == "title":
+            continue
+        opts.append(value if not name else f"{name}: {value}")
+    if opts:
+        variant = " / ".join(opts)
+    # Line-Item-Eigenschaften (Personalisierung am Artikel)
+    attrs = []
+    for attr in node.get("customAttributes") or []:
+        key = (attr.get("key") or "").strip()
+        value = (attr.get("value") or "").strip()
+        if not value:
+            continue
+        attrs.append(f"{key}: {value}" if key else value)
+    parts = [title] if title else []
+    if variant:
+        parts.append(variant)
+    elif (node.get("name") or "").strip() and (node.get("name") or "").strip() != title:
+        # name enthält oft „Titel - Variante“
+        full = (node.get("name") or "").strip()
+        if full.startswith(title) and len(full) > len(title) + 2:
+            parts = [full]
+    if attrs:
+        parts.append(" · ".join(attrs))
+    label = " - ".join(p for p in parts if p) if parts else "Position"
     return label[:300]
 
 
@@ -282,12 +318,20 @@ def sync_shopify_orders(db: Session) -> dict:
             continue
         key = normalize_order_number(name)
         if key in by_shop_num:
+            existing_order = by_shop_num[key]
+            note = (node.get("note") or "").strip()
+            if note and not (existing_order.note or "").strip():
+                existing_order.note = note[:2000]
+                existing_order.updated_at = datetime.now()
             skipped += 1
             continue
         found = by_any_num.get(key)
         if found is not None and found.origin == "manual":
             found.origin = "shopify"
             found.external_number = name[:80]
+            note = (node.get("note") or "").strip()
+            if note:
+                found.note = note[:2000]
             found.updated_at = datetime.now()
             claimed += 1
             by_shop_num[key] = found
@@ -327,10 +371,12 @@ def sync_shopify_orders(db: Session) -> dict:
 
         all_matched = all(prod is not None for _, _, prod, _ in prepared)
         status = "open" if all_matched else "review"
+        note = (node.get("note") or "").strip() or None
         order = CustomerOrder(
             ordered_on=_parse_created(node.get("createdAt")),
             customer_name=_customer_name(node),
             external_number=name[:80],
+            note=note[:2000] if note else None,
             origin="shopify",
             status=status,
         )

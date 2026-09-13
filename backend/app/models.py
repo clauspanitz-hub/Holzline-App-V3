@@ -409,6 +409,7 @@ class CustomerOrder(Base):
     ordered_on: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     customer_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     external_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
     origin: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")  # manual | shopify | etsy
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")  # review | open | ready | shipped
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
