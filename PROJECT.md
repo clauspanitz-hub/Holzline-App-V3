@@ -35,6 +35,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **shopify_ignored_handles:** dauerhaft ignorierte Shopify-Handles im Assistenten
 - **shopify_import_queue:** Import-Warteschlange (Serie/On-Demand → Serienanlage); Produkte `is_on_demand`
 - **orders / order_lines / todos:** manuelle Bestellung → Werkstatt-Todos (Artikel anlegen / Fertigen); Status offen / versandbereit / versendet
+- **shop_line_maps:** gemerkte Shop-Zuordnung (Herkunft + Titel/SKU → Produkt); Gemini nur Vorschlag (ADR `0014`)
 - **set_bom_lines:** Varianten-Stückliste → Material **oder** Produkt + Menge
 - **option_mappings:** Regel Option+Wert → Material/Produkt+Menge; Overrides je Variante möglich
 - **Baubare Menge:** `min(floor(sum_stock/qty))` über relevante Zeilen; Summe über Standorte **ohne Ausschuss**
@@ -69,6 +70,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Benutzer mit Rechten (App-Login Admin/Mitarbeiter, ADR `0010`) — Teilumsetzung Auth
 - [x] Manuelle Schnellerfassung + Todo-Liste (Artikel anlegen / Fertigen; kein Set-Zusammenstellen in diesem Schnitt)
 - [x] Shopify-API → Bestellungen (bezahlt, nicht voll erfüllt; Match → offen+Todos, sonst **zur Prüfung**; Polling; Dev-Dashboard Client-Credentials `SHOPIFY_STORE` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET`; Versendet manuell)
+- [x] Shop-Zuordnung merken + Gemini-Vorschlag nach Abruf (ADR `0014`; `GEMINI_API_KEY` optional)
 - [ ] Etsy-Mail + Gemini (Hintergrund) → dieselben Bestellungen **zur Prüfung**; Etsy-API falls/wenn Freigabe; kein CSV-Bestellexport
 - [ ] Zusammenstellen bei Set-Bestellung (nach hinten)
 - [ ] Einkauf-Todos aus Mindestbestand (Liste/Filter schon vorbereitet)

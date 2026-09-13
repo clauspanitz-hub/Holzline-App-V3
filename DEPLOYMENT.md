@@ -174,6 +174,15 @@ SHOPIFY_CLIENT_SECRET=…
 
 Die App holt per **Client-Credentials** ein 24-Stunden-Access-Token, cached es und ruft damit die Admin-API auf (alle 5 Minuten und per Knopf **Shopify abrufen**). Versendet bleibt manuell. Ohne Client-ID/Secret startet der Poller nicht; der Knopf meldet die fehlende Konfiguration.
 
+Optional für **Vorschläge** in **zur Prüfung** (kein Gedächtnis, siehe ADR `0014`):
+
+```
+GEMINI_API_KEY=…
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+Ohne Key bleibt manuelle Zuordnung plus gemerkte **Shop-Zuordnung**.
+
 ### C7. Externer Zugang (MyFRITZ + Caddy HTTPS)
 
 Auf dem Proxmox-Host läuft Caddy. Holzlinge:

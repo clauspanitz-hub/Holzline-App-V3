@@ -761,6 +761,7 @@
       const bits = []
       if (result.created) bits.push(`${result.created} neu`)
       if (result.claimed) bits.push(`${result.claimed} übernommen`)
+      if (result.suggested) bits.push(`${result.suggested} Vorschlag`)
       if (result.skipped) bits.push(`${result.skipped} übersprungen`)
       showFlash('ok', bits.length ? `Shopify: ${bits.join(', ')}.` : 'Shopify: keine neuen Aufträge.')
       if (result.errors?.length) showFlash('error', result.errors[0])
@@ -788,13 +789,15 @@
   async function setReviewLineProduct(order, line, productId) {
     saving = true
     try {
+      let result
       if (productId) {
-        await api.orders.linkLine(order.id, line.id, { product_id: Number(productId) })
+        result = await api.orders.linkLine(order.id, line.id, { product_id: Number(productId) })
       } else {
-        await api.orders.linkLine(order.id, line.id, { unassign: true })
+        result = await api.orders.linkLine(order.id, line.id, { unassign: true })
       }
       loadedBuckets.orders = false
       await refresh()
+      if (result?.notices?.length) showFlash('warn', result.notices.join(' '))
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -4094,8 +4097,19 @@
                 <div class="review-line">
                   <p class="review-line-shop">
                     <span class="review-line-qty">{formatQty(ln.quantity)}×</span>
-                    {ln.label}
+                    {ln.shop_title || ln.label}
                   </p>
+                  {#if ln.suggested_product_id && !ln.product_id}
+                    <div class="review-suggest">
+                      <p>Vorschlag: <strong>{ln.suggested_product_name || 'Produkt'}</strong></p>
+                      <button
+                        type="button"
+                        class="btn"
+                        disabled={saving}
+                        onclick={() => setReviewLineProduct(order, ln, ln.suggested_product_id)}
+                      >Übernehmen</button>
+                    </div>
+                  {/if}
                   <label class="review-line-assign">Lagerprodukt
                     <FamilySelect
                       value={ln.product_id || ''}

@@ -2724,15 +2724,23 @@ def _line_read(line: OrderLine, include_todos: bool = True) -> "OrderLineRead":
         id=line.id,
         quantity=_q(line.quantity),
         label=line.label,
+        shop_sku=line.shop_sku,
+        shop_title=line.shop_title,
         product_id=line.product_id,
         material_id=line.material_id,
         product_name=line.product.name if line.product else None,
         material_name=line.material.name if line.material else None,
+        suggested_product_id=line.suggested_product_id,
+        suggested_product_name=line.suggested_product.name if line.suggested_product else None,
         todos=[_todo_read(t) for t in line.todos] if include_todos else [],
     )
 
 
-def _order_read(order: CustomerOrder, include_line_todos: bool = True) -> "OrderRead":
+def _order_read(
+    order: CustomerOrder,
+    include_line_todos: bool = True,
+    notices: list[str] | None = None,
+) -> "OrderRead":
     from app.schemas import OrderRead
 
     status = order.status if order.status in ("review", "open", "ready", "shipped") else "open"
@@ -2748,6 +2756,7 @@ def _order_read(order: CustomerOrder, include_line_todos: bool = True) -> "Order
         todos=[_todo_read(t) for t in order.todos],
         created_at=order.created_at,
         updated_at=order.updated_at,
+        notices=notices or [],
     )
 
 
@@ -2758,6 +2767,7 @@ def _order_load(db: Session, order_id: int) -> CustomerOrder:
         .options(
             selectinload(CustomerOrder.lines).selectinload(OrderLine.product),
             selectinload(CustomerOrder.lines).selectinload(OrderLine.material),
+            selectinload(CustomerOrder.lines).selectinload(OrderLine.suggested_product),
             selectinload(CustomerOrder.lines).selectinload(OrderLine.todos).selectinload(WorkTodo.product),
             selectinload(CustomerOrder.lines).selectinload(OrderLine.todos).selectinload(WorkTodo.material),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.product),
@@ -2924,6 +2934,7 @@ def link_order_line(db: Session, order_id: int, line_id: int, payload: "OrderLin
     line = next((ln for ln in order.lines if ln.id == line_id), None)
     if line is None:
         raise HTTPException(status_code=404, detail="Position nicht gefunden")
+    notices: list[str] = []
     if payload.unassign:
         line.product_id = None
         line.material_id = None
@@ -2931,7 +2942,20 @@ def link_order_line(db: Session, order_id: int, line_id: int, payload: "OrderLin
         product = _load_product(db, payload.product_id)
         line.product_id = product.id
         line.material_id = None
-        line.label = product.name
+        line.suggested_product_id = None
+        if order.origin not in ("shopify", "etsy"):
+            line.label = product.name
+        if order.origin in ("shopify", "etsy"):
+            from app.shop_map import fill_product_sku, remember_shop_line, spread_shop_assignment
+
+            _, map_notices = remember_shop_line(db, origin=order.origin, line=line, product=product)
+            notices.extend(map_notices)
+            notices.extend(fill_product_sku(db, product, line.shop_sku))
+            pulled = spread_shop_assignment(db, origin=order.origin, source=line, product=product)
+            if pulled:
+                notices.append(
+                    f"{pulled} weitere Prüfungszeile(n) mit derselben Shop-Zeile zugeordnet."
+                )
     elif payload.material_id:
         material = _load_material(db, payload.material_id)
         line.material_id = material.id
@@ -2949,7 +2973,7 @@ def link_order_line(db: Session, order_id: int, line_id: int, payload: "OrderLin
     else:
         db.flush()
     db.commit()
-    return _order_read(_order_load(db, order_id))
+    return _order_read(_order_load(db, order_id), notices=notices)
 
 
 def approve_order(db: Session, order_id: int) -> "OrderRead":
@@ -2976,6 +3000,13 @@ def import_shopify_orders(db: Session) -> "ShopifyOrderSyncResult":
             detail="Shopify nicht konfiguriert (SHOPIFY_STORE, SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET)",
         )
     result = sync_shopify_orders(db)
+    from app.gemini_suggest import suggest_unmatched_shop_lines
+
+    suggested, gemini_error = suggest_unmatched_shop_lines(db, origin="shopify")
+    result["suggested"] = suggested
+    if gemini_error:
+        result.setdefault("errors", []).append(gemini_error)
+    db.commit()
     return ShopifyOrderSyncResult.model_validate(result)
 
 

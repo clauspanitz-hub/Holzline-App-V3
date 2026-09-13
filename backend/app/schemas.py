@@ -716,6 +716,7 @@ class ShopifyOrderSyncResult(BaseModel):
     created: int = 0
     skipped: int = 0
     claimed: int = 0
+    suggested: int = 0
     errors: list[str] = []
 
 
@@ -741,10 +742,14 @@ class OrderLineRead(BaseModel):
     id: int
     quantity: Quantity
     label: str
+    shop_sku: str | None = None
+    shop_title: str | None = None
     product_id: int | None = None
     material_id: int | None = None
     product_name: str | None = None
     material_name: str | None = None
+    suggested_product_id: int | None = None
+    suggested_product_name: str | None = None
     todos: list[TodoRead] = []
 
 
@@ -772,3 +777,4 @@ class OrderRead(BaseModel):
     todos: list[TodoRead] = []
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    notices: list[str] = []

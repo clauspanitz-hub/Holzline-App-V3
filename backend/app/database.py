@@ -184,6 +184,7 @@ def init_db() -> None:
         migrate_shopify_import_queue(engine)
         migrate_orders_todos(engine)
         migrate_order_origin(engine)
+        migrate_shop_line_maps(engine)
         migrate_color_hex(engine, db)
         migrate_material_decimal_places(engine)
         seed_admin_user(db)
@@ -476,6 +477,51 @@ def migrate_order_origin(engine) -> None:
                 """
             )
         )
+
+
+def migrate_shop_line_maps(engine) -> None:
+    """Shop-Zuordnung und Shop-Felder an Bestellpositionen."""
+    insp = inspect(engine)
+    names = set(insp.get_table_names())
+    with engine.begin() as conn:
+        if "order_lines" in names:
+            cols = {c["name"] for c in insp.get_columns("order_lines")}
+            if "shop_sku" not in cols:
+                conn.execute(text("ALTER TABLE order_lines ADD COLUMN shop_sku VARCHAR(100)"))
+            if "shop_title" not in cols:
+                conn.execute(text("ALTER TABLE order_lines ADD COLUMN shop_title VARCHAR(300)"))
+            if "suggested_product_id" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE order_lines ADD COLUMN suggested_product_id INTEGER "
+                        "REFERENCES products(id) ON DELETE SET NULL"
+                    )
+                )
+            conn.execute(
+                text(
+                    """
+                    UPDATE order_lines
+                    SET shop_title = label
+                    WHERE shop_title IS NULL OR shop_title = ''
+                    """
+                )
+            )
+        if "shop_line_maps" not in names:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE shop_line_maps (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        origin VARCHAR(20) NOT NULL,
+                        title_key VARCHAR(300) NOT NULL,
+                        sku_key VARCHAR(100),
+                        product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+                        UNIQUE (origin, title_key)
+                    )
+                    """
+                )
+            )
+
 
 
 def migrate_color_hex(engine, db: Session) -> None:

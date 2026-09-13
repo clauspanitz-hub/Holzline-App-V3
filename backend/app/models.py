@@ -432,13 +432,34 @@ class OrderLine(Base):
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
     label: Mapped[str] = mapped_column(String(300), nullable=False)
+    shop_sku: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    shop_title: Mapped[str | None] = mapped_column(String(300), nullable=True)
     product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
     material_id: Mapped[int | None] = mapped_column(ForeignKey("materials.id", ondelete="SET NULL"), nullable=True)
+    suggested_product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("products.id", ondelete="SET NULL"), nullable=True
+    )
 
     order: Mapped[CustomerOrder] = relationship(back_populates="lines")
-    product: Mapped[Product | None] = relationship()
+    product: Mapped[Product | None] = relationship(foreign_keys=[product_id])
     material: Mapped[Material | None] = relationship()
+    suggested_product: Mapped[Product | None] = relationship(foreign_keys=[suggested_product_id])
     todos: Mapped[list["WorkTodo"]] = relationship(back_populates="line", cascade="all, delete-orphan")
+
+
+class ShopLineMap(Base):
+    """Gemerkte Shop-Zeile (Herkunft + Titel, optional SKU) → Lagerprodukt."""
+
+    __tablename__ = "shop_line_maps"
+    __table_args__ = (UniqueConstraint("origin", "title_key", name="uq_shop_line_map_title"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    origin: Mapped[str] = mapped_column(String(20), nullable=False)
+    title_key: Mapped[str] = mapped_column(String(300), nullable=False)
+    sku_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+
+    product: Mapped[Product] = relationship()
 
 
 class WorkTodo(Base):

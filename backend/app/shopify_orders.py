@@ -257,6 +257,9 @@ def sync_shopify_orders(db: Session) -> dict:
     products = list(
         db.scalars(select(Product).options(selectinload(Product.color))).unique().all()
     )
+    from app.shop_map import load_maps, lookup_mapped_product
+
+    maps = load_maps(db, origin="shopify")
     existing = list(db.scalars(select(CustomerOrder)).all())
     by_shop_num = {
         normalize_order_number(o.external_number): o
@@ -294,23 +297,35 @@ def sync_shopify_orders(db: Session) -> dict:
             continue
 
         raw_lines = ((node.get("lineItems") or {}).get("nodes")) or []
-        prepared: list[tuple[str, Decimal, Product | None]] = []
+        prepared: list[tuple[str, Decimal, Product | None, str | None]] = []
         for item in raw_lines:
             qty = _line_qty(item)
             if qty <= 0:
                 continue
+            sku = item.get("sku") or ((item.get("variant") or {}).get("sku"))
+            title = item.get("title") or ""
+            variant_title = item.get("variantTitle")
+            label = _line_label(item)
+            mapped = lookup_mapped_product(
+                maps,
+                origin="shopify",
+                sku=sku,
+                title=label,
+                variant_title=None,
+            )
             product = match_product_for_shop_line(
                 products,
-                sku=item.get("sku") or ((item.get("variant") or {}).get("sku")),
-                title=item.get("title") or "",
-                variant_title=item.get("variantTitle"),
+                sku=sku,
+                title=title,
+                variant_title=variant_title,
+                mapped=mapped,
             )
-            prepared.append((_line_label(item), qty, product))
+            prepared.append((label, qty, product, (sku or "").strip() or None))
         if not prepared:
             skipped += 1
             continue
 
-        all_matched = all(prod is not None for _, _, prod in prepared)
+        all_matched = all(prod is not None for _, _, prod, _ in prepared)
         status = "open" if all_matched else "review"
         order = CustomerOrder(
             ordered_on=_parse_created(node.get("createdAt")),
@@ -321,11 +336,13 @@ def sync_shopify_orders(db: Session) -> dict:
         )
         db.add(order)
         db.flush()
-        for label, qty, product in prepared:
+        for label, qty, product, sku in prepared:
             line = OrderLine(
                 order_id=order.id,
                 quantity=qty,
                 label=label,
+                shop_title=label,
+                shop_sku=sku[:100] if sku else None,
                 product_id=product.id if product else None,
             )
             db.add(line)
@@ -353,7 +370,14 @@ def shopify_poll_loop() -> None:
             db = SessionLocal()
             try:
                 result = sync_shopify_orders(db)
-                if result.get("created") or result.get("claimed") or result.get("errors"):
+                from app.gemini_suggest import suggest_unmatched_shop_lines
+
+                suggested, gemini_error = suggest_unmatched_shop_lines(db, origin="shopify")
+                result["suggested"] = suggested
+                if gemini_error:
+                    result.setdefault("errors", []).append(gemini_error)
+                db.commit()
+                if result.get("created") or result.get("claimed") or result.get("suggested") or result.get("errors"):
                     log.info("Shopify-Sync: %s", result)
             except Exception:
                 log.exception("Shopify-Poller")
