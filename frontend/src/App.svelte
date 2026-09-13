@@ -95,6 +95,7 @@
   let todoStatusFilter = $state('open')
   let orderForm = $state(emptyOrderForm())
   let manufactureTodoId = $state(null)
+  let purchaseTodoId = $state(null)
   let articleChoiceTodo = $state(null)
   let ignoredHandlesModal = $state(false)
   let ignoredHandles = $state([])
@@ -198,6 +199,7 @@
       purchase_quantity: '1',
       purchase_price: '0',
       min_stock: '',
+      reorder_quantity: '',
       is_template: false,
       decimal_places: 0,
       family: '',
@@ -705,6 +707,15 @@
       openManufacture(product, { quantity: todo.quantity, todoId: todo.id })
       return
     }
+    if (todo.kind === 'purchase') {
+      const material = materials.find((m) => m.id === todo.material_id)
+      if (!material) {
+        showFlash('error', 'Material nicht gefunden.')
+        return
+      }
+      openPurchase(material, { quantity: todo.quantity, todoId: todo.id })
+      return
+    }
     if (todo.kind === 'create_article') {
       const order = orders.find((o) => o.id === todo.order_id)
       const line = orderLineForTodo(todo)
@@ -713,6 +724,35 @@
         return
       }
       articleChoiceTodo = todo
+    }
+  }
+
+  async function generatePurchaseTodos() {
+    const ignoredCount = ignoredCriticalMaterials.length
+    let includeIgnored = false
+    if (ignoredCount > 0) {
+      includeIgnored = window.confirm(
+        `${ignoredCount} ignorierte kritische Materialien. Mitnehmen?`,
+      )
+    }
+    saving = true
+    try {
+      const result = await api.todos.purchaseFromCritical({ include_ignored: includeIgnored })
+      await refresh()
+      const parts = []
+      if (result.created) parts.push(`${result.created} neu`)
+      if (result.skipped_existing) parts.push(`${result.skipped_existing} schon offen`)
+      if (result.skipped_ignored && !includeIgnored) parts.push(`${result.skipped_ignored} ignoriert übersprungen`)
+      if (result.deleted_stale) parts.push(`${result.deleted_stale} veraltet entfernt`)
+      showFlash('ok', parts.length ? `Einkauf-Todos: ${parts.join(', ')}.` : 'Keine neuen Einkauf-Todos.')
+      if (result.created) {
+        todoCategoryFilter = 'purchase'
+        selectTab('todos')
+      }
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
     }
   }
 
@@ -2043,6 +2083,10 @@
         purchase_quantity: String(template.purchase_quantity ?? 1),
         purchase_price: String(template.purchase_price ?? template.cost_per_unit ?? 0),
         min_stock: template.min_stock != null ? qtyInputValue(template.min_stock, itemDecimals(template)) : '',
+        reorder_quantity:
+          template.reorder_quantity != null
+            ? qtyInputValue(template.reorder_quantity, itemDecimals(template))
+            : '',
         family: template.family || '',
         decimal_places: itemDecimals(template),
         stock_quantity: '0',
@@ -2065,6 +2109,10 @@
       purchase_quantity: String(material.purchase_quantity ?? 1),
       purchase_price: String(material.purchase_price ?? material.cost_per_unit ?? 0),
       min_stock: material.min_stock != null ? qtyInputValue(material.min_stock, itemDecimals(material)) : '',
+      reorder_quantity:
+        material.reorder_quantity != null
+          ? qtyInputValue(material.reorder_quantity, itemDecimals(material))
+          : '',
       is_template: !!material.is_template,
       decimal_places: itemDecimals(material),
       family: material.family || '',
@@ -2497,14 +2545,24 @@
     manufactureModal = product
   }
 
-  function openPurchase(material) {
+  function openPurchase(material, { quantity = null, todoId = null } = {}) {
+    const fallback =
+      material.reorder_quantity != null
+        ? material.reorder_quantity
+        : material.last_purchase_quantity != null
+          ? material.last_purchase_quantity
+          : material.purchase_quantity
     purchaseForm = {
-      quantity: '',
+      quantity:
+        quantity != null
+          ? qtyInputValue(quantity, itemDecimals(material))
+          : qtyInputValue(fallback, itemDecimals(material)),
       location_id: String(
         materialLocations.find((x) => x.name === 'Hamburg')?.id || materialLocations[0]?.id || '',
       ),
       purchase_price: String(material.purchase_price ?? 0),
     }
+    purchaseTodoId = todoId
     purchaseModal = material
   }
 
@@ -2575,6 +2633,7 @@
           purchase_quantity: materialForm.purchase_quantity,
           purchase_price: materialForm.purchase_price,
           min_stock: parseOptionalQty(materialForm.min_stock),
+          reorder_quantity: parseOptionalQty(materialForm.reorder_quantity),
           family: materialForm.family.trim() || null,
           decimal_places: itemDecimals(materialForm),
           stock_quantity: materialForm.stock_quantity,
@@ -2599,6 +2658,7 @@
         purchase_quantity: materialForm.purchase_quantity,
         purchase_price: materialForm.purchase_price,
         min_stock: parseOptionalQty(materialForm.min_stock),
+        reorder_quantity: parseOptionalQty(materialForm.reorder_quantity),
         is_template: !!materialForm.is_template,
         family: materialForm.family.trim() || null,
         decimal_places: itemDecimals(materialForm),
@@ -2954,18 +3014,37 @@
       showFlash('error', 'Menge muss größer als 0 sein.')
       return
     }
+    const materialId = purchaseModal.id
+    const todoId = purchaseTodoId
+    const prevReorder = purchaseModal.reorder_quantity
     saving = true
     try {
-      await api.materials.update(purchaseModal.id, {
+      await api.materials.update(materialId, {
         purchase_price: purchaseForm.purchase_price,
+        last_purchase_quantity: qty,
       })
-      await api.materials.deltaStock(purchaseModal.id, {
+      await api.materials.deltaStock(materialId, {
         location_id: Number(purchaseForm.location_id),
         delta: qty,
       })
+      if (todoId) {
+        await api.todos.complete(todoId)
+        purchaseTodoId = null
+      }
       purchaseModal = null
       await refresh()
       showFlash('ok', 'Einkauf gespeichert.')
+      const sameReorder = prevReorder != null && Number(prevReorder) === qty
+      if (!sameReorder) {
+        const updateReorder = window.confirm(
+          `Bestellmenge auf ${formatQty(qty, itemDecimals({ decimal_places: materials.find((m) => m.id === materialId)?.decimal_places }))} setzen?`,
+        )
+        if (updateReorder) {
+          await api.materials.update(materialId, { reorder_quantity: qty })
+          await refresh()
+          showFlash('ok', 'Bestellmenge aktualisiert.')
+        }
+      }
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -3520,7 +3599,7 @@
           {#each rows as todo}
             <tr class:empty={todo.status === 'done'}>
               <td><strong>{todoKindLabel(todo.kind)}</strong> · {todo.title}</td>
-              <td>{todo.order_label || `#${todo.order_id}`}</td>
+              <td>{todo.order_label || (todo.order_id ? `#${todo.order_id}` : '—')}</td>
               <td>{formatQty(todo.quantity)}</td>
               <td>{todo.status === 'done' ? 'erledigt' : 'offen'}</td>
               <td class="col-actions">
@@ -3540,7 +3619,7 @@
         <article class="card" class:empty={todo.status === 'done'}>
           <h3>{todoKindLabel(todo.kind)}</h3>
           <p>{todo.title}</p>
-          <p class="empty">{todo.order_label} · {formatQty(todo.quantity)}</p>
+          <p class="empty">{todo.order_label || (todo.order_id ? `#${todo.order_id}` : 'Mindestbestand')} · {formatQty(todo.quantity)}</p>
           {#if todo.status === 'open'}
             <div class="row-actions"><button type="button" class="btn" onclick={() => startTodo(todo)}>Los</button></div>
           {/if}
@@ -3848,6 +3927,9 @@
             <span class="empty">({displayedOverviewProducts.length + displayedOverviewMaterials.length})</span>
           </button>
         </h2>
+        <button type="button" class="btn secondary" disabled={saving} onclick={() => generatePurchaseTodos()}>
+          Einkauf-Todos erzeugen
+        </button>
       </div>
       {#if overviewCriticalOpen}
         <p class="empty">
@@ -4080,6 +4162,7 @@
       onPatch={(item, patch) => patchGapItem('material', item, patch)}
       onAdjustStock={(item, body) => adjustGapStock('material', item, body)}
       onPurchase={openPurchase}
+      onGeneratePurchaseTodos={generatePurchaseTodos}
     />
     <section class="panel">
       <div class="panel-header">
@@ -4498,9 +4581,12 @@
     <section class="panel">
       <div class="panel-header">
         <h2>Todos</h2>
+        <button type="button" class="btn secondary" disabled={saving} onclick={() => generatePurchaseTodos()}>
+          Einkauf-Todos erzeugen
+        </button>
       </div>
       <p class="empty" style="margin-top:0">
-        Werkstatt zuerst. Einkauf-Todos aus Mindestbestand kommen im nächsten Schritt — der Filter ist schon da.
+        Werkstatt zuerst. Einkauf-Todos für kritische Materialien per Knopf — höchstens eines offen pro Material.
       </p>
       <div class="filter-bar form-grid">
         <label>Art
@@ -4518,7 +4604,7 @@
           </select>
         </label>
       </div>
-      {@render todosMarkup(displayedTodos(), todoCategoryFilter === 'purchase' ? 'Einkauf-Todos kommen im nächsten Schritt (Mindestbestand).' : 'Keine Todos.')}
+      {@render todosMarkup(displayedTodos(), todoCategoryFilter === 'purchase' ? 'Keine offenen Einkauf-Todos.' : 'Keine Todos.')}
     </section>
   {:else if tab === 'staff'}
     <section class="panel">
@@ -5081,6 +5167,9 @@
         <label>Mindestbestand (optional)
           <input type="number" step={qtyStep(materialForm.decimal_places)} min="0" bind:value={materialForm.min_stock} placeholder="leer = keiner" />
         </label>
+        <label>Bestellmenge (optional)
+          <input type="number" step={qtyStep(materialForm.decimal_places)} min="0" bind:value={materialForm.reorder_quantity} placeholder="leer = Packung / zuletzt" />
+        </label>
         <label>Materialfamilie
           <input list="material-family-suggestions" bind:value={materialForm.family} placeholder="optional" />
         </label>
@@ -5439,7 +5528,7 @@
 {/if}
 
 {#if purchaseModal}
-  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (purchaseModal = null)}>
+  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (purchaseModal = null, purchaseTodoId = null)}>
     <div class="modal" role="dialog" aria-modal="true">
       <h3>Einkauf: {purchaseModal.name}</h3>
       <form class="form-grid" onsubmit={(e) => { e.preventDefault(); submitPurchase() }}>
@@ -5454,7 +5543,7 @@
         </label>
         <p class="empty" style="margin:0">Bisher: {formatMoney(purchaseModal.purchase_price)}</p>
         <div class="modal-actions">
-          <button type="button" class="btn secondary" onclick={() => (purchaseModal = null)}>Abbrechen</button>
+          <button type="button" class="btn secondary" onclick={() => { purchaseModal = null; purchaseTodoId = null }}>Abbrechen</button>
           <button class="btn" disabled={saving}>Speichern</button>
         </div>
       </form>

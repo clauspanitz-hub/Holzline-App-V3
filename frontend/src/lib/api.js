@@ -241,6 +241,8 @@ export const api = {
       return request(`/api/todos${qs ? `?${qs}` : ''}`)
     },
     complete: (id) => request(`/api/todos/${id}/complete`, { method: 'POST' }),
+    purchaseFromCritical: (body = {}) =>
+      request('/api/todos/purchase-from-critical', { method: 'POST', body: JSON.stringify(body) }),
   },
   overview: {
     tageslage: (refresh = false) =>

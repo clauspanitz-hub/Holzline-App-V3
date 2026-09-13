@@ -829,6 +829,8 @@ def material_read(material: Material) -> MaterialRead:
         purchase_price=material.purchase_price,
         cost_per_unit=material.cost_per_unit,
         min_stock=material.min_stock,
+        reorder_quantity=getattr(material, "reorder_quantity", None),
+        last_purchase_quantity=getattr(material, "last_purchase_quantity", None),
         is_template=bool(getattr(material, "is_template", False)),
         decimal_places=int(getattr(material, "decimal_places", 0) or 0),
         family=material.family,
@@ -936,6 +938,7 @@ def create_material(db: Session, payload: MaterialCreate) -> MaterialRead:
         purchase_price=purchase_price,
         cost_per_unit=_unit_cost(purchase_price, purchase_quantity),
         min_stock=_q(payload.min_stock) if payload.min_stock is not None else None,
+        reorder_quantity=_q(payload.reorder_quantity) if payload.reorder_quantity is not None else None,
         family=(payload.family.strip() if payload.family else None),
         color_id=color.id if color else None,
         decimal_places=int(payload.decimal_places or 0),
@@ -1097,6 +1100,12 @@ def update_material(db: Session, material_id: int, payload: MaterialUpdate) -> M
         data["purchase_price"] = _m(data["purchase_price"])
     if "min_stock" in data:
         data["min_stock"] = _q(data["min_stock"]) if data["min_stock"] is not None else None
+    if "reorder_quantity" in data:
+        data["reorder_quantity"] = _q(data["reorder_quantity"]) if data["reorder_quantity"] is not None else None
+    if "last_purchase_quantity" in data:
+        data["last_purchase_quantity"] = (
+            _q(data["last_purchase_quantity"]) if data["last_purchase_quantity"] is not None else None
+        )
     if "family" in data and data["family"] is not None:
         data["family"] = data["family"].strip() or None
     if "color_id" in data:
@@ -1176,6 +1185,10 @@ def adjust_material_stock(db: Session, material_id: int, payload: StockAdjustReq
     get_location(db, payload.location_id)
     row = _get_or_create_material_stock(db, material_id, payload.location_id)
     row.quantity = _q(payload.quantity)
+    db.flush()
+    from app.purchase_todos import cleanup_stale_purchase_todos
+
+    cleanup_stale_purchase_todos(db)
     db.commit()
     return material_read(_load_material(db, material_id))
 
@@ -1185,6 +1198,10 @@ def delta_material_stock(db: Session, material_id: int, payload: StockDeltaReque
     get_location(db, payload.location_id)
     row = _get_or_create_material_stock(db, material_id, payload.location_id)
     row.quantity = _q(Decimal(row.quantity) + Decimal(payload.delta))
+    db.flush()
+    from app.purchase_todos import cleanup_stale_purchase_todos
+
+    cleanup_stale_purchase_todos(db)
     db.commit()
     return material_read(_load_material(db, material_id))
 
@@ -1208,6 +1225,10 @@ def transfer_material(db: Session, material_id: int, payload: TransferRequest) -
         material_id=material_id,
         note=payload.note,
     )
+    db.flush()
+    from app.purchase_todos import cleanup_stale_purchase_todos
+
+    cleanup_stale_purchase_todos(db)
     db.commit()
     return material_read(_load_material(db, material_id))
 
@@ -3155,6 +3176,11 @@ def list_todos(
     category: str | None = None,
     status: str | None = None,
 ) -> list["TodoRead"]:
+    from app.purchase_todos import cleanup_stale_purchase_todos
+
+    deleted = cleanup_stale_purchase_todos(db)
+    if deleted:
+        db.commit()
     stmt = (
         select(WorkTodo)
         .order_by(WorkTodo.status.asc(), WorkTodo.created_at.desc())
@@ -3172,6 +3198,14 @@ def list_todos(
     return [_todo_read(row) for row in rows]
 
 
+def generate_purchase_todos(db: Session, include_ignored: bool = False) -> "PurchaseTodosGenerateResult":
+    from app.purchase_todos import generate_purchase_todos as _generate
+    from app.schemas import PurchaseTodosGenerateResult
+
+    result = _generate(db, include_ignored=include_ignored)
+    return PurchaseTodosGenerateResult(**result)
+
+
 def complete_todo(db: Session, todo_id: int) -> "TodoRead":
     todo = db.get(WorkTodo, todo_id)
     if todo is None:
@@ -3179,8 +3213,9 @@ def complete_todo(db: Session, todo_id: int) -> "TodoRead":
     todo.status = "done"
     todo.completed_at = _utcnow()
     db.flush()
-    order = _order_load(db, todo.order_id)
-    _refresh_order_status(db, order)
+    if todo.order_id is not None:
+        order = _order_load(db, todo.order_id)
+        _refresh_order_status(db, order)
     db.commit()
     db.refresh(todo)
     todo = db.scalars(

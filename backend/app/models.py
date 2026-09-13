@@ -107,6 +107,8 @@ class Material(Base):
     purchase_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=Decimal("0"))
     cost_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False, default=Decimal("0"))
     min_stock: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    reorder_quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    last_purchase_quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     decimal_places: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     family: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -468,8 +470,8 @@ class WorkTodo(Base):
     __tablename__ = "todos"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
-    order_line_id: Mapped[int] = mapped_column(ForeignKey("order_lines.id", ondelete="CASCADE"), nullable=False)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), nullable=True)
+    order_line_id: Mapped[int | None] = mapped_column(ForeignKey("order_lines.id", ondelete="CASCADE"), nullable=True)
     kind: Mapped[str] = mapped_column(String(30), nullable=False)  # manufacture | create_article | purchase
     category: Mapped[str] = mapped_column(String(20), nullable=False, default="workshop")  # workshop | purchase
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")  # open | done
@@ -480,8 +482,8 @@ class WorkTodo(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    order: Mapped[CustomerOrder] = relationship(back_populates="todos")
-    line: Mapped[OrderLine] = relationship(back_populates="todos")
+    order: Mapped[CustomerOrder | None] = relationship(back_populates="todos")
+    line: Mapped[OrderLine | None] = relationship(back_populates="todos")
     product: Mapped[Product | None] = relationship()
     material: Mapped[Material | None] = relationship()
 

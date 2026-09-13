@@ -72,6 +72,8 @@ from app.schemas import (
     ShopifyOrderSyncResult,
     TageslageRead,
     TodoRead,
+    PurchaseTodosGenerateRequest,
+    PurchaseTodosGenerateResult,
     StockAdjustRequest,
     StockDeltaRequest,
     StockMovementRead,
@@ -643,6 +645,15 @@ def list_todos(
     db: Session = Depends(get_db),
 ) -> list[TodoRead]:
     return services.list_todos(db, category=category, status=status)
+
+
+@router.post("/todos/purchase-from-critical", response_model=PurchaseTodosGenerateResult)
+def purchase_todos_from_critical(
+    payload: PurchaseTodosGenerateRequest,
+    _: AdminUser,
+    db: Session = Depends(get_db),
+) -> PurchaseTodosGenerateResult:
+    return services.generate_purchase_todos(db, include_ignored=payload.include_ignored)
 
 
 @router.post("/todos/{todo_id}/complete", response_model=TodoRead)

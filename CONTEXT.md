@@ -10,7 +10,15 @@ _Avoid_: Rohmaterial, Rohstoff, Bestandteil, Komponente
 
 **Einkaufsmenge**:
 Die Menge einer Material-Packung beim Einkauf in der Material-Einheit (z. B. 750 ml).
-_Avoid_: Packungsgröße als UI-Fremdwort
+_Avoid_: Packungsgröße als UI-Fremdwort; Bestellmenge; Nachbestellmenge
+
+**Bestellmenge** (Material):
+Optionale typische Nachbestellmenge am Material (bewusst gepflegt). Steuert die Menge neuer Einkauf-Todos: Bestellmenge, sonst zuletzt bestellte Menge, sonst Einkaufsmenge (Packung).
+_Avoid_: Einkaufsmenge als Synonym; Fehlmenge als Pflicht-Todo-Menge; Bestellmenge = Mindestbestand
+
+**Zuletzt bestellt** (Material):
+Die Menge des letzten verbuchten Material-Einkaufs. Wird beim Speichern im Einkauf gesetzt; Fallback für Todo-Menge wenn keine Bestellmenge gepflegt ist.
+_Avoid_: Manuell Pflichtfeld; ersetzt Bestellmenge ohne Nachfrage
 
 **Einkaufspreis**:
 Der Preis für eine komplette Einkaufsmenge (Packung), nicht der Preis pro Verbrauchseinheit.
@@ -89,8 +97,8 @@ Gemerkte Identität einer Shop-Zeile einer **Herkunft** — Shop-SKU, sonst Shop
 _Avoid_: Alias, Mapping als UI-Wort; Gemini-Speicher; interne SKU-Vergabe; SKU-Sync in den Shop; stilles Überschreiben einer vorhandenen Produkt-SKU; erste Zuordnung unveränderlich ohne Hinweis; Leeren der Zeile löscht das Gedächtnis; Shopify- und Etsy-Titel als dieselbe Identität
 
 **Todo**:
-Eine abarbeitbare Werkstatt- oder Beschaffungsaufgabe. **Eigene Menüseite** (nicht nur unter Bestellungen). Filterbar nach Art (Werkstatt vs. Einkauf); Standardansicht Werkstatt. **Fertigen** / Zusammenstellen erst ab Bestellstatus **offen** (nach Schnellerfassung oder nach Abnicken). **Artikel anlegen** auch schon **zur Prüfung**, wenn **Auf Liste** gedrückt wurde — unter Todos sofort sichtbar. Pro **Bestellposition** höchstens die nötigen Todos — **nicht** über Bestellungen hinweg zusammenfassen. Set-Position → **Zusammenstellen**; **Fertigen** nur bei On-Demand oder fehlender Fertigware; lagerndes Produkt ohne Unterdeckung → **kein** Werkstatt-Todo; unzugeordnete Position → **Artikel anlegen**. Offene Todos halten die Bestellung auf **offen**, nicht **versandbereit**; an der Bestellung kurzer Hinweis (z. B. offene Fertigen-Anzahl). Aus Bestand (unter Mindestbestand / negativ) → Einkauf-Todo (später). Abhaken öffnet den bestehenden Dialog; erst Speichern dort erledigt das Todo (bei Artikel anlegen: verknüpft die Bestellzeile).
-_Avoid_: Todo = Bestellung; jede Positionszeile immer ein Todo; lagerndes Produkt als Pflicht-Todo; stilles Buchen nur durch Abhaken; Einkaufsliste als zweites, unverbundenes Konzept; eine ungeteilte Mischliste ohne Art; zwei getrennte Listen statt Filter; Fertigen-Todos über Bestellungen mergen; Todos nur unter Bestellungen versteckt; Fertigen-Todos an Bestellungen zur Prüfung; versandbereit trotz offener Todos
+Eine abarbeitbare Werkstatt- oder Beschaffungsaufgabe. **Eigene Menüseite** (nicht nur unter Bestellungen). Filterbar nach Art (Werkstatt vs. Einkauf); Standardansicht Werkstatt. **Fertigen** / Zusammenstellen erst ab Bestellstatus **offen** (nach Schnellerfassung oder nach Abnicken). **Artikel anlegen** auch schon **zur Prüfung**, wenn **Auf Liste** gedrückt wurde — unter Todos sofort sichtbar. Pro **Bestellposition** höchstens die nötigen Todos — **nicht** über Bestellungen hinweg zusammenfassen. Set-Position → **Zusammenstellen**; **Fertigen** nur bei On-Demand oder fehlender Fertigware; lagerndes Produkt ohne Unterdeckung → **kein** Werkstatt-Todo; unzugeordnete Position → **Artikel anlegen**. Offene Todos halten die Bestellung auf **offen**, nicht **versandbereit**; an der Bestellung kurzer Hinweis (z. B. offene Fertigen-Anzahl). Aus Bestand (unter Mindestbestand / negativ) → **Einkauf-Todo** nur für Materialien, per Knopf (Todos und kritische Listen); höchstens eines offen pro Material; Menge aus Bestellmenge / zuletzt bestellt / Einkaufsmenge. Ignorierte Kritische: Nachfrage. Nicht mehr kritisch → offene Einkauf-Todos werden gelöscht. Abhaken öffnet den Einkauf-Dialog; Speichern erledigt und fragt nach Anpassung der Bestellmenge.
+_Avoid_: Todo = Bestellung; jede Positionszeile immer ein Todo; lagerndes Produkt als Pflicht-Todo; stilles Buchen nur durch Abhaken; Einkaufsliste als zweites, unverbundenes Konzept; eine ungeteilte Mischliste ohne Art; zwei getrennte Listen statt Filter; Fertigen-Todos über Bestellungen mergen; Todos nur unter Bestellungen versteckt; Fertigen-Todos an Bestellungen zur Prüfung; versandbereit trotz offener Todos; Einkauf-Todos für Produkte; stilles Auto-Anlegen bei jedem kritischen Stand
 
 
 
@@ -111,7 +119,7 @@ Ein Ort, an dem Material- oder Produktbestand liegt. Physisch: Hamburg, Dahlenbu
 _Avoid_: Location als UI-Begriff, Bin, Am Waldpark 27 / Werkstatt Rissen / Lager Petra (Shopify-Namen, nicht kanonisch)
 
 **Mindestbestand**:
-Optionale Untergrenze je Material oder Produkt. Unterschreitung (oder Gesamt ≤ 0 / negativ) markiert den Artikel als **kritisch** (Fehlmenge): in der Übersicht und zusätzlich in Extra-Blöcken auf den Seiten Materialien und Produkte. Kann ein **Todo** (Einkauf) erzeugen.
+Optionale Untergrenze je Material oder Produkt. Unterschreitung (oder Gesamt ≤ 0 / negativ) markiert den Artikel als **kritisch** (Fehlmenge): in der Übersicht und zusätzlich in Extra-Blöcken auf den Seiten Materialien und Produkte. Kritische **Materialien** können per Knopf ein **Einkauf-Todo** erzeugen (ADR `0019`).
 _Avoid_: Sollbestand als Pflichtfeld; kritische Übersicht als Ersatz für die Todo-Liste; „Fehlmenge“ als eigenes Objekt neben kritischem Artikel
 
 **Baubare Variante**:

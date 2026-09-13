@@ -19,6 +19,7 @@
     onAdjustStock = async () => {},
     onManufacture = (_item) => {},
     onPurchase = (_item) => {},
+    onGeneratePurchaseTodos = null,
   } = $props()
 
   const isMaterial = $derived(kind === 'material')
@@ -63,6 +64,11 @@
         <span class="empty">({criticalRows.length})</span>
       </button>
     </h2>
+    {#if isMaterial && onGeneratePurchaseTodos}
+      <button type="button" class="btn secondary" disabled={saving} onclick={() => onGeneratePurchaseTodos()}>
+        Einkauf-Todos erzeugen
+      </button>
+    {/if}
   </div>
   {#if criticalOpen}
     {@render gapTable(criticalRows, true)}

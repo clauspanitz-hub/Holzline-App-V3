@@ -190,6 +190,7 @@ def init_db() -> None:
         migrate_order_note(engine)
         migrate_color_hex(engine, db)
         migrate_material_decimal_places(engine)
+        migrate_purchase_todos(engine)
         seed_admin_user(db)
         from app.services import backfill_incomplete_tags, ensure_system_incomplete_tags
 
@@ -446,8 +447,8 @@ def migrate_orders_todos(engine) -> None:
                     """
                     CREATE TABLE todos (
                         id INTEGER NOT NULL PRIMARY KEY,
-                        order_id INTEGER NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
-                        order_line_id INTEGER NOT NULL REFERENCES order_lines(id) ON DELETE CASCADE,
+                        order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+                        order_line_id INTEGER REFERENCES order_lines(id) ON DELETE CASCADE,
                         kind VARCHAR(30) NOT NULL,
                         category VARCHAR(20) NOT NULL DEFAULT 'workshop',
                         status VARCHAR(20) NOT NULL DEFAULT 'open',
@@ -609,6 +610,68 @@ def migrate_color_hex(engine, db: Session) -> None:
         if guessed:
             color.hex = guessed
     db.commit()
+
+
+def migrate_purchase_todos(engine) -> None:
+    """Bestellmenge/zuletzt bestellt am Material; Todos ohne Bestellung (ADR 0019)."""
+    insp = inspect(engine)
+    if "materials" in insp.get_table_names():
+        cols = {c["name"] for c in insp.get_columns("materials")}
+        with engine.begin() as conn:
+            if "reorder_quantity" not in cols:
+                conn.execute(text("ALTER TABLE materials ADD COLUMN reorder_quantity NUMERIC(14, 3)"))
+            if "last_purchase_quantity" not in cols:
+                conn.execute(text("ALTER TABLE materials ADD COLUMN last_purchase_quantity NUMERIC(14, 3)"))
+
+    if "todos" not in insp.get_table_names():
+        return
+    todo_cols = {c["name"]: c for c in insp.get_columns("todos")}
+    order_col = todo_cols.get("order_id")
+    if order_col is None or order_col.get("nullable"):
+        return
+
+    with engine.connect() as conn:
+        conn.execute(text("PRAGMA foreign_keys=OFF"))
+        conn.commit()
+        with conn.begin():
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE todos_new (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        order_id INTEGER REFERENCES orders(id) ON DELETE CASCADE,
+                        order_line_id INTEGER REFERENCES order_lines(id) ON DELETE CASCADE,
+                        kind VARCHAR(30) NOT NULL,
+                        category VARCHAR(20) NOT NULL DEFAULT 'workshop',
+                        status VARCHAR(20) NOT NULL DEFAULT 'open',
+                        title VARCHAR(300) NOT NULL,
+                        quantity NUMERIC(14, 3) NOT NULL DEFAULT 1,
+                        product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+                        material_id INTEGER REFERENCES materials(id) ON DELETE SET NULL,
+                        created_at DATETIME NOT NULL,
+                        completed_at DATETIME
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO todos_new (
+                        id, order_id, order_line_id, kind, category, status, title,
+                        quantity, product_id, material_id, created_at, completed_at
+                    )
+                    SELECT
+                        id, order_id, order_line_id, kind, category, status, title,
+                        quantity, product_id, material_id, created_at, completed_at
+                    FROM todos
+                    """
+                )
+            )
+            conn.execute(text("DROP TABLE todos"))
+            conn.execute(text("ALTER TABLE todos_new RENAME TO todos"))
+        conn.execute(text("PRAGMA foreign_keys=ON"))
+        conn.commit()
 
 
 def migrate_material_decimal_places(engine) -> None:

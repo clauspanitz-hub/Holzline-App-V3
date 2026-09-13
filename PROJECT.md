@@ -17,7 +17,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 ## 3. Datenmodell
 
 ### Phase 1 (Basis)
-- **materials:** `id`, `name` (unique), `unit`, `purchase_quantity`, `purchase_price`, `cost_per_unit` (= Preis/Einkaufsmenge), optional `min_stock`/`color`/`tags`/`family` (Materialfamilie), `is_template`, Audit `created_at`/`updated_at`/`created_by`/`updated_by` — Bestand nur in `material_stocks`
+- **materials:** `id`, `name` (unique), `unit`, `purchase_quantity`, `purchase_price`, `cost_per_unit` (= Preis/Einkaufsmenge), optional `min_stock` / `reorder_quantity` (Bestellmenge) / `last_purchase_quantity`, optional `color`/`tags`/`family` (Materialfamilie), `is_template`, Audit `created_at`/`updated_at`/`created_by`/`updated_by` — Bestand nur in `material_stocks`
 - **products:** `id`, `name` (unique), `sku` (optional unique), `selling_price` (Verkaufspreis EUR, 0 = unvollständig), optional `min_stock`/`color`/`tags`/`family` (Produktfamilie), `is_template`, Audit wie Materialien — kein Gesamtbestand mehr an der Zeile
 - **Unvollständig (UI):** Material: Mindestbestand, Einkaufspreis=0; Produkt: Mindestbestand, Stückliste, Verkaufspreis=0 — sichtbar als „!“ und als System-Tags `fehlt …` (ADR `0011`)
 - **product_materials:** Produkt-Stückliste — Material **oder** Komponenten-Produkt → Fertigen (ADR `0012`)
@@ -42,7 +42,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **users / auth_sessions:** App-Login; Rollen Admin / Mitarbeiter (ADR `0010`)
 - **orders:** Herkunft Shopify/Etsy/Manuell; Status **zur Prüfung** (`review`) / **offen** / **versandbereit** / **versendet**; externe Nummer; Kunde; Bestellzeit; optionale **Notiz** (Personalisierung)
 - **order_lines:** Menge, Label; optional `product_id`, `shop_sku`, `shop_title`, `suggested_product_id` (Gemini-Vorschlag)
-- **todos:** Arten Artikel anlegen / Fertigen (Einkauf-Filter vorbereitet); halten Bestellung auf **offen**
+- **todos:** Arten Artikel anlegen / Fertigen / Einkauf; Einkauf ohne Bestellung möglich; halten Bestellung auf **offen** wenn verknüpft
 - **shop_line_maps:** gemerkte Shop-Zuordnung (Herkunft + Titel/SKU → Produkt); Gemini nur Vorschlag (ADR `0014`)
 - **tageslage_cache:** ein Eintrag pro Kalendertag (Zusammenfassung, Spruch, Nächste Schritte; ADR `0016`)
 - **incoming_mails:** IMAP-Warteschlange (Rohtext; Etsy-Parser → Bestellung zur Prüfung; ADR `0018`)
@@ -81,8 +81,8 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Prüfung: Produkt erzeugen / Auf Liste; Status an offene Todos; Hinweis (ADR `0015`)
 - [x] Übersicht: Tageslage (Kennzahlen + Gemini-Text/Spruch/Nächste Schritte, Tages-Cache; ADR `0016`)
 - [x] Etsy-Mail + Gemini (IMAP-Warteschlange, seltener Auto-Fetch, Parse-Knopf; ADR `0018`) → **zur Prüfung**; Etsy-API falls/wenn Freigabe; kein CSV-Bestellexport
+- [x] Einkauf-Todos aus Mindestbestand (Knopf, nur Materialien; ADR `0019`)
 - [ ] Zusammenstellen bei Set-Bestellung (nach hinten)
-- [ ] Einkauf-Todos aus Mindestbestand (Liste/Filter schon vorbereitet)
 
 ### Phase 3: Optimierung & Einkauf (GEPLANT — vorgemerkt aus Grill)
 - [ ] Einkaufsliste aus fehlenden Materialien (Todo-Art Einkauf)

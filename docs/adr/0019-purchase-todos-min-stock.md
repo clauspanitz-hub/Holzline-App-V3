@@ -1,0 +1,5 @@
+# Einkauf-Todos aus Mindestbestand (Material)
+
+Kritische Materialien (Bestand ≤ 0 oder unter Mindestbestand) erzeugen keine Todos von allein. Admin-Knopf **Einkauf-Todos erzeugen** (Todos-Seite und kritische Listen) legt pro Material höchstens ein offenes Todo an (`kind`/`category` purchase, ohne Bestellung). Menge: **Bestellmenge** am Material, sonst zuletzt bestellte Menge, sonst Packungsgröße (Einkaufsmenge). Ignorierte Kritische: Nachfrage „mitnehmen?“. Schon offenes Einkauf-Todo → überspringen. Abhaken öffnet den bestehenden Einkauf-Dialog; Speichern erledigt das Todo, setzt zuletzt bestellt und fragt, ob die Bestellmenge angepasst wird. Wird das Material nicht mehr kritisch, verschwinden offene Einkauf-Todos (sofort bei Bestandsänderung und beim Erzeugen/Listenöffnen). Still-Buchen ohne Dialog später möglich. Produkte bleiben beim Fertigen, kein Einkauf-Todo.
+
+**Considered Options:** Automatisch bei jedem kritischen Stand; Produkte mit einkaufen; Todo-Menge = Fehlmenge; Todo nur Erinnerung ohne Menge

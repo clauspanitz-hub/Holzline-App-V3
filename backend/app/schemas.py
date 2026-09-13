@@ -122,6 +122,7 @@ class MaterialBase(BaseModel):
     purchase_quantity: Quantity = Field(default=Decimal("1"), gt=0)
     purchase_price: Money = Decimal("0")
     min_stock: Quantity | None = None
+    reorder_quantity: Quantity | None = None
     family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     decimal_places: int = Field(default=0, ge=0, le=3)
@@ -147,6 +148,8 @@ class MaterialUpdate(BaseModel):
     purchase_quantity: Quantity | None = Field(default=None, gt=0)
     purchase_price: Money | None = None
     min_stock: Quantity | None = None
+    reorder_quantity: Quantity | None = None
+    last_purchase_quantity: Quantity | None = None
     is_template: bool | None = None
     decimal_places: int | None = Field(default=None, ge=0, le=3)
     family: str | None = Field(default=None, max_length=200)
@@ -173,6 +176,8 @@ class MaterialRead(BaseModel):
     purchase_price: Money
     cost_per_unit: UnitCost
     min_stock: Quantity | None = None
+    reorder_quantity: Quantity | None = None
+    last_purchase_quantity: Quantity | None = None
     is_template: bool = False
     decimal_places: int = 0
     family: str | None = None
@@ -743,8 +748,8 @@ class EtsyMailParseResult(BaseModel):
 
 class TodoRead(BaseModel):
     id: int
-    order_id: int
-    order_line_id: int
+    order_id: int | None = None
+    order_line_id: int | None = None
     kind: Literal["manufacture", "create_article", "purchase"]
     category: Literal["workshop", "purchase"]
     status: Literal["open", "done"]
@@ -757,6 +762,17 @@ class TodoRead(BaseModel):
     order_label: str | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
+
+
+class PurchaseTodosGenerateRequest(BaseModel):
+    include_ignored: bool = False
+
+
+class PurchaseTodosGenerateResult(BaseModel):
+    created: int = 0
+    skipped_existing: int = 0
+    skipped_ignored: int = 0
+    deleted_stale: int = 0
 
 
 class OrderLineRead(BaseModel):
