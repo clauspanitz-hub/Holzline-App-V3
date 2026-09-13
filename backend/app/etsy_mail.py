@@ -271,7 +271,8 @@ def _call_gemini_parse(mail: IncomingMail) -> tuple[dict | None, str | None]:
         '"note":"<Personalisierung/Gravur/Käufernotiz oder null>",'
         '"lines":[{"title":"<Produkt inkl. Variante/Farbe/Optionen>",'
         '"sku":"<SKU oder null>","quantity":1}]} '
-        "Titel MUSS gewählte Varianten/Optionen/Farben enthalten (nicht nur „Color selectable“). "
+        "Titel MUSS gewählte Varianten/Optionen/Farben/Form (rund/eckig) enthalten "
+        "(nicht nur „Color selectable“ oder nackter Produktname). "
         "Personalisierung und Sonderwünsche in note. "
         "Mindestens eine Position mit Titel und Menge > 0. "
         "Keine erfundenen Positionen.\n\n"

@@ -39,6 +39,7 @@ query HolzlingeOpenPaidOrders($first: Int!, $after: String, $query: String!) {
           quantity
           unfulfilledQuantity
           customAttributes { key value }
+          product { handle title }
           variant {
             sku
             title
@@ -181,6 +182,23 @@ def _line_qty(node: dict) -> Decimal:
     return qty
 
 
+def _form_hint_from_handle(handle: str | None) -> str | None:
+    """Form/Stil aus dem Product-Handle, falls nicht schon im Titel (z. B. rund/eckig)."""
+    h = (handle or "").casefold().replace("_", "-")
+    if not h:
+        return None
+    for token, label in (
+        ("eckig", "eckig"),
+        ("rechteck", "eckig"),
+        ("quadrat", "eckig"),
+        ("rund", "rund"),
+        ("oval", "oval"),
+    ):
+        if token in h:
+            return label
+    return None
+
+
 def _line_label(node: dict) -> str:
     title = (node.get("title") or "").strip()
     variant = (node.get("variantTitle") or "").strip()
@@ -217,6 +235,10 @@ def _line_label(node: dict) -> str:
     if attrs:
         parts.append(" · ".join(attrs))
     label = " - ".join(p for p in parts if p) if parts else "Position"
+    handle = (node.get("product") or {}).get("handle") or ""
+    form = _form_hint_from_handle(handle)
+    if form and form.casefold() not in label.casefold():
+        label = f"{label} · {form}"
     return label[:300]
 
 
@@ -276,6 +298,49 @@ def _customer_name(node: dict) -> str | None:
     return name[:200] or None
 
 
+def _usable_line_items(node: dict) -> list[dict]:
+    out = []
+    for item in ((node.get("lineItems") or {}).get("nodes")) or []:
+        if _line_qty(item) > 0:
+            out.append(item)
+    return out
+
+
+def _refresh_existing_shop_order(order: CustomerOrder, node: dict) -> bool:
+    """Notiz und Positions-Labels bei erneutem Abruf nachziehen. Returns True wenn geändert."""
+    changed = False
+    note = (node.get("note") or "").strip()
+    if note and not (order.note or "").strip():
+        order.note = note[:2000]
+        changed = True
+    items = _usable_line_items(node)
+    lines = list(order.lines or [])
+    if not items or not lines:
+        if changed:
+            order.updated_at = datetime.now()
+        return changed
+    # 1:1 nach Reihenfolge, sonst nur bei gleicher Anzahl
+    pairs: list[tuple[OrderLine, dict]] = []
+    if len(items) == len(lines):
+        pairs = list(zip(lines, items))
+    elif len(lines) == 1 and len(items) == 1:
+        pairs = [(lines[0], items[0])]
+    for line, item in pairs:
+        label = _line_label(item)
+        if not label:
+            continue
+        if (line.shop_title or "") != label:
+            line.shop_title = label
+            changed = True
+        # Anzeige-Label nur überschreiben, solange die Zeile unzugeordnet ist
+        if not line.product_id and not line.material_id and (line.label or "") != label:
+            line.label = label
+            changed = True
+    if changed:
+        order.updated_at = datetime.now()
+    return changed
+
+
 def sync_shopify_orders(db: Session) -> dict:
     """Neue Shopify-Aufträge anlegen. Idempotent über Herkunft + Nummer."""
     from app.services import _order_load, _refresh_order_status, _sync_line_todos
@@ -296,7 +361,11 @@ def sync_shopify_orders(db: Session) -> dict:
     from app.shop_map import load_maps, lookup_mapped_product
 
     maps = load_maps(db, origin="shopify")
-    existing = list(db.scalars(select(CustomerOrder)).all())
+    existing = list(
+        db.scalars(
+            select(CustomerOrder).options(selectinload(CustomerOrder.lines))
+        ).all()
+    )
     by_shop_num = {
         normalize_order_number(o.external_number): o
         for o in existing
@@ -319,19 +388,15 @@ def sync_shopify_orders(db: Session) -> dict:
         key = normalize_order_number(name)
         if key in by_shop_num:
             existing_order = by_shop_num[key]
-            note = (node.get("note") or "").strip()
-            if note and not (existing_order.note or "").strip():
-                existing_order.note = note[:2000]
-                existing_order.updated_at = datetime.now()
+            if existing_order.status != "shipped":
+                _refresh_existing_shop_order(existing_order, node)
             skipped += 1
             continue
         found = by_any_num.get(key)
         if found is not None and found.origin == "manual":
             found.origin = "shopify"
             found.external_number = name[:80]
-            note = (node.get("note") or "").strip()
-            if note:
-                found.note = note[:2000]
+            _refresh_existing_shop_order(found, node)
             found.updated_at = datetime.now()
             claimed += 1
             by_shop_num[key] = found
@@ -340,12 +405,10 @@ def sync_shopify_orders(db: Session) -> dict:
             skipped += 1
             continue
 
-        raw_lines = ((node.get("lineItems") or {}).get("nodes")) or []
+        raw_lines = _usable_line_items(node)
         prepared: list[tuple[str, Decimal, Product | None, str | None]] = []
         for item in raw_lines:
             qty = _line_qty(item)
-            if qty <= 0:
-                continue
             sku = item.get("sku") or ((item.get("variant") or {}).get("sku"))
             title = item.get("title") or ""
             variant_title = item.get("variantTitle")
