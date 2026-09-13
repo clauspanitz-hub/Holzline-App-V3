@@ -4085,25 +4085,29 @@
 
       <h3>Zur Prüfung {#if reviewOrders.length}<span class="empty">({reviewOrders.length})</span>{/if}</h3>
       {#if reviewOrders.length}
-        <div class="table-wrap">
-          {#each reviewOrders as order}
-            <article class="card" style="margin-bottom:1rem">
+        <div class="review-orders">
+          {#each reviewOrders as order (order.id)}
+            <article class="review-order">
               <h3>{order.customer_name || order.external_number || `Bestellung ${order.id}`}</h3>
               <p class="empty">{formatDateTime(order.ordered_on)} · {orderOriginLabel(order.origin)} · {order.external_number || ''}</p>
-              {#each order.lines as ln}
-                <div class="order-line" style="margin-top:0.6rem">
-                  <p style="margin:0 0 0.3rem">{formatQty(ln.quantity)}× {ln.label}</p>
-                  <label>Produkt
+              {#each order.lines as ln (ln.id)}
+                <div class="review-line">
+                  <p class="review-line-shop">
+                    <span class="review-line-qty">{formatQty(ln.quantity)}×</span>
+                    {ln.label}
+                  </p>
+                  <label class="review-line-assign">Lagerprodukt
                     <FamilySelect
                       value={ln.product_id || ''}
                       items={products}
                       emptyLabel="unzugeordnet"
+                      inline
                       onchange={(v) => setReviewLineProduct(order, ln, v)}
                     />
                   </label>
                 </div>
               {/each}
-              <div class="row-actions" style="margin-top:0.8rem">
+              <div class="row-actions">
                 <button type="button" class="btn" onclick={() => approveOrder(order)} disabled={saving}>Abnicken</button>
                 <button type="button" class="btn secondary" onclick={() => deleteOrder(order)} disabled={saving}>Löschen</button>
               </div>
