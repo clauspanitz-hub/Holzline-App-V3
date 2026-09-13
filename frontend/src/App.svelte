@@ -3779,7 +3779,15 @@
             <blockquote class="tageslage-quote">{tageslage.quote}</blockquote>
           {/if}
           {#if tageslage.error}
-            <p class="empty">Hinweis: Kurzlage ggf. unvollständig ({tageslage.error === 'model_404' ? 'Modell' : 'API'}).</p>
+            <p class="empty">
+              {#if tageslage.error === 'rate_limit'}
+                Gemini-Kontingent erreicht — Fallback aktiv. Später „Aktualisieren“.
+              {:else if tageslage.error === 'model_404'}
+                Gemini-Modell nicht gefunden — Fallback aktiv.
+              {:else}
+                Kurzlage ggf. unvollständig (API) — Fallback aktiv.
+              {/if}
+            </p>
           {/if}
         {:else}
           <p class="empty">Tageslage noch nicht geladen.</p>

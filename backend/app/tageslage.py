@@ -121,13 +121,42 @@ def _normalize_steps(raw_steps: object, allowed_todo_ids: set[int]) -> list[dict
     return out
 
 
+def _fallback_steps(stats: dict) -> list[dict]:
+    """Ohne Gemini: bis zu 3 Schritte aus offenen Todos."""
+    items = stats.get("todo_items") or []
+    out = []
+    for item in items[:3]:
+        kind = item.get("kind")
+        name = item.get("product_name") or item.get("title") or "Todo"
+        qty = item.get("quantity") or "1"
+        if kind == "manufacture":
+            text = f"Fertige {qty}× {name} — bringt dich dem Versand näher."
+        elif kind == "create_article":
+            text = f"Lege „{name}“ an — dann kann die Bestellung weiterlaufen."
+        else:
+            text = f"Erledige: {item.get('title') or name}"
+        out.append({"text": text[:240], "todo_id": item.get("id")})
+    if not out:
+        out = [
+            {
+                "text": "Schau in die kritischen Artikel — oft steckt dort die nächste sinnvolle Werkstatt-Aktion.",
+                "todo_id": None,
+            },
+            {
+                "text": "Prüfe offene Shop-Zuordnungen unter Bestellungen — klare Stammdaten sparen später Zeit.",
+                "todo_id": None,
+            },
+        ]
+    return out[:3]
+
+
 def _call_gemini(stats: dict) -> tuple[str, str, list[dict], str | None]:
     """Returns summary, quote, steps, error."""
     if not gemini_configured():
         return (
-            "Kurzlage nicht verfügbar (kein Gemini-Schlüssel).",
-            "",
-            [],
+            "Kurzlage nicht verfügbar (kein Gemini-Schlüssel). Kennzahlen und nächste Schritte bleiben.",
+            "Auch ohne KI gilt: ein klarer nächster Schritt schlägt zehn offene Tabs.",
+            _fallback_steps(stats),
             None,
         )
     model = (settings.gemini_model or "gemini-3.8-flash").strip()
@@ -156,10 +185,17 @@ def _call_gemini(stats: dict) -> tuple[str, str, list[dict], str | None]:
         )
         if response.status_code == 404:
             return (
-                f"Kurzlage nicht verfügbar (Modell „{model}“ nicht gefunden).",
-                "",
-                [],
+                f"Kurzlage nicht verfügbar (Modell „{model}“). Kennzahlen und nächste Schritte bleiben.",
+                "Auch ohne KI gilt: ein klarer nächster Schritt schlägt zehn offene Tabs.",
+                _fallback_steps(stats),
                 "model_404",
+            )
+        if response.status_code == 429:
+            return (
+                "Kurzlage kurz pausiert (Gemini-Kontingent). Kennzahlen und nächste Schritte aus den Todos.",
+                "Pause ist produktiv: erst erledigen, dann neu abrufen.",
+                _fallback_steps(stats),
+                "rate_limit",
             )
         response.raise_for_status()
         body = response.json()
@@ -170,13 +206,20 @@ def _call_gemini(stats: dict) -> tuple[str, str, list[dict], str | None]:
     except Exception as exc:
         safe = _redact_secret(str(exc))
         log.warning("Tageslage Gemini fehlgeschlagen: %s", safe)
-        return ("Kurzlage nicht verfügbar.", "", [], safe)
+        return (
+            "Kurzlage nicht verfügbar. Kennzahlen und nächste Schritte aus den Todos.",
+            "Auch ohne KI gilt: ein klarer nächster Schritt schlägt zehn offene Tabs.",
+            _fallback_steps(stats),
+            safe,
+        )
 
     data = _parse_gemini_payload(text)
     summary = str(data.get("summary") or "").strip() or "Kurzlage ohne Text."
     quote = str(data.get("quote") or "").strip()
     allowed = {int(t["id"]) for t in stats.get("todo_items") or []}
     steps = _normalize_steps(data.get("next_steps"), allowed)
+    if not steps:
+        steps = _fallback_steps(stats)
     return summary, quote, steps, None
 
 
