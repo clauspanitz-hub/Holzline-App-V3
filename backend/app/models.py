@@ -497,3 +497,22 @@ class TageslageCache(Base):
     next_steps_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class IncomingMail(Base):
+    """IMAP-Rohmail in der Warteschlange (Etsy-Parser u. a.)."""
+
+    __tablename__ = "incoming_mails"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    origin: Mapped[str] = mapped_column(String(20), nullable=False, default="etsy")
+    message_id: Mapped[str] = mapped_column(String(300), nullable=False, unique=True)
+    subject: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    from_addr: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    body_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    # pending | duplicate | error
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)

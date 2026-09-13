@@ -185,6 +185,20 @@ GEMINI_MODEL=gemini-3.1-flash-lite
 
 Ohne Key bleibt manuelle Zuordnung plus gemerkte **Shop-Zuordnung**.
 
+Optional für **Etsy-Mail-Eingang** (IMAP-Warteschlange, ADR `0018`):
+
+```
+IMAP_HOST=mail.example.com
+IMAP_PORT=993
+IMAP_USER=etsy-bestellungen@…
+IMAP_PASSWORD=…
+IMAP_FOLDER=INBOX
+IMAP_PROCESSED_FOLDER=verarbeitet
+IMAP_POLL_HOURS=6
+```
+
+Ohne IMAP bleibt Shopify/Schnellerfassung; der Etsy-Parse-Knopf meldet fehlende Konfiguration. Gemini-Key wird fürs Parsen und für Vorschläge benötigt.
+
 ### C7. Externer Zugang (MyFRITZ + Caddy HTTPS)
 
 Auf dem Proxmox-Host läuft Caddy. Holzlinge:

@@ -16,6 +16,13 @@ services:
       SHOPIFY_API_VERSION: ${SHOPIFY_API_VERSION:-2026-01}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite}
+      IMAP_HOST: ${IMAP_HOST:-}
+      IMAP_PORT: ${IMAP_PORT:-993}
+      IMAP_USER: ${IMAP_USER:-}
+      IMAP_PASSWORD: ${IMAP_PASSWORD:-}
+      IMAP_FOLDER: ${IMAP_FOLDER:-INBOX}
+      IMAP_PROCESSED_FOLDER: ${IMAP_PROCESSED_FOLDER:-verarbeitet}
+      IMAP_POLL_HOURS: ${IMAP_POLL_HOURS:-6}
     volumes:
       - holzlinge_data:/data
     restart: unless-stopped

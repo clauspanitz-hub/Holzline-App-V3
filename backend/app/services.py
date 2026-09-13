@@ -3071,6 +3071,84 @@ def import_shopify_orders(db: Session) -> "ShopifyOrderSyncResult":
     return ShopifyOrderSyncResult.model_validate(result)
 
 
+def list_etsy_mails(db: Session) -> list["IncomingMailRead"]:
+    from app.etsy_mail import list_queue
+    from app.schemas import IncomingMailRead
+
+    rows = list_queue(db)
+    out: list[IncomingMailRead] = []
+    for row in rows:
+        preview = (row.body_text or "").strip().replace("\n", " ")
+        if len(preview) > 240:
+            preview = preview[:240] + "…"
+        out.append(
+            IncomingMailRead(
+                id=row.id,
+                origin=row.origin,
+                subject=row.subject,
+                from_addr=row.from_addr,
+                status=row.status,
+                error_message=row.error_message,
+                body_preview=preview,
+                received_at=row.received_at,
+                created_at=row.created_at,
+            )
+        )
+    return out
+
+
+def fetch_etsy_mails(db: Session) -> dict:
+    from app.etsy_mail import fetch_new_mails, imap_configured
+
+    if not imap_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="IMAP nicht konfiguriert (IMAP_HOST, IMAP_USER, IMAP_PASSWORD)",
+        )
+    result = fetch_new_mails(db)
+    db.commit()
+    return result
+
+
+def parse_etsy_mails(db: Session) -> "EtsyMailParseResult":
+    from app.etsy_mail import fetch_new_mails, imap_configured, parse_pending_mails
+    from app.gemini_suggest import suggest_unmatched_shop_lines
+    from app.schemas import EtsyMailParseResult
+
+    fetched = 0
+    errors: list[str] = []
+    if imap_configured():
+        fetch_result = fetch_new_mails(db)
+        fetched = int(fetch_result.get("fetched") or 0)
+        errors.extend(fetch_result.get("errors") or [])
+    else:
+        errors.append("IMAP nicht konfiguriert — nur vorhandene Warteschlange")
+
+    parse_result = parse_pending_mails(db)
+    suggested, gemini_error = suggest_unmatched_shop_lines(db, origin="etsy")
+    if gemini_error:
+        errors.append(gemini_error)
+    for err in parse_result.get("errors") or []:
+        if err not in errors:
+            errors.append(err)
+    db.commit()
+    return EtsyMailParseResult(
+        fetched=fetched,
+        created=int(parse_result.get("created") or 0),
+        duplicates=int(parse_result.get("duplicates") or 0),
+        failed=int(parse_result.get("failed") or 0),
+        suggested=suggested,
+        errors=errors,
+    )
+
+
+def ignore_etsy_mail(db: Session, mail_id: int) -> None:
+    from app.etsy_mail import ignore_mail
+
+    ignore_mail(db, mail_id)
+    db.commit()
+
+
 def list_todos(
     db: Session,
     category: str | None = None,

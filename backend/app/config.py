@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     shopify_api_version: str = "2026-01"
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.1-flash-lite"
+    imap_host: str | None = None
+    imap_port: int = 993
+    imap_user: str | None = None
+    imap_password: str | None = None
+    imap_folder: str = "INBOX"
+    imap_processed_folder: str = "verarbeitet"
+    imap_poll_hours: float = 6.0
 
     @field_validator("gemini_model", mode="before")
     @classmethod

@@ -720,6 +720,27 @@ class ShopifyOrderSyncResult(BaseModel):
     errors: list[str] = []
 
 
+class IncomingMailRead(BaseModel):
+    id: int
+    origin: str
+    subject: str | None = None
+    from_addr: str | None = None
+    status: str
+    error_message: str | None = None
+    body_preview: str = ""
+    received_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+class EtsyMailParseResult(BaseModel):
+    fetched: int = 0
+    created: int = 0
+    duplicates: int = 0
+    failed: int = 0
+    suggested: int = 0
+    errors: list[str] = []
+
+
 class TodoRead(BaseModel):
     id: int
     order_id: int

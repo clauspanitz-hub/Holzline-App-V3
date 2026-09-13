@@ -186,6 +186,7 @@ def init_db() -> None:
         migrate_order_origin(engine)
         migrate_shop_line_maps(engine)
         migrate_tageslage_cache(engine)
+        migrate_incoming_mails(engine)
         migrate_color_hex(engine, db)
         migrate_material_decimal_places(engine)
         seed_admin_user(db)
@@ -540,6 +541,33 @@ def migrate_tageslage_cache(engine) -> None:
                     summary TEXT NOT NULL DEFAULT '',
                     quote TEXT NOT NULL DEFAULT '',
                     next_steps_json TEXT NOT NULL DEFAULT '[]',
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+
+
+def migrate_incoming_mails(engine) -> None:
+    """IMAP-Warteschlange für Etsy-Mails (ADR 0018)."""
+    insp = inspect(engine)
+    if "incoming_mails" in set(insp.get_table_names()):
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE incoming_mails (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    origin VARCHAR(20) NOT NULL DEFAULT 'etsy',
+                    message_id VARCHAR(300) NOT NULL UNIQUE,
+                    subject VARCHAR(500),
+                    from_addr VARCHAR(300),
+                    body_text TEXT NOT NULL DEFAULT '',
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    error_message VARCHAR(500),
+                    received_at DATETIME,
                     created_at DATETIME NOT NULL,
                     updated_at DATETIME NOT NULL
                 )

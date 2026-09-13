@@ -50,6 +50,8 @@
   let sellingPriceStage = $state('ask')
   let sellingPricePicks = $state({})
   let shippedOrdersOpen = $state(false)
+  let manualOrderOpen = $state(false)
+  let etsyMails = $state([])
   let colorSuggestions = $state([])
   let loading = $state(true)
   let flash = $state(null)
@@ -810,6 +812,40 @@
     }
   }
 
+  async function parseEtsyMails() {
+    saving = true
+    try {
+      const result = await api.orders.parseEtsyMails()
+      loadedBuckets.orders = false
+      await refresh()
+      const bits = []
+      if (result.fetched) bits.push(`${result.fetched} geholt`)
+      if (result.created) bits.push(`${result.created} Bestellung`)
+      if (result.suggested) bits.push(`${result.suggested} Vorschlag`)
+      if (result.duplicates) bits.push(`${result.duplicates} Doppel`)
+      if (result.failed) bits.push(`${result.failed} Fehler`)
+      showFlash('ok', bits.length ? `Etsy-Mail: ${bits.join(', ')}.` : 'Etsy-Mail: nichts Neues.')
+      if (result.errors?.length) showFlash('error', result.errors[0])
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function ignoreEtsyMail(mail) {
+    saving = true
+    try {
+      await api.orders.ignoreEtsyMail(mail.id)
+      etsyMails = etsyMails.filter((m) => m.id !== mail.id)
+      showFlash('ok', 'Mail ignoriert.')
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
   async function approveOrder(order) {
     saving = true
     try {
@@ -1435,11 +1471,14 @@
       }
       if (['overview', 'orders', 'todos'].includes(t) && !loadedBuckets.orders) {
         jobs.push(
-          Promise.all([api.orders.list(), api.todos.list()]).then(([o, td]) => {
-            orders = o
-            todos = td
-            loadedBuckets.orders = true
-          }),
+          Promise.all([api.orders.list(), api.todos.list(), api.orders.listEtsyMails().catch(() => [])]).then(
+            ([o, td, mails]) => {
+              orders = o
+              todos = td
+              etsyMails = mails || []
+              loadedBuckets.orders = true
+            },
+          ),
         )
       }
       if (['sets', 'import'].includes(t) && !loadedBuckets.sets) {
@@ -4288,11 +4327,43 @@
     <section class="panel">
       <div class="panel-header">
         <h2>Bestellungen</h2>
-        <button type="button" class="btn secondary" onclick={syncShopifyOrders} disabled={saving}>Shopify abrufen</button>
+        <div class="row-actions">
+          <button type="button" class="btn secondary" onclick={syncShopifyOrders} disabled={saving}>Shopify abrufen</button>
+          <button type="button" class="btn secondary" onclick={parseEtsyMails} disabled={saving}>Etsy-Mails parsen</button>
+        </div>
       </div>
       <p class="empty" style="margin-top:0">
-        Oben Aufträge zur Prüfung (Shop, unklare Zuordnung). Dann aktuelle Aufträge (offen und versandbereit). Darunter Schnellerfassung. Versendete unten ausklappbar.
+        Oben Etsy-Mail-Warteschlange und Aufträge zur Prüfung. Dann aktuelle Aufträge. Schnellerfassung zugeklappt. Versendete unten.
       </p>
+
+      <h3>Etsy-Mails {#if etsyMails.length}<span class="empty">({etsyMails.length})</span>{/if}</h3>
+      {#if etsyMails.length}
+        <div class="review-orders">
+          {#each etsyMails as mail (mail.id)}
+            <article class="review-order">
+              <h3>{mail.subject || `Mail ${mail.id}`}</h3>
+              <p class="empty">
+                {mail.status === 'duplicate' ? 'Doppel' : mail.status === 'error' ? 'Fehler' : 'wartet'}
+                {#if mail.from_addr} · {mail.from_addr}{/if}
+              </p>
+              {#if mail.error_message}
+                <p class="flash error" style="margin:.35rem 0">{mail.error_message}</p>
+              {/if}
+              {#if mail.body_preview}
+                <p class="empty" style="white-space:pre-wrap">{mail.body_preview}</p>
+              {/if}
+              <div class="row-actions">
+                <button type="button" class="btn secondary" onclick={() => ignoreEtsyMail(mail)} disabled={saving}>Ignorieren</button>
+                {#if mail.status === 'pending'}
+                  <span class="empty">Wird beim Parsen verarbeitet</span>
+                {/if}
+              </div>
+            </article>
+          {/each}
+        </div>
+      {:else}
+        <p class="empty">Keine Mails in der Warteschlange. „Etsy-Mails parsen“ holt zuerst neue aus dem Postfach.</p>
+      {/if}
 
       <h3>Zur Prüfung {#if reviewOrders.length}<span class="empty">({reviewOrders.length})</span>{/if}</h3>
       {#if reviewOrders.length}
@@ -4368,8 +4439,11 @@
       <h3 style="margin-top:1.5rem">Aktuelle Bestellungen</h3>
       {@render ordersMarkup(currentOrders, 'Keine aktuellen Bestellungen.')}
 
-      <h3 style="margin-top:1.5rem">Neue Bestellung</h3>
-      <form class="form-grid" onsubmit={(e) => { e.preventDefault(); submitOrder() }}>
+      <button type="button" class="group-toggle overview-section-toggle" style="margin-top:1.5rem" onclick={() => (manualOrderOpen = !manualOrderOpen)}>
+        {manualOrderOpen ? '▼' : '▶'} Neue Bestellung (Schnellerfassung)
+      </button>
+      {#if manualOrderOpen}
+      <form class="form-grid" style="margin-top:.75rem" onsubmit={(e) => { e.preventDefault(); submitOrder() }}>
         <label>Datum und Uhrzeit<input type="datetime-local" bind:value={orderForm.ordered_on} required /></label>
         <label>Kunde (optional)<input bind:value={orderForm.customer_name} placeholder="Name" /></label>
         <label>Nummer (optional)<input bind:value={orderForm.external_number} placeholder="später Shopify/Etsy" /></label>
@@ -4401,6 +4475,7 @@
           <button class="btn" type="submit" disabled={saving}>Bestellung anlegen</button>
         </div>
       </form>
+      {/if}
 
       <button type="button" class="group-toggle overview-section-toggle" style="margin-top:1.5rem" onclick={() => (shippedOrdersOpen = !shippedOrdersOpen)}>
         {shippedOrdersOpen ? '▼' : '▶'} Versendete Bestellungen

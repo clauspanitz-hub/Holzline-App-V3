@@ -45,6 +45,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **todos:** Arten Artikel anlegen / Fertigen (Einkauf-Filter vorbereitet); halten Bestellung auf **offen**
 - **shop_line_maps:** gemerkte Shop-Zuordnung (Herkunft + Titel/SKU → Produkt); Gemini nur Vorschlag (ADR `0014`)
 - **tageslage_cache:** ein Eintrag pro Kalendertag (Zusammenfassung, Spruch, Nächste Schritte; ADR `0016`)
+- **incoming_mails:** IMAP-Warteschlange (Rohtext; Etsy-Parser → Bestellung zur Prüfung; ADR `0018`)
 
 **Einheiten:** `Stk`, `m`, `kg`, `g`, `m²`, `l`, `ml`
 
@@ -79,7 +80,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Shop-Zuordnung merken + Gemini-Vorschlag nach Abruf (ADR `0014`; `GEMINI_API_KEY` optional; Free + Default `gemini-3.1-flash-lite`, ADR `0017`)
 - [x] Prüfung: Produkt erzeugen / Auf Liste; Status an offene Todos; Hinweis (ADR `0015`)
 - [x] Übersicht: Tageslage (Kennzahlen + Gemini-Text/Spruch/Nächste Schritte, Tages-Cache; ADR `0016`)
-- [ ] Etsy-Mail + Gemini (Hintergrund) → dieselben Bestellungen **zur Prüfung**; Etsy-API falls/wenn Freigabe; kein CSV-Bestellexport
+- [x] Etsy-Mail + Gemini (IMAP-Warteschlange, seltener Auto-Fetch, Parse-Knopf; ADR `0018`) → **zur Prüfung**; Etsy-API falls/wenn Freigabe; kein CSV-Bestellexport
 - [ ] Zusammenstellen bei Set-Bestellung (nach hinten)
 - [ ] Einkauf-Todos aus Mindestbestand (Liste/Filter schon vorbereitet)
 

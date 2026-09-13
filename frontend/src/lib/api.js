@@ -224,6 +224,9 @@ export const api = {
     remove: (id) => request(`/api/orders/${id}`, { method: 'DELETE' }),
     approve: (id) => request(`/api/orders/${id}/approve`, { method: 'POST' }),
     syncShopify: () => request('/api/orders/shopify-sync', { method: 'POST' }),
+    listEtsyMails: () => request('/api/orders/etsy-mails'),
+    parseEtsyMails: () => request('/api/orders/etsy-mails/parse', { method: 'POST' }),
+    ignoreEtsyMail: (id) => request(`/api/orders/etsy-mails/${id}/ignore`, { method: 'POST' }),
     linkLine: (orderId, lineId, body) =>
       request(`/api/orders/${orderId}/lines/${lineId}`, { method: 'PATCH', body: JSON.stringify(body) }),
     queueCreate: (orderId, lineId) =>

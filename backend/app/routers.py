@@ -67,6 +67,8 @@ from app.schemas import (
     OrderLineLink,
     OrderRead,
     OrderUpdate,
+    IncomingMailRead,
+    EtsyMailParseResult,
     ShopifyOrderSyncResult,
     TageslageRead,
     TodoRead,
@@ -577,6 +579,26 @@ def create_order(payload: OrderCreate, db: Session = Depends(get_db)) -> OrderRe
 @router.post("/orders/shopify-sync", response_model=ShopifyOrderSyncResult)
 def sync_shopify_orders(db: Session = Depends(get_db)) -> ShopifyOrderSyncResult:
     return services.import_shopify_orders(db)
+
+
+@router.get("/orders/etsy-mails", response_model=list[IncomingMailRead])
+def get_etsy_mails(db: Session = Depends(get_db)) -> list[IncomingMailRead]:
+    return services.list_etsy_mails(db)
+
+
+@router.post("/orders/etsy-mails/fetch")
+def fetch_etsy_mails(db: Session = Depends(get_db)) -> dict:
+    return services.fetch_etsy_mails(db)
+
+
+@router.post("/orders/etsy-mails/parse", response_model=EtsyMailParseResult)
+def parse_etsy_mails(db: Session = Depends(get_db)) -> EtsyMailParseResult:
+    return services.parse_etsy_mails(db)
+
+
+@router.post("/orders/etsy-mails/{mail_id}/ignore", status_code=204)
+def ignore_etsy_mail(mail_id: int, db: Session = Depends(get_db)) -> None:
+    services.ignore_etsy_mail(db, mail_id)
 
 
 @router.post("/orders/{order_id}/approve", response_model=OrderRead)
