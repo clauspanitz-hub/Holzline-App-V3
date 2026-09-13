@@ -3,7 +3,7 @@ from decimal import Decimal
 from math import floor
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -2780,12 +2780,30 @@ def _order_load(db: Session, order_id: int) -> CustomerOrder:
     return order
 
 
-def _refresh_order_status(order: CustomerOrder) -> None:
+def _open_todo_count(db: Session, order_id: int) -> int:
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(WorkTodo)
+            .where(WorkTodo.order_id == order_id, WorkTodo.status == "open")
+        )
+        or 0
+    )
+
+
+def _refresh_order_status(db: Session, order: CustomerOrder) -> None:
     if order.status in ("shipped", "review"):
         return
-    has_open = any(t.status == "open" for t in order.todos)
-    order.status = "open" if has_open else "ready"
+    # Explizite Query: ORM-Collection kann nach Todo-Anlage leer/stale sein.
+    order.status = "open" if _open_todo_count(db, order.id) else "ready"
     order.updated_at = _utcnow()
+
+
+def _complete_create_article_todos(line: OrderLine) -> None:
+    for todo in list(line.todos):
+        if todo.status == "open" and todo.kind == "create_article":
+            todo.status = "done"
+            todo.completed_at = _utcnow()
 
 
 def _needs_manufacture(db: Session, product: Product, qty: Decimal) -> bool:
@@ -2867,7 +2885,7 @@ def create_order(db: Session, payload: "OrderCreate") -> "OrderRead":
         _sync_line_todos(db, line)
     db.flush()
     order = _order_load(db, order.id)
-    _refresh_order_status(order)
+    _refresh_order_status(db, order)
     db.commit()
     return _order_read(_order_load(db, order.id))
 
@@ -2879,6 +2897,7 @@ def list_orders(db: Session, status: str | None = None) -> list["OrderRead"]:
         .options(
             selectinload(CustomerOrder.lines).selectinload(OrderLine.product),
             selectinload(CustomerOrder.lines).selectinload(OrderLine.material),
+            selectinload(CustomerOrder.lines).selectinload(OrderLine.suggested_product),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.product),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.material),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.order),
@@ -2886,7 +2905,17 @@ def list_orders(db: Session, status: str | None = None) -> list["OrderRead"]:
     )
     if status in ("review", "open", "ready", "shipped"):
         stmt = stmt.where(CustomerOrder.status == status)
-    rows = db.scalars(stmt).unique().all()
+    rows = list(db.scalars(stmt).unique().all())
+    dirty = False
+    for row in rows:
+        if row.status in ("open", "ready"):
+            before = row.status
+            _refresh_order_status(db, row)
+            if row.status != before:
+                dirty = True
+    if dirty:
+        db.commit()
+        rows = list(db.scalars(stmt).unique().all())
     return [_order_read(row, include_line_todos=False) for row in rows]
 
 
@@ -2906,7 +2935,7 @@ def update_order(db: Session, order_id: int, payload: "OrderUpdate") -> "OrderRe
     if "external_number" in data:
         order.external_number = (data["external_number"] or "").strip() or None
     if data.get("status") == "shipped":
-        _refresh_order_status(order)
+        _refresh_order_status(db, order)
         if order.status == "open":
             raise HTTPException(status_code=400, detail="Bestellung hat noch offene Todos")
         order.status = "shipped"
@@ -2965,15 +2994,47 @@ def link_order_line(db: Session, order_id: int, line_id: int, payload: "OrderLin
         raise HTTPException(status_code=400, detail="Produkt, Material oder Menge angeben")
     if payload.quantity is not None:
         line.quantity = _q(payload.quantity)
+    if payload.product_id or payload.material_id:
+        _complete_create_article_todos(line)
     if order.status != "review":
         _sync_line_todos(db, line)
         db.flush()
         order = _order_load(db, order_id)
-        _refresh_order_status(order)
+        _refresh_order_status(db, order)
     else:
         db.flush()
     db.commit()
     return _order_read(_order_load(db, order_id), notices=notices)
+
+
+def queue_create_article(db: Session, order_id: int, line_id: int) -> "OrderRead":
+    """Vormerken: Todo Artikel anlegen (auch zur Prüfung). Kein Duplikat."""
+    order = _order_load(db, order_id)
+    line = next((ln for ln in order.lines if ln.id == line_id), None)
+    if line is None:
+        raise HTTPException(status_code=404, detail="Position nicht gefunden")
+    if line.product_id is not None or line.material_id is not None:
+        raise HTTPException(status_code=400, detail="Position ist bereits zugeordnet")
+    existing = next(
+        (t for t in line.todos if t.status == "open" and t.kind == "create_article"),
+        None,
+    )
+    if existing is not None:
+        return _order_read(order, notices=["bereits vorgemerkt"])
+    label = (line.shop_title or line.label or "Artikel").strip()
+    db.add(
+        WorkTodo(
+            order_id=order.id,
+            order_line_id=line.id,
+            kind="create_article",
+            category="workshop",
+            status="open",
+            title=f"Artikel anlegen: {label}",
+            quantity=_q(line.quantity),
+        )
+    )
+    db.commit()
+    return _order_read(_order_load(db, order_id), notices=["vorgemerkt"])
 
 
 def approve_order(db: Session, order_id: int) -> "OrderRead":
@@ -2985,7 +3046,7 @@ def approve_order(db: Session, order_id: int) -> "OrderRead":
     db.flush()
     order = _order_load(db, order_id)
     order.status = "open"
-    _refresh_order_status(order)
+    _refresh_order_status(db, order)
     db.commit()
     return _order_read(_order_load(db, order_id))
 
@@ -3040,7 +3101,7 @@ def complete_todo(db: Session, todo_id: int) -> "TodoRead":
     todo.completed_at = _utcnow()
     db.flush()
     order = _order_load(db, todo.order_id)
-    _refresh_order_status(order)
+    _refresh_order_status(db, order)
     db.commit()
     db.refresh(todo)
     todo = db.scalars(

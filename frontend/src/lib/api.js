@@ -226,6 +226,8 @@ export const api = {
     syncShopify: () => request('/api/orders/shopify-sync', { method: 'POST' }),
     linkLine: (orderId, lineId, body) =>
       request(`/api/orders/${orderId}/lines/${lineId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    queueCreate: (orderId, lineId) =>
+      request(`/api/orders/${orderId}/lines/${lineId}/queue-create`, { method: 'POST' }),
   },
   todos: {
     list: ({ category, status } = {}) => {

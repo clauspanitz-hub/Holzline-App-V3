@@ -598,6 +598,11 @@ def link_order_line(
     return services.link_order_line(db, order_id, line_id, payload)
 
 
+@router.post("/orders/{order_id}/lines/{line_id}/queue-create", response_model=OrderRead)
+def queue_create_article(order_id: int, line_id: int, db: Session = Depends(get_db)) -> OrderRead:
+    return services.queue_create_article(db, order_id, line_id)
+
+
 @router.get("/todos", response_model=list[TodoRead])
 def list_todos(
     category: Literal["workshop", "purchase"] | None = None,

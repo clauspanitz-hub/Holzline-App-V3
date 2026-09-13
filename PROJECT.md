@@ -71,6 +71,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Manuelle Schnellerfassung + Todo-Liste (Artikel anlegen / Fertigen; kein Set-Zusammenstellen in diesem Schnitt)
 - [x] Shopify-API → Bestellungen (bezahlt, nicht voll erfüllt; Match → offen+Todos, sonst **zur Prüfung**; Polling; Dev-Dashboard Client-Credentials `SHOPIFY_STORE` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET`; Versendet manuell)
 - [x] Shop-Zuordnung merken + Gemini-Vorschlag nach Abruf (ADR `0014`; `GEMINI_API_KEY` optional)
+- [x] Prüfung: Produkt erzeugen / Auf Liste; Status an offene Todos; Hinweis (ADR `0015`)
 - [ ] Etsy-Mail + Gemini (Hintergrund) → dieselben Bestellungen **zur Prüfung**; Etsy-API falls/wenn Freigabe; kein CSV-Bestellexport
 - [ ] Zusammenstellen bei Set-Bestellung (nach hinten)
 - [ ] Einkauf-Todos aus Mindestbestand (Liste/Filter schon vorbereitet)

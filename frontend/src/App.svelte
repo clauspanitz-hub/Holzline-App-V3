@@ -258,6 +258,29 @@
     return 'offen'
   }
 
+  function orderOpenTodoHint(order) {
+    const open = (order.todos || []).filter((t) => t.status === 'open')
+    if (!open.length) return ''
+    const fertigen = open.filter((t) => t.kind === 'manufacture').length
+    const anlegen = open.filter((t) => t.kind === 'create_article').length
+    const bits = []
+    if (fertigen) bits.push(`${fertigen}× Fertigen`)
+    if (anlegen) bits.push(`${anlegen}× Anlegen`)
+    if (!bits.length) bits.push(`${open.length} offen`)
+    return bits.join(', ')
+  }
+
+  function lineHasCreateTodo(order, line) {
+    return (order.todos || []).some(
+      (t) => t.order_line_id === line.id && t.status === 'open' && t.kind === 'create_article',
+    )
+  }
+
+  function orderLineForTodo(todo) {
+    const order = orders.find((o) => o.id === todo.order_id)
+    return order?.lines?.find((ln) => ln.id === todo.order_line_id) || null
+  }
+
   function orderOriginLabel(origin) {
     if (origin === 'shopify') return 'Shopify'
     if (origin === 'etsy') return 'Etsy'
@@ -678,6 +701,12 @@
       return
     }
     if (todo.kind === 'create_article') {
+      const order = orders.find((o) => o.id === todo.order_id)
+      const line = orderLineForTodo(todo)
+      if (order && (order.origin === 'shopify' || order.origin === 'etsy')) {
+        openCreateProductFromOrderLine(order, line || { label: todoLabelForCreate(todo), quantity: todo.quantity })
+        return
+      }
       articleChoiceTodo = todo
     }
   }
@@ -1994,7 +2023,7 @@
     captureEditBaseline('material')
   }
 
-  function openCreateProduct(template = null, { name = '', orderLink = null } = {}) {
+  function openCreateProduct(template = null, { name = '', sku = '', family = '', mediumId = '', colorId = '', orderLink = null } = {}) {
     editNav = null
     productForm = emptyProduct()
     productForm.location_id = String(locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || '')
@@ -2018,7 +2047,77 @@
       showProductTags = productForm.tagIds.length > 0
     }
     if (name) productForm.name = name
+    if (sku) productForm.sku = sku
+    if (family) productForm.family = family
+    if (mediumId) productForm.medium_id = String(mediumId)
+    if (colorId) productForm.color_id = String(colorId)
     productModal = { mode: 'create', product: null, templateBom: template?.bom ? [...template.bom] : [], orderLink }
+  }
+
+  /** Shop-Titel → Farbe (eindeutig) + Familie/Basis als Vorschlag. */
+  function suggestPrefillFromShopLine(line) {
+    const title = String(line?.shop_title || line?.label || '').trim()
+    const sku = String(line?.shop_sku || '').trim()
+    const tokens = title.split(/[\s,;|/–—\-]+/).filter((t) => t.length > 1)
+    const hitIds = new Set()
+    const hits = []
+    for (const token of tokens) {
+      for (const c of matchColorsPool(colors, token)) {
+        if (!hitIds.has(c.id)) {
+          hitIds.add(c.id)
+          hits.push(c)
+        }
+      }
+    }
+    for (const c of colors) {
+      if (title.toLowerCase().includes(String(c.name || '').toLowerCase()) && !hitIds.has(c.id)) {
+        hitIds.add(c.id)
+        hits.push(c)
+      }
+    }
+    let colorId = ''
+    let mediumId = ''
+    let family = ''
+    if (hits.length === 1) {
+      const c = hits[0]
+      colorId = String(c.id)
+      mediumId = c.medium_id ? String(c.medium_id) : mediumIdFromColor(c.id)
+      const colorName = c.name
+      let base = title
+      const inRe = new RegExp(`\\s+in\\s+${colorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*$`, 'i')
+      base = base.replace(inRe, '').trim()
+      if (base.toLowerCase().endsWith(colorName.toLowerCase())) {
+        base = base.slice(0, base.length - colorName.length).trim()
+      }
+      base = base.split(/[–—|]/)[0].trim()
+      family = base.slice(0, 120)
+    } else {
+      family = title.split(/[–—|]/)[0].trim().slice(0, 120)
+    }
+    return { name: title, sku, family, mediumId, colorId }
+  }
+
+  function openCreateProductFromOrderLine(order, line) {
+    const pre = suggestPrefillFromShopLine(line)
+    openCreateProduct(null, {
+      ...pre,
+      orderLink: { orderId: order.id, lineId: line.id },
+    })
+  }
+
+  async function queueCreateArticleFromReview(order, line) {
+    saving = true
+    try {
+      const result = await api.orders.queueCreate(order.id, line.id)
+      loadedBuckets.orders = false
+      await refresh()
+      const notice = (result.notices || [])[0]
+      showFlash('ok', notice === 'bereits vorgemerkt' ? 'Bereits vorgemerkt.' : 'Auf Anlege-Liste (Todos).')
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
   }
 
   function openEditProduct(product, { ids, keepNav = false } = {}) {
@@ -3423,7 +3522,12 @@
                   <div>{formatQty(ln.quantity)}× {ln.label}</div>
                 {/each}
               </td>
-              <td>{orderStatusLabel(order.status)}</td>
+              <td>
+                <div>{orderStatusLabel(order.status)}</div>
+                {#if orderOpenTodoHint(order)}
+                  <div class="empty" style="margin:0">{orderOpenTodoHint(order)}</div>
+                {/if}
+              </td>
               <td class="col-actions">
                 {#if order.status === 'ready'}
                   <button type="button" class="btn" onclick={() => markOrderShipped(order)}>Versendet</button>
@@ -3448,7 +3552,10 @@
       {#each rows as order}
         <article class="card" class:empty={order.status === 'shipped'}>
           <h3>{order.customer_name || order.external_number || `Bestellung ${order.id}`}</h3>
-          <p class="empty">{formatDateTime(order.ordered_on)} · {orderOriginLabel(order.origin)} · {orderStatusLabel(order.status)}</p>
+          <p class="empty">
+            {formatDateTime(order.ordered_on)} · {orderOriginLabel(order.origin)} · {orderStatusLabel(order.status)}
+            {#if orderOpenTodoHint(order)} · {orderOpenTodoHint(order)}{/if}
+          </p>
           {#each order.lines as ln}
             <p>{formatQty(ln.quantity)}× {ln.label}</p>
           {/each}
@@ -4135,6 +4242,26 @@
                       onchange={(v) => setReviewLineProduct(order, ln, v)}
                     />
                   </label>
+                  {#if !ln.product_id && !ln.material_id}
+                    <div class="row-actions" style="margin-top:.35rem">
+                      <button
+                        type="button"
+                        class="btn secondary"
+                        disabled={saving}
+                        onclick={() => openCreateProductFromOrderLine(order, ln)}
+                      >Produkt erzeugen</button>
+                      {#if lineHasCreateTodo(order, ln)}
+                        <span class="empty">vorgemerkt</span>
+                      {:else}
+                        <button
+                          type="button"
+                          class="btn secondary"
+                          disabled={saving}
+                          onclick={() => queueCreateArticleFromReview(order, ln)}
+                        >Auf Liste</button>
+                      {/if}
+                    </div>
+                  {/if}
                 </div>
               {/each}
               <div class="row-actions">
