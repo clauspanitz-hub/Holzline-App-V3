@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import datetime
 from decimal import Decimal
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
@@ -16,6 +18,10 @@ from app.models import CustomerOrder, OrderLine, Product
 from app.order_match import match_product_for_shop_line, normalize_order_number
 
 log = logging.getLogger(__name__)
+
+# Poller-Thread und manueller Knopf teilen sich denselben Prozess.
+# Ohne Sperre legen beide dieselbe Shopify-Nummer parallel an.
+_SYNC_LOCK = threading.Lock()
 
 ORDERS_QUERY = """
 query HolzlingeOpenPaidOrders($first: Int!, $after: String, $query: String!) {
@@ -153,17 +159,23 @@ def _customer_name(node: dict) -> str | None:
 
 def sync_shopify_orders(db: Session) -> dict:
     """Neue Shopify-Aufträge anlegen. Idempotent über Herkunft + Nummer."""
+    try:
+        nodes = fetch_open_paid_orders()
+    except Exception as exc:
+        log.warning("Shopify-Abruf fehlgeschlagen: %s", exc)
+        return {"created": 0, "skipped": 0, "claimed": 0, "errors": [str(exc)]}
+
+    with _SYNC_LOCK:
+        return _import_shopify_nodes(db, nodes)
+
+
+def _import_shopify_nodes(db: Session, nodes: list) -> dict:
     from app.services import _order_load, _refresh_order_status, _sync_line_todos
 
     created = 0
     skipped = 0
     claimed = 0
     errors: list[str] = []
-    try:
-        nodes = fetch_open_paid_orders()
-    except Exception as exc:
-        log.warning("Shopify-Abruf fehlgeschlagen: %s", exc)
-        return {"created": 0, "skipped": 0, "claimed": 0, "errors": [str(exc)]}
 
     products = list(
         db.scalars(select(Product).options(selectinload(Product.color))).unique().all()
@@ -181,6 +193,9 @@ def sync_shopify_orders(db: Session) -> dict:
             by_any_num[key] = order
 
     for node in nodes:
+        if not node:
+            skipped += 1
+            continue
         name = (node.get("name") or "").strip()
         if not name:
             skipped += 1
@@ -207,6 +222,8 @@ def sync_shopify_orders(db: Session) -> dict:
         raw_lines = ((node.get("lineItems") or {}).get("nodes")) or []
         prepared: list[tuple[str, Decimal, Product | None]] = []
         for item in raw_lines:
+            if not item:
+                continue
             qty = _line_qty(item)
             if qty <= 0:
                 continue
@@ -223,29 +240,34 @@ def sync_shopify_orders(db: Session) -> dict:
 
         all_matched = all(prod is not None for _, _, prod in prepared)
         status = "open" if all_matched else "review"
-        order = CustomerOrder(
-            ordered_on=_parse_created(node.get("createdAt")),
-            customer_name=_customer_name(node),
-            external_number=name[:80],
-            origin="shopify",
-            status=status,
-        )
-        db.add(order)
-        db.flush()
-        for label, qty, product in prepared:
-            line = OrderLine(
-                order_id=order.id,
-                quantity=qty,
-                label=label,
-                product_id=product.id if product else None,
-            )
-            db.add(line)
-            db.flush()
-            if status == "open":
-                _sync_line_todos(db, line)
-        if status == "open":
-            loaded = _order_load(db, order.id)
-            _refresh_order_status(loaded)
+        try:
+            with db.begin_nested():
+                order = CustomerOrder(
+                    ordered_on=_parse_created(node.get("createdAt")),
+                    customer_name=_customer_name(node),
+                    external_number=name[:80],
+                    origin="shopify",
+                    status=status,
+                )
+                db.add(order)
+                db.flush()
+                for label, qty, product in prepared:
+                    line = OrderLine(
+                        order_id=order.id,
+                        quantity=qty,
+                        label=label,
+                        product_id=product.id if product else None,
+                    )
+                    db.add(line)
+                    db.flush()
+                    if status == "open":
+                        _sync_line_todos(db, line)
+                if status == "open":
+                    loaded = _order_load(db, order.id)
+                    _refresh_order_status(loaded)
+        except IntegrityError:
+            skipped += 1
+            continue
         created += 1
         by_shop_num[key] = order
         by_any_num[key] = order
