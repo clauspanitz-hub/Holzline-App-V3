@@ -36,6 +36,10 @@
   let overviewIncompleteOpen = $state(false)
   let overviewIgnoredOpen = $state(false)
   let overviewOrdersOpen = $state(true)
+  let overviewTodosOpen = $state(true)
+  let overviewTageslageOpen = $state(true)
+  let tageslage = $state(null)
+  let tageslageLoading = $state(false)
   let extraMatCriticalOpen = $state(false)
   let extraMatIncompleteOpen = $state(false)
   let extraMatIgnoredOpen = $state(false)
@@ -45,7 +49,6 @@
   let sellingPriceConflicts = $state(null)
   let sellingPriceStage = $state('ask')
   let sellingPricePicks = $state({})
-  let overviewTodosOpen = $state(true)
   let shippedOrdersOpen = $state(false)
   let colorSuggestions = $state([])
   let loading = $state(true)
@@ -1339,14 +1342,28 @@
     return c ? String(c.medium_id) : ''
   }
 
+  async function loadTageslage({ refresh: force = false } = {}) {
+    if (!authUser || authUser.role === 'mitarbeiter') return
+    tageslageLoading = true
+    try {
+      tageslage = await api.overview.tageslage(force)
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      tageslageLoading = false
+    }
+  }
+
   async function refresh({ silent = false } = {}) {
     loadedBuckets = { catalog: false, inventory: false, orders: false, sets: false, queue: false }
     await ensureTabData({ silent })
+    if (tab === 'overview') await loadTageslage()
   }
 
   async function selectTab(next) {
     tab = next
     await ensureTabData({ silent: true })
+    if (next === 'overview') await loadTageslage()
   }
 
   async function ensureTabData({ silent = false } = {}) {
@@ -3707,6 +3724,66 @@
       </div>
       {#if overviewTodosOpen}
         {@render todosMarkup(overviewOpenTodos, 'Keine offenen Werkstatt-Todos aus Bestellungen.')}
+      {/if}
+    </section>
+
+    <section class="panel tageslage-panel" class:collapsed={!overviewTageslageOpen}>
+      <div class="panel-header">
+        <h2>
+          <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewTageslageOpen = !overviewTageslageOpen)}>
+            {overviewTageslageOpen ? '▼' : '▶'} Tageslage
+            {#if tageslage?.cache_date}<span class="empty">({tageslage.cache_date})</span>{/if}
+          </button>
+        </h2>
+        <button
+          type="button"
+          class="btn secondary"
+          disabled={tageslageLoading || saving}
+          onclick={() => loadTageslage({ refresh: true })}
+        >Aktualisieren</button>
+      </div>
+      {#if overviewTageslageOpen}
+        {#if tageslageLoading && !tageslage}
+          <p class="empty">Lade Tageslage…</p>
+        {:else if tageslage}
+          <div class="tageslage-stats">
+            <span><strong>{tageslage.stats?.current_orders ?? 0}</strong> aktuelle Bestellungen</span>
+            <span><strong>{tageslage.stats?.review_orders ?? 0}</strong> zur Prüfung</span>
+            <span><strong>{tageslage.stats?.open_todos ?? 0}</strong> offene Todos</span>
+            {#if tageslage.stats?.todos_by_kind}
+              <span class="empty">
+                Fertigen {tageslage.stats.todos_by_kind.manufacture || 0}
+                · Anlegen {tageslage.stats.todos_by_kind.create_article || 0}
+              </span>
+            {/if}
+          </div>
+          {#if tageslage.summary}
+            <p class="tageslage-summary">{tageslage.summary}</p>
+          {/if}
+          {#if tageslage.next_steps?.length}
+            <h3 class="tageslage-next-title">Als Nächstes</h3>
+            <ol class="tageslage-next">
+              {#each tageslage.next_steps as step, i (i)}
+                <li>
+                  <span>{step.text}</span>
+                  {#if step.todo_id}
+                    {#each todos.filter((t) => t.id === step.todo_id && t.status === 'open') as todo (todo.id)}
+                      <button type="button" class="btn" onclick={() => startTodo(todo)}>Los</button>
+                    {/each}
+                  {/if}
+                </li>
+              {/each}
+            </ol>
+          {/if}
+          {#if tageslage.quote}
+            <blockquote class="tageslage-quote">{tageslage.quote}</blockquote>
+          {/if}
+          {#if tageslage.error}
+            <p class="empty">Hinweis: Kurzlage ggf. unvollständig ({tageslage.error === 'model_404' ? 'Modell' : 'API'}).</p>
+          {/if}
+        {:else}
+          <p class="empty">Tageslage noch nicht geladen.</p>
+        {/if}
       {/if}
     </section>
 

@@ -14,6 +14,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Table,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -482,3 +483,17 @@ class WorkTodo(Base):
     line: Mapped[OrderLine] = relationship(back_populates="todos")
     product: Mapped[Product | None] = relationship()
     material: Mapped[Material | None] = relationship()
+
+
+class TageslageCache(Base):
+    """Gemini-Text der Tageslage, 1× pro Kalendertag."""
+
+    __tablename__ = "tageslage_cache"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cache_date: Mapped[str] = mapped_column(String(10), nullable=False, unique=True)  # YYYY-MM-DD
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    quote: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    next_steps_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)

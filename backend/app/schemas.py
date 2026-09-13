@@ -778,3 +778,27 @@ class OrderRead(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     notices: list[str] = []
+
+
+class TageslageNextStep(BaseModel):
+    text: str
+    todo_id: int | None = None
+
+
+class TageslageStats(BaseModel):
+    current_orders: int = 0
+    review_orders: int = 0
+    open_todos: int = 0
+    todos_by_kind: dict[str, int] = {}
+    todo_items: list[dict] = []
+    current_order_labels: list[str] = []
+
+
+class TageslageRead(BaseModel):
+    cache_date: str
+    cached: bool = False
+    stats: TageslageStats
+    summary: str = ""
+    quote: str = ""
+    next_steps: list[TageslageNextStep] = []
+    error: str | None = None

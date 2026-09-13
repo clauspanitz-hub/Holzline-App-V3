@@ -68,6 +68,7 @@ from app.schemas import (
     OrderRead,
     OrderUpdate,
     ShopifyOrderSyncResult,
+    TageslageRead,
     TodoRead,
     StockAdjustRequest,
     StockDeltaRequest,
@@ -89,6 +90,16 @@ router = APIRouter(prefix="/api")
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get("/overview/tageslage", response_model=TageslageRead)
+def overview_tageslage(
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+) -> TageslageRead:
+    from app.tageslage import get_tageslage
+
+    return TageslageRead.model_validate(get_tageslage(db, force_refresh=refresh))
 
 
 @router.get("/units", response_model=list[UnitInfo])

@@ -185,6 +185,7 @@ def init_db() -> None:
         migrate_orders_todos(engine)
         migrate_order_origin(engine)
         migrate_shop_line_maps(engine)
+        migrate_tageslage_cache(engine)
         migrate_color_hex(engine, db)
         migrate_material_decimal_places(engine)
         seed_admin_user(db)
@@ -522,6 +523,29 @@ def migrate_shop_line_maps(engine) -> None:
                 )
             )
 
+
+
+def migrate_tageslage_cache(engine) -> None:
+    """Tages-Cache für Übersicht-Tageslage (Gemini-Text)."""
+    insp = inspect(engine)
+    if "tageslage_cache" in set(insp.get_table_names()):
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE tageslage_cache (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    cache_date VARCHAR(10) NOT NULL UNIQUE,
+                    summary TEXT NOT NULL DEFAULT '',
+                    quote TEXT NOT NULL DEFAULT '',
+                    next_steps_json TEXT NOT NULL DEFAULT '[]',
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
 
 
 def migrate_color_hex(engine, db: Session) -> None:

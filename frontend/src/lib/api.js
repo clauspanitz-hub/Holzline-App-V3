@@ -239,6 +239,10 @@ export const api = {
     },
     complete: (id) => request(`/api/todos/${id}/complete`, { method: 'POST' }),
   },
+  overview: {
+    tageslage: (refresh = false) =>
+      request(`/api/overview/tageslage${refresh ? '?refresh=true' : ''}`),
+  },
 }
 
 /** Nachkommastellen eines Artikels (Produkte immer 0, Material laut Feld). */
