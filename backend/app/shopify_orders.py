@@ -80,6 +80,34 @@ def _shop_host() -> str:
     return raw
 
 
+def _oauth_error_message(status: int, body: str) -> str:
+    """Shopify liefert bei OAuth oft HTML; ins Banner nur den Kern."""
+    text = (body or "").strip()
+    lower = text.lower()
+    if "application_cannot_be_found" in lower:
+        return (
+            "Shopify kennt die App auf diesem Shop nicht (application_cannot_be_found). "
+            "Shop-Domain prüfen, App im Dev Dashboard auf genau diesem Shop installieren, "
+            "Client-ID/Secret aus derselben App kopieren. Shop und App müssen in derselben "
+            "Shopify-Organisation liegen."
+        )
+    if "shop_not_permitted" in lower:
+        return (
+            "Client-Credentials nicht erlaubt: Shop und Dev-Dashboard-App müssen "
+            "in derselben Shopify-Organisation liegen, und die App muss installiert sein."
+        )
+    snippet = text
+    if "<" in snippet:
+        start = lower.find("<title>")
+        end = lower.find("</title>")
+        if 0 <= start < end:
+            snippet = text[start + 7 : end].strip()
+        else:
+            snippet = "HTML-Fehlerseite ohne JSON"
+    snippet = " ".join(snippet.split())[:180]
+    return f"Shopify-Token fehlgeschlagen ({status}): {snippet or 'unbekannter Fehler'}"
+
+
 def _request_access_token() -> str:
     """Dev Dashboard: Client-ID/Secret → 24h-Access-Token (kein shpat_ mehr)."""
     host = _shop_host()
@@ -91,17 +119,14 @@ def _request_access_token() -> str:
             "client_id": (settings.shopify_client_id or "").strip(),
             "client_secret": (settings.shopify_client_secret or "").strip(),
         },
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+        },
         timeout=30.0,
     )
     if response.status_code >= 400:
-        body = (response.text or "").strip()[:400]
-        if "shop_not_permitted" in body:
-            raise RuntimeError(
-                "Client-Credentials nicht erlaubt: Shop und Dev-Dashboard-App müssen "
-                "in derselben Shopify-Organisation liegen, und die App muss installiert sein."
-            )
-        raise RuntimeError(f"Shopify-Token fehlgeschlagen ({response.status_code}): {body or response.reason_phrase}")
+        raise RuntimeError(_oauth_error_message(response.status_code, response.text or ""))
     payload = response.json()
     token = (payload.get("access_token") or "").strip()
     if not token:
