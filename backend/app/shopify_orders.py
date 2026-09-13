@@ -28,7 +28,6 @@ query HolzlingeOpenPaidOrders($first: Int!, $after: String, $query: String!) {
       cancelledAt
       displayFinancialStatus
       displayFulfillmentStatus
-      customer { displayName }
       shippingAddress { name }
       lineItems(first: 50) {
         nodes {
