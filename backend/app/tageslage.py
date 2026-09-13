@@ -172,7 +172,7 @@ def _call_gemini(stats: dict) -> tuple[str, str, list[dict], str | None]:
             _fallback_steps(stats),
             None,
         )
-    model = (settings.gemini_model or "gemini-3.8-flash").strip()
+    model = (settings.gemini_model or "gemini-3.1-flash-lite").strip()
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     prompt = (
         "Du bist die motivierende Tageslage für die Manufaktur Holzlinge "

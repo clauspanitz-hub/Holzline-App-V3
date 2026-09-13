@@ -358,29 +358,3 @@ def sync_shopify_orders(db: Session) -> dict:
 
     db.commit()
     return {"created": created, "skipped": skipped, "claimed": claimed, "errors": errors}
-
-
-def shopify_poll_loop() -> None:
-    from app.database import SessionLocal
-
-    delay = max(60, int(settings.shopify_poll_seconds or 300))
-    time.sleep(min(30, delay))
-    while True:
-        if shopify_configured():
-            db = SessionLocal()
-            try:
-                result = sync_shopify_orders(db)
-                from app.gemini_suggest import suggest_unmatched_shop_lines
-
-                suggested, gemini_error = suggest_unmatched_shop_lines(db, origin="shopify")
-                result["suggested"] = suggested
-                if gemini_error:
-                    result.setdefault("errors", []).append(gemini_error)
-                db.commit()
-                if result.get("created") or result.get("claimed") or result.get("suggested") or result.get("errors"):
-                    log.info("Shopify-Sync: %s", result)
-            except Exception:
-                log.exception("Shopify-Poller")
-            finally:
-                db.close()
-        time.sleep(delay)

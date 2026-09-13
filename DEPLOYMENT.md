@@ -172,15 +172,14 @@ SHOPIFY_CLIENT_ID=…
 SHOPIFY_CLIENT_SECRET=…
 ```
 
-Die App holt per **Client-Credentials** ein 24-Stunden-Access-Token, cached es und ruft damit die Admin-API auf (alle 5 Minuten und per Knopf **Shopify abrufen**). Versendet bleibt manuell. Ohne Client-ID/Secret startet der Poller nicht; der Knopf meldet die fehlende Konfiguration.
+Die App holt per **Client-Credentials** ein 24-Stunden-Access-Token, cached es und ruft die Admin-API nur per Knopf **Shopify abrufen** auf (kein Hintergrund-Poll). Versendet bleibt manuell. Ohne Client-ID/Secret meldet der Knopf die fehlende Konfiguration.
 
-Optional für **Vorschläge** in **zur Prüfung** (kein Gedächtnis, siehe ADR `0014`):
+Optional für **Vorschläge** in **zur Prüfung** und **Tageslage** (kein Gedächtnis, siehe ADR `0014` / `0016`):
 
 ```
 GEMINI_API_KEY=…
-GEMINI_MODEL=gemini-3.8-flash
+GEMINI_MODEL=gemini-3.1-flash-lite
 ```
-
 
 Ohne Key bleibt manuelle Zuordnung plus gemerkte **Shop-Zuordnung**.
 

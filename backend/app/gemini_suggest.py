@@ -123,7 +123,7 @@ def suggest_unmatched_shop_lines(db: Session, origin: str = "shopify") -> tuple[
         '{"matches":[{"id":<line id>,"product_id":<id oder null>}]}'
         f"\n\n{json.dumps(payload, ensure_ascii=False)}"
     )
-    model = (settings.gemini_model or "gemini-3.8-flash").strip()
+    model = (settings.gemini_model or "gemini-3.1-flash-lite").strip()
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     try:
         response = httpx.post(
@@ -138,7 +138,7 @@ def suggest_unmatched_shop_lines(db: Session, origin: str = "shopify") -> tuple[
         if response.status_code == 404:
             return 0, (
                 f"Gemini-Modell „{model}“ nicht gefunden (404). "
-                "GEMINI_MODEL in der .env prüfen (z. B. gemini-3.8-flash)."
+                "GEMINI_MODEL in der .env prüfen (z. B. gemini-3.1-flash-lite)."
             )
         response.raise_for_status()
         body = response.json()

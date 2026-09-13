@@ -15,9 +15,8 @@ class Settings(BaseSettings):
     shopify_client_secret: str | None = None
     shopify_admin_token: str | None = None
     shopify_api_version: str = "2026-01"
-    shopify_poll_seconds: int = 300
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-3.8-flash"
+    gemini_model: str = "gemini-3.1-flash-lite"
 
 
 settings = Settings()
