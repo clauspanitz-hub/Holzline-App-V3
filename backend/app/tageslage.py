@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 
 import httpx
 from sqlalchemy import select
@@ -24,6 +25,18 @@ def _utcnow() -> datetime:
 
 def _today_key() -> str:
     return date.today().isoformat()
+
+
+def _fmt_qty(value) -> str:
+    """Decimal ohne Trailing-Nullen (1.000 → „1“, nicht „1.000“)."""
+    try:
+        d = value if isinstance(value, Decimal) else Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value) if value is not None else "1"
+    if d == d.to_integral_value():
+        return str(int(d))
+    text = format(d.normalize(), "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
 
 
 def collect_tageslage_stats(db: Session) -> dict:
@@ -63,7 +76,7 @@ def collect_tageslage_stats(db: Session) -> dict:
                 "kind": todo.kind,
                 "title": todo.title,
                 "product_name": name,
-                "quantity": str(todo.quantity),
+                "quantity": _fmt_qty(todo.quantity),
                 "order_label": (
                     (todo.order.customer_name if todo.order and todo.order.customer_name else None)
                     or (todo.order.external_number if todo.order else None)
