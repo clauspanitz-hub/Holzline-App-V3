@@ -181,6 +181,8 @@ GEMINI_API_KEY=…
 GEMINI_MODEL=gemini-3.1-flash-lite
 ```
 
+`GEMINI_MODEL` = API-ID (`gemini-3.1-flash-lite`), nicht der AI-Studio-Anzeigename. Anzeigenamen mit Leerzeichen normalisiert die App beim Start; trotzdem die ID setzen.
+
 Ohne Key bleibt manuelle Zuordnung plus gemerkte **Shop-Zuordnung**.
 
 ### C7. Externer Zugang (MyFRITZ + Caddy HTTPS)
