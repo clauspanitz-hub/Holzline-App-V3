@@ -162,14 +162,17 @@ Nach dem Seed: Login in der App, weitere Benutzer unter Tab **Benutzer**. `ADMIN
 
 ### C6b. Shopify-Bestelleingang
 
-Custom App im Shop (Admin API, Leserecht Orders). In der Compose-`.env` auf CT 131:
+Apps kommen aus dem [Dev Dashboard](https://shopify.dev/docs/apps/build/dev-dashboard) (kein `shpat_`-Token mehr in der Admin). Client-ID und Secret unter Einstellungen; Scope **`read_orders`** in einer App-Version; App im Shop installieren. Shop und App müssen in derselben Organisation liegen.
+
+In der Compose-`.env` auf CT 131:
 
 ```
 SHOPIFY_STORE=dein-shop.myshopify.com
-SHOPIFY_ADMIN_TOKEN=shpat_…
+SHOPIFY_CLIENT_ID=…
+SHOPIFY_CLIENT_SECRET=…
 ```
 
-Die App holt alle 5 Minuten (und per Knopf **Shopify abrufen**) bezahlte, noch nicht vollständig erfüllte Aufträge. Versendet bleibt manuell. Ohne Token startet der Poller nicht; der Knopf meldet die fehlende Konfiguration.
+Die App holt per **Client-Credentials** ein 24-Stunden-Access-Token, cached es und ruft damit die Admin-API auf (alle 5 Minuten und per Knopf **Shopify abrufen**). Versendet bleibt manuell. Ohne Client-ID/Secret startet der Poller nicht; der Knopf meldet die fehlende Konfiguration.
 
 ### C7. Externer Zugang (MyFRITZ + Caddy HTTPS)
 

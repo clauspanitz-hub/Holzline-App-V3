@@ -2973,7 +2973,7 @@ def import_shopify_orders(db: Session) -> "ShopifyOrderSyncResult":
     if not shopify_configured():
         raise HTTPException(
             status_code=400,
-            detail="Shopify nicht konfiguriert (SHOPIFY_STORE, SHOPIFY_ADMIN_TOKEN)",
+            detail="Shopify nicht konfiguriert (SHOPIFY_STORE, SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET)",
         )
     result = sync_shopify_orders(db)
     return ShopifyOrderSyncResult.model_validate(result)

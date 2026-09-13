@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import datetime
 from decimal import Decimal
@@ -47,10 +48,28 @@ query HolzlingeOpenPaidOrders($first: Int!, $after: String, $query: String!) {
 SEARCH_QUERY = "status:open financial_status:paid"
 PAID_OK = {"PAID", "PARTIALLY_PAID"}
 FULFILL_OK = {"UNFULFILLED", "PARTIALLY_FULFILLED"}
+MISSING_CONFIG = "Shopify nicht konfiguriert (SHOPIFY_STORE, SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET)"
+
+_token_lock = threading.Lock()
+_cached_token: str | None = None
+_cached_token_until = 0.0
+
+
+def _has_client_credentials() -> bool:
+    return bool(
+        (settings.shopify_store or "").strip()
+        and (settings.shopify_client_id or "").strip()
+        and (settings.shopify_client_secret or "").strip()
+    )
 
 
 def shopify_configured() -> bool:
-    return bool((settings.shopify_store or "").strip() and (settings.shopify_admin_token or "").strip())
+    store = (settings.shopify_store or "").strip()
+    if not store:
+        return False
+    if _has_client_credentials():
+        return True
+    return bool((settings.shopify_admin_token or "").strip())
 
 
 def _shop_host() -> str:
@@ -59,6 +78,52 @@ def _shop_host() -> str:
     if raw and "." not in raw:
         raw = f"{raw}.myshopify.com"
     return raw
+
+
+def _request_access_token() -> str:
+    """Dev Dashboard: Client-ID/Secret → 24h-Access-Token (kein shpat_ mehr)."""
+    host = _shop_host()
+    url = f"https://{host}/admin/oauth/access_token"
+    response = httpx.post(
+        url,
+        data={
+            "grant_type": "client_credentials",
+            "client_id": (settings.shopify_client_id or "").strip(),
+            "client_secret": (settings.shopify_client_secret or "").strip(),
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=30.0,
+    )
+    if response.status_code >= 400:
+        body = (response.text or "").strip()[:400]
+        if "shop_not_permitted" in body:
+            raise RuntimeError(
+                "Client-Credentials nicht erlaubt: Shop und Dev-Dashboard-App müssen "
+                "in derselben Shopify-Organisation liegen, und die App muss installiert sein."
+            )
+        raise RuntimeError(f"Shopify-Token fehlgeschlagen ({response.status_code}): {body or response.reason_phrase}")
+    payload = response.json()
+    token = (payload.get("access_token") or "").strip()
+    if not token:
+        raise RuntimeError("Shopify-Token-Antwort ohne access_token")
+    expires = int(payload.get("expires_in") or 86399)
+    global _cached_token, _cached_token_until
+    _cached_token = token
+    _cached_token_until = time.time() + max(60, expires - 120)
+    return token
+
+
+def _access_token() -> str:
+    legacy = (settings.shopify_admin_token or "").strip()
+    if legacy and not _has_client_credentials():
+        return legacy
+    if not _has_client_credentials():
+        raise RuntimeError(MISSING_CONFIG)
+    global _cached_token, _cached_token_until
+    with _token_lock:
+        if _cached_token and time.time() < _cached_token_until:
+            return _cached_token
+        return _request_access_token()
 
 
 def _parse_created(value: str | None) -> datetime:
@@ -97,13 +162,13 @@ def _line_label(node: dict) -> str:
 
 def fetch_open_paid_orders() -> list[dict]:
     if not shopify_configured():
-        raise RuntimeError("Shopify nicht konfiguriert (SHOPIFY_STORE, SHOPIFY_ADMIN_TOKEN)")
+        raise RuntimeError(MISSING_CONFIG)
     host = _shop_host()
     version = (settings.shopify_api_version or "2026-01").strip()
     url = f"https://{host}/admin/api/{version}/graphql.json"
     headers = {
         "Content-Type": "application/json",
-        "X-Shopify-Access-Token": settings.shopify_admin_token.strip(),
+        "X-Shopify-Access-Token": _access_token(),
     }
     out: list[dict] = []
     after = None
