@@ -54,6 +54,7 @@
   let flashClearTimer = null
   let saveOkTimer = null
   let saving = $state(false)
+  let pendingDeleteOrderId = $state(null)
 
   /** Clientseitige Suche/Sortierung je Listen-Block */
   let listUi = $state({
@@ -739,10 +740,15 @@
   }
 
   async function deleteOrder(order) {
-    if (!confirm('Bestellung löschen?')) return
+    if (pendingDeleteOrderId !== order.id) {
+      pendingDeleteOrderId = order.id
+      return
+    }
     saving = true
     try {
       await api.orders.remove(order.id)
+      pendingDeleteOrderId = null
+      loadedBuckets.orders = false
       await refresh()
       showFlash('ok', 'Bestellung gelöscht.')
     } catch (error) {
@@ -3423,7 +3429,12 @@
                   <button type="button" class="btn" onclick={() => markOrderShipped(order)}>Versendet</button>
                 {/if}
                 {#if order.status !== 'shipped'}
-                  <button type="button" class="btn secondary" onclick={() => deleteOrder(order)}>Löschen</button>
+                  {#if pendingDeleteOrderId === order.id}
+                    <button type="button" class="btn danger" disabled={saving} onclick={() => deleteOrder(order)}>Wirklich löschen?</button>
+                    <button type="button" class="btn secondary" disabled={saving} onclick={() => (pendingDeleteOrderId = null)}>Abbrechen</button>
+                  {:else}
+                    <button type="button" class="btn secondary" disabled={saving} onclick={() => deleteOrder(order)}>Löschen</button>
+                  {/if}
                 {/if}
               </td>
             </tr>
@@ -3446,7 +3457,12 @@
               <button type="button" class="btn" onclick={() => markOrderShipped(order)}>Versendet</button>
             {/if}
             {#if order.status !== 'shipped'}
-              <button type="button" class="btn secondary" onclick={() => deleteOrder(order)}>Löschen</button>
+              {#if pendingDeleteOrderId === order.id}
+                <button type="button" class="btn danger" disabled={saving} onclick={() => deleteOrder(order)}>Wirklich löschen?</button>
+                <button type="button" class="btn secondary" disabled={saving} onclick={() => (pendingDeleteOrderId = null)}>Abbrechen</button>
+              {:else}
+                <button type="button" class="btn secondary" disabled={saving} onclick={() => deleteOrder(order)}>Löschen</button>
+              {/if}
             {/if}
           </div>
         </article>
@@ -4123,7 +4139,12 @@
               {/each}
               <div class="row-actions">
                 <button type="button" class="btn" onclick={() => approveOrder(order)} disabled={saving}>Abnicken</button>
-                <button type="button" class="btn secondary" onclick={() => deleteOrder(order)} disabled={saving}>Löschen</button>
+                {#if pendingDeleteOrderId === order.id}
+                  <button type="button" class="btn danger" onclick={() => deleteOrder(order)} disabled={saving}>Wirklich löschen?</button>
+                  <button type="button" class="btn secondary" onclick={() => (pendingDeleteOrderId = null)} disabled={saving}>Abbrechen</button>
+                {:else}
+                  <button type="button" class="btn secondary" onclick={() => deleteOrder(order)} disabled={saving}>Löschen</button>
+                {/if}
               </div>
             </article>
           {/each}

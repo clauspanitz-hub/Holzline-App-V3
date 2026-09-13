@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     shopify_api_version: str = "2026-01"
     shopify_poll_seconds: int = 300
     gemini_api_key: str | None = None
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3.8-flash"
 
 
 settings = Settings()

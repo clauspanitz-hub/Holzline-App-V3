@@ -19,6 +19,17 @@ MAX_LINES = 40
 MAX_PRODUCTS = 400
 
 
+def _redact_secret(text: str) -> str:
+    """API-Keys nie in UI/Logs durchreichen."""
+    out = text or ""
+    key = (settings.gemini_api_key or "").strip()
+    if key:
+        out = out.replace(key, "***")
+    out = re.sub(r"([?&]key=)[^&\s'\"<>]+", r"\1***", out, flags=re.IGNORECASE)
+    out = re.sub(r"(x-goog-api-key['\"\\s:=]+)[^\s'\"<>]+", r"\1***", out, flags=re.IGNORECASE)
+    return out
+
+
 def gemini_configured() -> bool:
     return bool((settings.gemini_api_key or "").strip())
 
@@ -112,20 +123,23 @@ def suggest_unmatched_shop_lines(db: Session, origin: str = "shopify") -> tuple[
         '{"matches":[{"id":<line id>,"product_id":<id oder null>}]}'
         f"\n\n{json.dumps(payload, ensure_ascii=False)}"
     )
-    model = (settings.gemini_model or "gemini-2.5-flash").strip()
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-        f"?key={settings.gemini_api_key.strip()}"
-    )
+    model = (settings.gemini_model or "gemini-3.8-flash").strip()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     try:
         response = httpx.post(
             url,
+            headers={"x-goog-api-key": settings.gemini_api_key.strip()},
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {"responseMimeType": "application/json", "temperature": 0},
             },
             timeout=45.0,
         )
+        if response.status_code == 404:
+            return 0, (
+                f"Gemini-Modell „{model}“ nicht gefunden (404). "
+                "GEMINI_MODEL in der .env prüfen (z. B. gemini-3.8-flash)."
+            )
         response.raise_for_status()
         body = response.json()
         text = (
@@ -133,8 +147,9 @@ def suggest_unmatched_shop_lines(db: Session, origin: str = "shopify") -> tuple[
             or ""
         )
     except Exception as exc:
-        log.warning("Gemini-Vorschlag fehlgeschlagen: %s", exc)
-        return 0, f"Gemini-Vorschlag fehlgeschlagen: {exc}"
+        safe = _redact_secret(str(exc))
+        log.warning("Gemini-Vorschlag fehlgeschlagen: %s", safe)
+        return 0, f"Gemini-Vorschlag fehlgeschlagen: {safe}"
 
     by_id = {line.id: line for line in lines}
     applied = 0

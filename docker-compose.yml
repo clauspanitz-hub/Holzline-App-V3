@@ -16,7 +16,7 @@ services:
       SHOPIFY_API_VERSION: ${SHOPIFY_API_VERSION:-2026-01}
       SHOPIFY_POLL_SECONDS: ${SHOPIFY_POLL_SECONDS:-300}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
     volumes:
       - holzlinge_data:/data
     restart: unless-stopped

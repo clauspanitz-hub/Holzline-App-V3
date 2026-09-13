@@ -178,8 +178,9 @@ Optional für **Vorschläge** in **zur Prüfung** (kein Gedächtnis, siehe ADR `
 
 ```
 GEMINI_API_KEY=…
-GEMINI_MODEL=gemini-2.5-flash
+GEMINI_MODEL=gemini-3.8-flash
 ```
+
 
 Ohne Key bleibt manuelle Zuordnung plus gemerkte **Shop-Zuordnung**.
 
