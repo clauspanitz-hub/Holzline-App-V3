@@ -17,7 +17,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 ## 3. Datenmodell
 
 ### Phase 1 (Basis)
-- **materials:** `id`, `name` (unique), `unit`, `purchase_quantity`, `purchase_price`, `cost_per_unit` (= Preis/Einkaufsmenge), optional `min_stock` / `reorder_quantity` (Bestellmenge) / `last_purchase_quantity`, optional `color`/`tags`/`family` (Materialfamilie), `is_template`, Audit `created_at`/`updated_at`/`created_by`/`updated_by` — Bestand nur in `material_stocks`
+- **materials:** … optional `min_stock` / `reorder_quantity` / `last_purchase_quantity`, optional `alternatives_note` / `products_note`, Bezugsquellen in `material_purchase_sources` (Shop + URL), …
 - **products:** `id`, `name` (unique), `sku` (optional unique), `selling_price` (Verkaufspreis EUR, 0 = unvollständig), optional `min_stock`/`color`/`tags`/`family` (Produktfamilie), `is_template`, Audit wie Materialien — kein Gesamtbestand mehr an der Zeile
 - **Unvollständig (UI):** Material: Mindestbestand, Einkaufspreis=0; Produkt: Mindestbestand, Stückliste, Verkaufspreis=0 — sichtbar als „!“ und als System-Tags `fehlt …` (ADR `0011`)
 - **product_materials:** Produkt-Stückliste — Material **oder** Komponenten-Produkt → Fertigen (ADR `0012`)
@@ -85,8 +85,8 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Zusammenstellen bei Set-Bestellung (Set-Variante an Position, Todo, Abbuchung; ADR `0020`)
 
 ### Phase 3: Optimierung & Einkauf (GEPLANT — vorgemerkt aus Grill)
-- [ ] Einkaufsliste aus fehlenden Materialien (Todo-Art Einkauf)
-- [ ] Einkaufsquellen + Alternativen am Material
+- [x] Einkaufsliste aus fehlenden Materialien (Todo-Art Einkauf; umgesetzt als Einkauf-Todos aus Mindestbestand, ADR `0019`)
+- [x] Einkaufsquellen + Alternativen am Material (ADR `0021`)
 - [x] Mindestbestand je Material/Produkt → Warnungen in Übersicht (vorgezogen in 1.5)
 
 ## 5. Geschäftsregeln (gültig)

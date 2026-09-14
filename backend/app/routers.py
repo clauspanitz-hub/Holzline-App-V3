@@ -79,6 +79,12 @@ from app.schemas import (
     StockAdjustRequest,
     StockDeltaRequest,
     StockMovementRead,
+    ShopCreate,
+    ShopRead,
+    ShopSuggestRequest,
+    ShopSuggestResult,
+    ShopUpdate,
+    PurchaseSourceOverviewGroup,
     TagCreate,
     TagRead,
     TagUpdate,
@@ -171,6 +177,67 @@ def update_tag(tag_id: int, payload: TagUpdate, db: Session = Depends(get_db)) -
 @router.delete("/tags/{tag_id}", status_code=204)
 def delete_tag(tag_id: int, db: Session = Depends(get_db)) -> None:
     services.delete_tag(db, tag_id)
+
+
+@router.get("/shops", response_model=list[ShopRead])
+def list_shops(db: Session = Depends(get_db)) -> list[ShopRead]:
+    from app import purchase_sources as ps
+
+    return [ShopRead(id=s.id, name=s.name, domain_hint=s.domain_hint) for s in ps.list_shops(db)]
+
+
+@router.post("/shops", response_model=ShopRead, status_code=201)
+def create_shop(payload: ShopCreate, _: AdminUser, db: Session = Depends(get_db)) -> ShopRead:
+    from app import purchase_sources as ps
+
+    s = ps.create_shop(db, payload.name, payload.domain_hint)
+    return ShopRead(id=s.id, name=s.name, domain_hint=s.domain_hint)
+
+
+@router.patch("/shops/{shop_id}", response_model=ShopRead)
+def update_shop(shop_id: int, payload: ShopUpdate, _: AdminUser, db: Session = Depends(get_db)) -> ShopRead:
+    from app import purchase_sources as ps
+
+    s = ps.update_shop(db, shop_id, name=payload.name, domain_hint=payload.domain_hint)
+    return ShopRead(id=s.id, name=s.name, domain_hint=s.domain_hint)
+
+
+@router.delete("/shops/{shop_id}", status_code=204)
+def delete_shop(shop_id: int, _: AdminUser, db: Session = Depends(get_db)) -> None:
+    from app import purchase_sources as ps
+
+    ps.delete_shop(db, shop_id)
+
+
+@router.post("/shops/suggest-from-url", response_model=ShopSuggestResult)
+def suggest_shop_from_url(payload: ShopSuggestRequest, db: Session = Depends(get_db)) -> ShopSuggestResult:
+    from app import purchase_sources as ps
+    from sqlalchemy import select
+    from app.models import Shop
+
+    name = ps.shop_name_from_url(payload.url) or "Shop"
+    try:
+        from urllib.parse import urlparse
+
+        host = urlparse(payload.url if "://" in payload.url else "https://" + payload.url).hostname or ""
+        host = host.lower().removeprefix("www.")
+    except Exception:
+        host = None
+    existing = db.scalars(select(Shop).where(Shop.name == name)).first()
+    if not existing and host:
+        existing = db.scalars(select(Shop).where(Shop.domain_hint == host)).first()
+    return ShopSuggestResult(
+        suggested_name=existing.name if existing else name,
+        domain_hint=existing.domain_hint if existing else host,
+        existing_shop_id=existing.id if existing else None,
+    )
+
+
+@router.get("/purchase-sources/overview", response_model=list[PurchaseSourceOverviewGroup])
+def purchase_sources_overview(db: Session = Depends(get_db)) -> list[PurchaseSourceOverviewGroup]:
+    from app import purchase_sources as ps
+
+    return [PurchaseSourceOverviewGroup(**g) for g in ps.list_sources_overview(db)]
 
 
 @router.get("/suggestions/by-color/{color_id}", response_model=list[ColorMatchSuggestion])

@@ -97,6 +97,20 @@ class Color(Base):
     products: Mapped[list["Product"]] = relationship(back_populates="color")
 
 
+class Shop(Base):
+    """Einkaufs-Shop zur Gruppierung von Bezugsquellen (ADR 0021)."""
+
+    __tablename__ = "shops"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    domain_hint: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    sources: Mapped[list["MaterialPurchaseSource"]] = relationship(back_populates="shop")
+
+
 class Material(Base):
     __tablename__ = "materials"
 
@@ -109,6 +123,8 @@ class Material(Base):
     min_stock: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     reorder_quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     last_purchase_quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    alternatives_note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    products_note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     decimal_places: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     family: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -123,6 +139,25 @@ class Material(Base):
     tags: Mapped[list[Tag]] = relationship(secondary=material_tags)
     product_links: Mapped[list["ProductMaterial"]] = relationship(back_populates="material")
     stocks: Mapped[list["MaterialStock"]] = relationship(back_populates="material", cascade="all, delete-orphan")
+    purchase_sources: Mapped[list["MaterialPurchaseSource"]] = relationship(
+        back_populates="material",
+        cascade="all, delete-orphan",
+        order_by="MaterialPurchaseSource.id",
+    )
+
+
+class MaterialPurchaseSource(Base):
+    __tablename__ = "material_purchase_sources"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("materials.id", ondelete="CASCADE"), nullable=False)
+    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="RESTRICT"), nullable=False)
+    url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_preferred: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    material: Mapped[Material] = relationship(back_populates="purchase_sources")
+    shop: Mapped[Shop] = relationship(back_populates="sources")
 
 
 class Product(Base):

@@ -123,10 +123,13 @@ class MaterialBase(BaseModel):
     purchase_price: Money = Decimal("0")
     min_stock: Quantity | None = None
     reorder_quantity: Quantity | None = None
+    alternatives_note: str | None = Field(default=None, max_length=1000)
+    products_note: str | None = Field(default=None, max_length=1000)
     family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     decimal_places: int = Field(default=0, ge=0, le=3)
     tag_ids: list[int] = []
+    purchase_sources: list["PurchaseSourceWrite"] = []
 
     @field_validator("family")
     @classmethod
@@ -135,6 +138,28 @@ class MaterialBase(BaseModel):
             return None
         stripped = value.strip()
         return stripped or None
+
+
+class PurchaseSourceWrite(BaseModel):
+    shop_id: int | None = None
+    shop_name: str | None = Field(default=None, max_length=200)
+    url: str = Field(min_length=1, max_length=1000)
+    note: str | None = Field(default=None, max_length=500)
+    is_preferred: bool = False
+
+
+class PurchaseSourceRead(BaseModel):
+    id: int
+    shop_id: int
+    shop_name: str
+    url: str
+    note: str | None = None
+    is_preferred: bool = False
+
+
+class MaterialUsedInProduct(BaseModel):
+    id: int
+    name: str
 
 
 class MaterialCreate(MaterialBase):
@@ -150,12 +175,15 @@ class MaterialUpdate(BaseModel):
     min_stock: Quantity | None = None
     reorder_quantity: Quantity | None = None
     last_purchase_quantity: Quantity | None = None
+    alternatives_note: str | None = Field(default=None, max_length=1000)
+    products_note: str | None = Field(default=None, max_length=1000)
     is_template: bool | None = None
     decimal_places: int | None = Field(default=None, ge=0, le=3)
     family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     tag_ids: list[int] | None = None
     overview_ignored: bool | None = None
+    purchase_sources: list[PurchaseSourceWrite] | None = None
 
     @field_validator("family")
     @classmethod
@@ -178,6 +206,8 @@ class MaterialRead(BaseModel):
     min_stock: Quantity | None = None
     reorder_quantity: Quantity | None = None
     last_purchase_quantity: Quantity | None = None
+    alternatives_note: str | None = None
+    products_note: str | None = None
     is_template: bool = False
     decimal_places: int = 0
     family: str | None = None
@@ -185,6 +215,10 @@ class MaterialRead(BaseModel):
     color_id: int | None = None
     color: ColorRead | None = None
     tags: list[TagRead] = []
+    purchase_sources: list[PurchaseSourceRead] = []
+    used_in_products: list[MaterialUsedInProduct] = []
+    preferred_source_url: str | None = None
+    preferred_shop_name: str | None = None
     stock_total: Quantity
     is_negative: bool
     stocks: list[StockByLocation] = []
@@ -193,6 +227,50 @@ class MaterialRead(BaseModel):
     updated_at: datetime | None = None
     created_by: str | None = None
     updated_by: str | None = None
+
+
+class ShopCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    domain_hint: str | None = Field(default=None, max_length=200)
+
+
+class ShopUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    domain_hint: str | None = Field(default=None, max_length=200)
+
+
+class ShopRead(BaseModel):
+    id: int
+    name: str
+    domain_hint: str | None = None
+
+
+class ShopSuggestRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=1000)
+
+
+class ShopSuggestResult(BaseModel):
+    suggested_name: str
+    domain_hint: str | None = None
+    existing_shop_id: int | None = None
+
+
+class PurchaseSourceOverviewEntry(BaseModel):
+    id: int
+    material_id: int
+    material_name: str
+    shop_id: int | None = None
+    shop_name: str
+    url: str
+    note: str | None = None
+    is_preferred: bool = False
+
+
+class PurchaseSourceOverviewGroup(BaseModel):
+    shop_id: int | None = None
+    shop_name: str
+    domain_hint: str | None = None
+    sources: list[PurchaseSourceOverviewEntry] = []
 
 
 class BomLineCreate(BaseModel):
@@ -790,6 +868,8 @@ class TodoRead(BaseModel):
     material_name: str | None = None
     set_name: str | None = None
     variant_label: str | None = None
+    preferred_source_url: str | None = None
+    preferred_shop_name: str | None = None
     order_label: str | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None

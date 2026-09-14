@@ -15,6 +15,7 @@ from app.models import (
     CustomerOrder,
     Location,
     Material,
+    MaterialPurchaseSource,
     MaterialStock,
     OptionMapping,
     OrderLine,
@@ -820,7 +821,32 @@ def product_incomplete_fields(product: Product) -> list[str]:
 
 
 def material_read(material: Material) -> MaterialRead:
+    from app.purchase_sources import preferred_source
+    from app.schemas import MaterialUsedInProduct, PurchaseSourceRead
+
     total = _material_stock_total(material)
+    sources = []
+    for src in getattr(material, "purchase_sources", None) or []:
+        sources.append(
+            PurchaseSourceRead(
+                id=src.id,
+                shop_id=src.shop_id,
+                shop_name=src.shop.name if src.shop else "?",
+                url=src.url,
+                note=src.note,
+                is_preferred=bool(src.is_preferred),
+            )
+        )
+    pref = preferred_source(material) if sources else None
+    used: list[MaterialUsedInProduct] = []
+    seen: set[int] = set()
+    for link in getattr(material, "product_links", None) or []:
+        prod = getattr(link, "product", None)
+        if prod is None or prod.id in seen:
+            continue
+        seen.add(prod.id)
+        used.append(MaterialUsedInProduct(id=prod.id, name=prod.name))
+    used.sort(key=lambda x: x.name.casefold())
     return MaterialRead(
         id=material.id,
         name=material.name,
@@ -831,6 +857,8 @@ def material_read(material: Material) -> MaterialRead:
         min_stock=material.min_stock,
         reorder_quantity=getattr(material, "reorder_quantity", None),
         last_purchase_quantity=getattr(material, "last_purchase_quantity", None),
+        alternatives_note=getattr(material, "alternatives_note", None),
+        products_note=getattr(material, "products_note", None),
         is_template=bool(getattr(material, "is_template", False)),
         decimal_places=int(getattr(material, "decimal_places", 0) or 0),
         family=material.family,
@@ -838,6 +866,10 @@ def material_read(material: Material) -> MaterialRead:
         color_id=material.color_id,
         color=color_read(material.color),
         tags=[TagRead.model_validate(t) for t in material.tags],
+        purchase_sources=sources,
+        used_in_products=used,
+        preferred_source_url=pref.url if pref else None,
+        preferred_shop_name=pref.shop.name if pref and pref.shop else None,
         stock_total=total,
         is_negative=total < 0 or any(s.quantity < 0 for s in material.stocks),
         stocks=_stock_rows_material(material),
@@ -890,6 +922,8 @@ def _load_material(db: Session, material_id: int) -> Material:
             selectinload(Material.stocks).selectinload(MaterialStock.location),
             selectinload(Material.color).selectinload(Color.medium),
             selectinload(Material.tags),
+            selectinload(Material.purchase_sources).selectinload(MaterialPurchaseSource.shop),
+            selectinload(Material.product_links).selectinload(ProductMaterial.product),
         )
     ).first()
     if not material:
@@ -914,6 +948,8 @@ def list_materials(
             selectinload(Material.stocks).selectinload(MaterialStock.location),
             selectinload(Material.color).selectinload(Color.medium),
             selectinload(Material.tags),
+            selectinload(Material.purchase_sources).selectinload(MaterialPurchaseSource.shop),
+            selectinload(Material.product_links).selectinload(ProductMaterial.product),
         )
     )
     if tag:
@@ -939,6 +975,8 @@ def create_material(db: Session, payload: MaterialCreate) -> MaterialRead:
         cost_per_unit=_unit_cost(purchase_price, purchase_quantity),
         min_stock=_q(payload.min_stock) if payload.min_stock is not None else None,
         reorder_quantity=_q(payload.reorder_quantity) if payload.reorder_quantity is not None else None,
+        alternatives_note=(payload.alternatives_note or "").strip() or None,
+        products_note=(payload.products_note or "").strip() or None,
         family=(payload.family.strip() if payload.family else None),
         color_id=color.id if color else None,
         decimal_places=int(payload.decimal_places or 0),
@@ -947,6 +985,14 @@ def create_material(db: Session, payload: MaterialCreate) -> MaterialRead:
     db.add(material)
     try:
         db.flush()
+        if payload.purchase_sources:
+            from app.purchase_sources import replace_material_sources
+
+            replace_material_sources(
+                db,
+                material,
+                [s.model_dump() for s in payload.purchase_sources],
+            )
         db.add(
             MaterialStock(
                 material_id=material.id,
@@ -1092,6 +1138,7 @@ def update_material(db: Session, material_id: int, payload: MaterialUpdate) -> M
     before_missing = material_incomplete_fields_raw(material)
     data = payload.model_dump(exclude_unset=True)
     tag_ids = data.pop("tag_ids", None)
+    sources_payload = data.pop("purchase_sources", None)
     if "name" in data and data["name"] is not None:
         data["name"] = data["name"].strip()
     if "purchase_quantity" in data and data["purchase_quantity"] is not None:
@@ -1106,6 +1153,10 @@ def update_material(db: Session, material_id: int, payload: MaterialUpdate) -> M
         data["last_purchase_quantity"] = (
             _q(data["last_purchase_quantity"]) if data["last_purchase_quantity"] is not None else None
         )
+    if "alternatives_note" in data:
+        data["alternatives_note"] = (data["alternatives_note"] or "").strip() or None
+    if "products_note" in data:
+        data["products_note"] = (data["products_note"] or "").strip() or None
     if "family" in data and data["family"] is not None:
         data["family"] = data["family"].strip() or None
     if "color_id" in data:
@@ -1115,6 +1166,10 @@ def update_material(db: Session, material_id: int, payload: MaterialUpdate) -> M
         setattr(material, key, value)
     if tag_ids is not None:
         material.tags = resolve_tags(db, tag_ids)
+    if sources_payload is not None:
+        from app.purchase_sources import replace_material_sources
+
+        replace_material_sources(db, material, sources_payload)
     material.cost_per_unit = _unit_cost(Decimal(material.purchase_price), Decimal(material.purchase_quantity))
     sync_incomplete_tags(db, material, before_missing=before_missing)
     _stamp_update(material)
@@ -2880,6 +2935,7 @@ def _order_display(order: CustomerOrder) -> str:
 
 
 def _todo_read(todo: WorkTodo) -> "TodoRead":
+    from app.purchase_sources import preferred_source
     from app.schemas import TodoRead
 
     order = todo.order
@@ -2887,6 +2943,7 @@ def _todo_read(todo: WorkTodo) -> "TodoRead":
     variant = line.set_variant if line is not None else None
     set_obj = variant.product_set if variant is not None else None
     kind = todo.kind if todo.kind in ("manufacture", "create_article", "purchase", "assemble") else "create_article"
+    pref = preferred_source(todo.material) if kind == "purchase" and todo.material else None
     return TodoRead(
         id=todo.id,
         order_id=todo.order_id,
@@ -2904,6 +2961,8 @@ def _todo_read(todo: WorkTodo) -> "TodoRead":
         material_name=todo.material.name if todo.material else None,
         set_name=set_obj.name if set_obj else None,
         variant_label=_variant_label(variant) if variant else None,
+        preferred_source_url=pref.url if pref else None,
+        preferred_shop_name=pref.shop.name if pref and pref.shop else None,
         order_label=_order_display(order) if order else None,
         created_at=todo.created_at,
         completed_at=todo.completed_at,
@@ -3412,7 +3471,9 @@ def list_todos(
         .order_by(WorkTodo.status.asc(), WorkTodo.created_at.desc())
         .options(
             selectinload(WorkTodo.product),
-            selectinload(WorkTodo.material),
+            selectinload(WorkTodo.material)
+            .selectinload(Material.purchase_sources)
+            .selectinload(MaterialPurchaseSource.shop),
             selectinload(WorkTodo.order),
             selectinload(WorkTodo.line)
             .selectinload(OrderLine.set_variant)

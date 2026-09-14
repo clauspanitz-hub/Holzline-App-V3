@@ -67,6 +67,17 @@ export const api = {
     update: (id, body) => request(`/api/tags/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     remove: (id) => request(`/api/tags/${id}`, { method: 'DELETE' }),
   },
+  shops: {
+    list: () => request('/api/shops'),
+    create: (body) => request('/api/shops', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) => request(`/api/shops/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    remove: (id) => request(`/api/shops/${id}`, { method: 'DELETE' }),
+    suggestFromUrl: (url) =>
+      request('/api/shops/suggest-from-url', { method: 'POST', body: JSON.stringify({ url }) }),
+  },
+  purchaseSources: {
+    overview: () => request('/api/purchase-sources/overview'),
+  },
   suggestions: {
     byColor: (colorId, { materials = true, products = true } = {}) =>
       request(`/api/suggestions/by-color/${colorId}?materials=${materials}&products=${products}`),

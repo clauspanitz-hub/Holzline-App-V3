@@ -192,6 +192,7 @@ def init_db() -> None:
         migrate_material_decimal_places(engine)
         migrate_purchase_todos(engine)
         migrate_order_line_set_variant(engine)
+        migrate_purchase_sources(engine)
         seed_admin_user(db)
         from app.services import backfill_incomplete_tags, ensure_system_incomplete_tags
 
@@ -611,6 +612,48 @@ def migrate_color_hex(engine, db: Session) -> None:
         if guessed:
             color.hex = guessed
     db.commit()
+
+
+def migrate_purchase_sources(engine) -> None:
+    """Shops + Material-Bezugsquellen + Notizfelder (ADR 0021)."""
+    insp = inspect(engine)
+    names = set(insp.get_table_names())
+    with engine.begin() as conn:
+        if "shops" not in names:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE shops (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        name VARCHAR(200) NOT NULL UNIQUE,
+                        domain_hint VARCHAR(200),
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME NOT NULL
+                    )
+                    """
+                )
+            )
+        if "material_purchase_sources" not in names:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE material_purchase_sources (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+                        shop_id INTEGER NOT NULL REFERENCES shops(id) ON DELETE RESTRICT,
+                        url VARCHAR(1000) NOT NULL,
+                        note VARCHAR(500),
+                        is_preferred BOOLEAN NOT NULL DEFAULT 0
+                    )
+                    """
+                )
+            )
+        if "materials" in names:
+            cols = {c["name"] for c in insp.get_columns("materials")}
+            if "alternatives_note" not in cols:
+                conn.execute(text("ALTER TABLE materials ADD COLUMN alternatives_note VARCHAR(1000)"))
+            if "products_note" not in cols:
+                conn.execute(text("ALTER TABLE materials ADD COLUMN products_note VARCHAR(1000)"))
 
 
 def migrate_order_line_set_variant(engine) -> None:

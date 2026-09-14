@@ -29,6 +29,9 @@
   let units = $state([])
   let locations = $state([])
   let media = $state([])
+  let shops = $state([])
+  let purchaseSourceGroups = $state([])
+  let newShopName = $state('')
   let colors = $state([])
   let allTags = $state([])
   let catalogFilter = $state(emptyCatalogFilter())
@@ -204,6 +207,9 @@
       purchase_price: '0',
       min_stock: '',
       reorder_quantity: '',
+      alternatives_note: '',
+      products_note: '',
+      purchase_sources: [emptyPurchaseSource(true)],
       is_template: false,
       decimal_places: 0,
       family: '',
@@ -212,6 +218,69 @@
       color_id: '',
       tagIds: [],
     }
+  }
+
+  function emptyPurchaseSource(preferred = false) {
+    return { shop_id: '', shop_name: '', url: '', note: '', is_preferred: !!preferred }
+  }
+
+  function normalizePurchaseSources(rows) {
+    const filled = (rows || []).filter((r) => String(r.url || '').trim())
+    if (!filled.length) return []
+    const anyPref = filled.some((r) => r.is_preferred)
+    return filled.map((r, i) => ({
+      shop_id: r.shop_id ? Number(r.shop_id) : null,
+      shop_name: (r.shop_name || '').trim() || null,
+      url: String(r.url).trim(),
+      note: (r.note || '').trim() || null,
+      is_preferred: anyPref ? !!r.is_preferred : i === 0,
+    }))
+  }
+
+  function materialSourcesForForm(material) {
+    const rows = (material.purchase_sources || []).map((s) => ({
+      shop_id: s.shop_id ? String(s.shop_id) : '',
+      shop_name: s.shop_name || '',
+      url: s.url || '',
+      note: s.note || '',
+      is_preferred: !!s.is_preferred,
+    }))
+    if (!rows.length) return [emptyPurchaseSource(true)]
+    if (!rows.some((r) => r.is_preferred)) rows[0].is_preferred = true
+    if (rows[rows.length - 1].url) rows.push(emptyPurchaseSource(false))
+    return rows
+  }
+
+  async function onSourceUrlBlur(index) {
+    const row = materialForm.purchase_sources[index]
+    if (!row?.url?.trim()) return
+    try {
+      const sug = await api.shops.suggestFromUrl(row.url.trim())
+      if (!row.shop_id && sug.existing_shop_id) {
+        materialForm.purchase_sources[index].shop_id = String(sug.existing_shop_id)
+        materialForm.purchase_sources[index].shop_name = sug.suggested_name
+      } else if (!row.shop_id && !row.shop_name) {
+        materialForm.purchase_sources[index].shop_name = sug.suggested_name
+      }
+      ensureTrailingSourceRow()
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function ensureTrailingSourceRow() {
+    const rows = materialForm.purchase_sources || []
+    const last = rows[rows.length - 1]
+    if (last && String(last.url || '').trim()) {
+      materialForm.purchase_sources = [...rows, emptyPurchaseSource(false)]
+    }
+  }
+
+  function setPreferredSource(index) {
+    materialForm.purchase_sources = materialForm.purchase_sources.map((r, i) => ({
+      ...r,
+      is_preferred: i === index,
+    }))
   }
   function emptyProduct() {
     return {
@@ -1585,13 +1654,20 @@
       const jobs = []
       if (!loadedBuckets.catalog) {
         jobs.push(
-          Promise.all([api.units(), api.locations(), api.media.list(), api.colors.list(), api.tags.list()]).then(
-            ([u, l, med, c, tags]) => {
+          Promise.all([
+            api.units(),
+            api.locations(),
+            api.media.list(),
+            api.colors.list(),
+            api.tags.list(),
+            api.shops.list(),
+          ]).then(([u, l, med, c, tags, shopRows]) => {
               units = u
               locations = l
               media = med
               colors = c
               allTags = tags
+              shops = shopRows
               const drafts = { ...catalogNewColorDrafts }
               for (const row of med) {
                 if (drafts[row.id] == null) drafts[row.id] = ''
@@ -1615,11 +1691,14 @@
       }
       if (t !== 'users' && !loadedBuckets.inventory) {
         jobs.push(
-          Promise.all([api.materials.list(), api.products.list()]).then(([m, p]) => {
-            materials = m
-            products = p
-            loadedBuckets.inventory = true
-          }),
+          Promise.all([api.materials.list(), api.products.list(), api.purchaseSources.overview()]).then(
+            ([m, p, overview]) => {
+              materials = m
+              products = p
+              purchaseSourceGroups = overview || []
+              loadedBuckets.inventory = true
+            },
+          ),
         )
       }
       if (['overview', 'orders', 'todos'].includes(t) && !loadedBuckets.orders) {
@@ -2226,6 +2305,9 @@
         material.reorder_quantity != null
           ? qtyInputValue(material.reorder_quantity, itemDecimals(material))
           : '',
+      alternatives_note: material.alternatives_note || '',
+      products_note: material.products_note || '',
+      purchase_sources: materialSourcesForForm(material),
       is_template: !!material.is_template,
       decimal_places: itemDecimals(material),
       family: material.family || '',
@@ -2634,6 +2716,51 @@
     }
   }
 
+  async function commitNewShop() {
+    const name = newShopName.trim()
+    if (!name || saving) return
+    saving = true
+    try {
+      await api.shops.create({ name })
+      newShopName = ''
+      await refresh({ silent: true })
+      showFlash('ok', `Shop „${name}“ angelegt.`)
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function renameShop(shop, nextName) {
+    const name = String(nextName || '').trim()
+    if (!name || name === shop.name || saving) return
+    saving = true
+    try {
+      await api.shops.update(shop.id, { name })
+      await refresh({ silent: true })
+      showFlash('ok', 'Shop umbenannt.')
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function deleteShop(shop) {
+    if (!confirm(`Shop „${shop.name}“ löschen?`)) return
+    saving = true
+    try {
+      await api.shops.remove(shop.id)
+      await refresh({ silent: true })
+      showFlash('ok', `Shop „${shop.name}“ gelöscht.`)
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
   function applySuggestion(s) {
     if (productModal && s.kind === 'material') {
       bomForm.kind = 'material'
@@ -2739,6 +2866,12 @@
       if (materialModal.mode === 'create' || nextMaterialTags) {
         colorPayload.tag_ids = materialModal.mode === 'create' ? materialForm.tagIds : nextMaterialTags
       }
+      const sourcesPayload = normalizePurchaseSources(materialForm.purchase_sources)
+      const notesPayload = {
+        alternatives_note: (materialForm.alternatives_note || '').trim() || null,
+        products_note: (materialForm.products_note || '').trim() || null,
+        purchase_sources: sourcesPayload,
+      }
       if (materialModal.mode === 'create') {
         const created = await api.materials.create({
           name: materialForm.name.trim(),
@@ -2751,6 +2884,7 @@
           decimal_places: itemDecimals(materialForm),
           stock_quantity: materialForm.stock_quantity,
           location_id: Number(materialForm.location_id),
+          ...notesPayload,
           ...colorPayload,
         })
         if (materialModal.orderLink) {
@@ -2775,6 +2909,7 @@
         is_template: !!materialForm.is_template,
         family: materialForm.family.trim() || null,
         decimal_places: itemDecimals(materialForm),
+        ...notesPayload,
         ...colorPayload,
       })
       showFlash('ok', 'Material gespeichert.')
@@ -2784,6 +2919,9 @@
         const fresh = materials.find((m) => m.id === materialModal.id)
         if (fresh) {
           materialModal = { ...materialModal, material: fresh }
+          materialForm.alternatives_note = fresh.alternatives_note || ''
+          materialForm.products_note = fresh.products_note || ''
+          materialForm.purchase_sources = materialSourcesForForm(fresh)
           initStockDrafts(fresh)
           captureEditBaseline('material')
         }
@@ -3711,7 +3849,16 @@
         <tbody>
           {#each rows as todo}
             <tr class:empty={todo.status === 'done'}>
-              <td><strong>{todoKindLabel(todo.kind)}</strong> · {todo.title}</td>
+              <td>
+                <strong>{todoKindLabel(todo.kind)}</strong> · {todo.title}
+                {#if todo.kind === 'purchase' && todo.preferred_source_url}
+                  <div>
+                    <a href={todo.preferred_source_url} target="_blank" rel="noopener noreferrer">
+                      {todo.preferred_shop_name || 'Zum Shop'}
+                    </a>
+                  </div>
+                {/if}
+              </td>
               <td>{todo.order_label || (todo.order_id ? `#${todo.order_id}` : '—')}</td>
               <td>{formatQty(todo.quantity)}</td>
               <td>{todo.status === 'done' ? 'erledigt' : 'offen'}</td>
@@ -3733,6 +3880,13 @@
           <h3>{todoKindLabel(todo.kind)}</h3>
           <p>{todo.title}</p>
           <p class="empty">{todo.order_label || (todo.order_id ? `#${todo.order_id}` : 'Mindestbestand')} · {formatQty(todo.quantity)}</p>
+          {#if todo.kind === 'purchase' && todo.preferred_source_url}
+            <p style="margin:0">
+              <a href={todo.preferred_source_url} target="_blank" rel="noopener noreferrer">
+                {todo.preferred_shop_name || 'Zum Shop'}
+              </a>
+            </p>
+          {/if}
           {#if todo.status === 'open'}
             <div class="row-actions"><button type="button" class="btn" onclick={() => startTodo(todo)}>Los</button></div>
           {/if}
@@ -5052,6 +5206,88 @@
           </table>
         </div>
       </div>
+
+      <div class="catalog-block">
+        <h3>Shops (Einkauf)</h3>
+        <p class="empty" style="margin-top:0">Shops gruppieren Bezugsquellen. Domains werden beim Speichern einer Material-URL vorgeschlagen.</p>
+        <div class="table-wrap catalog-table-wrap">
+          <table class="catalog-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Domain</th>
+                <th class="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each shops as s}
+                <tr>
+                  <td>
+                    <input
+                      class="catalog-cell"
+                      type="text"
+                      value={s.name}
+                      disabled={saving}
+                      onblur={(e) => renameShop(s, e.currentTarget.value)}
+                      aria-label={`Shop ${s.name}`}
+                    />
+                  </td>
+                  <td><span class="empty">{s.domain_hint || '—'}</span></td>
+                  <td class="col-actions">
+                    <button type="button" class="btn-icon danger" title="Löschen" aria-label="Shop löschen" disabled={saving} onclick={() => deleteShop(s)}>✕</button>
+                  </td>
+                </tr>
+              {:else}
+                <tr><td colspan="3" class="empty">Noch keine Shops.</td></tr>
+              {/each}
+              <tr class="catalog-new-row">
+                <td>
+                  <input
+                    class="catalog-cell"
+                    type="text"
+                    bind:value={newShopName}
+                    placeholder="Neuer Shop…"
+                    disabled={saving}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        commitNewShop()
+                      }
+                    }}
+                    onblur={commitNewShop}
+                    aria-label="Neuer Shop"
+                  />
+                </td>
+                <td colspan="2" class="col-actions"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="catalog-block">
+        <h3>Link-Übersicht (Bezugsquellen)</h3>
+        {#each purchaseSourceGroups as group}
+          <div style="margin-bottom:1rem">
+            <h4 style="margin:0 0 .35rem">{group.shop_name}{#if group.domain_hint} <span class="empty">({group.domain_hint})</span>{/if}</h4>
+            {#if group.sources?.length}
+              <ul style="margin:0;padding-left:1.2rem">
+                {#each group.sources as src}
+                  <li>
+                    <a href={src.url} target="_blank" rel="noopener noreferrer">{src.material_name}</a>
+                    {#if src.is_preferred} <span class="empty">bevorzugt</span>{/if}
+                    {#if src.note} <span class="empty">— {src.note}</span>{/if}
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="empty" style="margin:0">Keine Links.</p>
+            {/if}
+          </div>
+        {:else}
+          <p class="empty">Noch keine Bezugsquellen an Materialien.</p>
+        {/each}
+      </div>
     </section>
   {:else if tab === 'import'}
     <section class="panel">
@@ -5306,6 +5542,53 @@
         <label>Bestellmenge (optional)
           <input type="number" step={qtyStep(materialForm.decimal_places)} min="0" bind:value={materialForm.reorder_quantity} placeholder="leer = Packung / zuletzt" />
         </label>
+        <fieldset class="tag-picker">
+          <legend>Bezugsquellen</legend>
+          <p class="empty" style="margin:0 0 .5rem">Shop-Produkt-URL je Quelle. Neue Zeile erscheint, sobald die letzte URL gefüllt ist. Eine Quelle als bevorzugt markieren.</p>
+          {#each materialForm.purchase_sources as row, i}
+            <div class="form-grid" style="margin-bottom:.75rem;padding-bottom:.75rem;border-bottom:1px solid var(--border, #ddd)">
+              <label class="tag-check">
+                <input type="radio" name="preferred-source" checked={row.is_preferred} onchange={() => setPreferredSource(i)} />
+                Bevorzugt
+              </label>
+              <label>Shop
+                <select
+                  bind:value={row.shop_id}
+                  onchange={() => {
+                    const s = shops.find((x) => String(x.id) === String(row.shop_id))
+                    if (s) row.shop_name = s.name
+                  }}
+                >
+                  <option value="">aus URL / neu</option>
+                  {#each shops as s}<option value={s.id}>{s.name}</option>{/each}
+                </select>
+              </label>
+              {#if !row.shop_id}
+                <label>Shop-Name
+                  <input bind:value={row.shop_name} placeholder="wird aus URL vorgeschlagen" />
+                </label>
+              {/if}
+              <label>URL
+                <input type="url" bind:value={row.url} placeholder="https://…" onblur={() => onSourceUrlBlur(i)} oninput={ensureTrailingSourceRow} />
+              </label>
+              <label>Notiz
+                <input bind:value={row.note} placeholder="optional" />
+              </label>
+            </div>
+          {/each}
+        </fieldset>
+        <label>Alternativen (Freitext)
+          <textarea rows="2" bind:value={materialForm.alternatives_note} placeholder="z. B. anderes Filament / Lieferant"></textarea>
+        </label>
+        <label>Produktbezug (Freitext, ergänzend zur Stückliste)
+          <textarea rows="2" bind:value={materialForm.products_note} placeholder="optional"></textarea>
+        </label>
+        {#if materialModal.mode === 'edit' && (materialModal.material?.used_in_products || []).length}
+          <p class="empty" style="margin:0">
+            In Stücklisten:
+            {(materialModal.material.used_in_products || []).map((p) => p.name).join(', ')}
+          </p>
+        {/if}
         <label>Materialfamilie
           <input list="material-family-suggestions" bind:value={materialForm.family} placeholder="optional" />
         </label>
@@ -5702,6 +5985,13 @@
   <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (purchaseModal = null, purchaseTodoId = null)}>
     <div class="modal" role="dialog" aria-modal="true">
       <h3>Einkauf: {purchaseModal.name}</h3>
+      {#if purchaseModal.preferred_source_url}
+        <p style="margin:0 0 .75rem">
+          <a href={purchaseModal.preferred_source_url} target="_blank" rel="noopener noreferrer">
+            {purchaseModal.preferred_shop_name || 'Bevorzugte Bezugsquelle öffnen'}
+          </a>
+        </p>
+      {/if}
       <form class="form-grid" onsubmit={(e) => { e.preventDefault(); submitPurchase() }}>
         <label>Menge ({purchaseModal.unit})
           <input type="number" step={qtyStep(itemDecimals(purchaseModal))} min={qtyStep(itemDecimals(purchaseModal))} bind:value={purchaseForm.quantity} required />

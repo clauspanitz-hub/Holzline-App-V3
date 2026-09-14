@@ -16,6 +16,22 @@ _Avoid_: Packungsgröße als UI-Fremdwort; Bestellmenge; Nachbestellmenge
 Optionale typische Nachbestellmenge am Material (bewusst gepflegt). Steuert die Menge neuer Einkauf-Todos: Bestellmenge, sonst zuletzt bestellte Menge, sonst Einkaufsmenge (Packung).
 _Avoid_: Einkaufsmenge als Synonym; Fehlmenge als Pflicht-Todo-Menge; Bestellmenge = Mindestbestand
 
+**Bezugsquelle** (Material):
+Ein konkreter Shop-Produkt-Link für dieses Material (eigener Link je Material/Farbe). Felder: **Shop** (Katalog), URL, optionale Notiz; mehrere möglich, eine **bevorzugt**. Neue Zeile erst, wenn die vorherige gefüllt ist. In der Link-Übersicht nach Shop gruppiert. Bevorzugte Quelle erscheint im Einkauf-Todo/-Dialog.
+_Avoid_: Ein Link für alle Farben desselben Filaments; Lieferanten-CRM; Ersatzartikel als Bezugsquelle
+
+**Shop** (Einkaufskatalog):
+Name eines Bezugs-Shops zur Gruppierung von Bezugsquellen. Beim Einfügen einer URL wird der Name aus der Domain vorgeschlagen und bleibt editierbar.
+_Avoid_: Shop = Shopify-Herkunft der Bestellung; Shop nur als URL-String ohne Katalog
+
+**Alternativen** (Material):
+Freitext-Hinweis zu Ersatzmöglichkeiten (kein Verweis auf andere Material-Stammdaten).
+_Avoid_: Gegenseitige Material-Verknüpfung; Alternative = zweite Bezugsquelle
+
+**Produktbezug** (Material):
+Welche Produkte dieses Material in der Stückliste nutzen (automatisch) plus optionale Freitext-Notiz.
+_Avoid_: Manuell gepflegte Produktliste als alleinige Wahrheit
+
 **Zuletzt bestellt** (Material):
 Die Menge des letzten verbuchten Material-Einkaufs. Wird beim Speichern im Einkauf gesetzt; Fallback für Todo-Menge wenn keine Bestellmenge gepflegt ist.
 _Avoid_: Manuell Pflichtfeld; ersetzt Bestellmenge ohne Nachfrage
