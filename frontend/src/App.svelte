@@ -4436,7 +4436,7 @@
         <h2>Materialien</h2>
         <div class="row-actions">
           <button class="btn secondary" onclick={() => openBulkMaterials()}>Aus Farben…</button>
-          <button class="btn" onclick={openCreateMaterial}>Neu</button>
+          <button class="btn" onclick={() => openCreateMaterial()}>Neu</button>
         </div>
       </div>
       {#if selectedMaterialIds.length}
@@ -4570,7 +4570,7 @@
         <div class="row-actions">
           <button class="btn secondary" disabled={saving} onclick={suggestFamilies}>Familien vorschlagen</button>
           <button class="btn secondary" onclick={() => openBulkProducts()}>Aus Farben…</button>
-          <button class="btn" onclick={openCreateProduct}>Neu</button>
+          <button class="btn" onclick={() => openCreateProduct()}>Neu</button>
         </div>
       </div>
       {#if selectedProductIds.length}
