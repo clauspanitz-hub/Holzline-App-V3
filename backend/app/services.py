@@ -1310,17 +1310,41 @@ def create_product(db: Session, payload: ProductCreate) -> ProductRead:
 
 
 def _material_for_target_color(db: Session, source_material: Material, target_color_id: int) -> Material | None:
-    """Keep colorless materials; remap colored BOM lines to a material with the target color."""
+    """Keep colorless materials; remap colored BOM lines by name/family to the target color.
+
+    Must not pick an arbitrary material of the target color — Kerzensets have several
+    materials in the same colour (Kerze klein + Lebenslicht), and the wrong mapping
+    would deduct the wrong stock on Fertigen.
+    """
     if source_material.color_id is None:
         return source_material
     if source_material.color_id == target_color_id:
         return source_material
-    return db.scalars(
-        select(Material)
-        .where(Material.color_id == target_color_id)
-        .order_by(Material.id)
-        .limit(1)
-    ).first()
+    target_color = get_color(db, target_color_id)
+    source_color = source_material.color or get_color(db, source_material.color_id)
+    if not target_color or not source_color:
+        return None
+    name = source_material.name
+    for sep in (f" - {source_color.name}", f" {source_color.name}"):
+        if name.endswith(sep):
+            base = name[: -len(sep)]
+            for new_sep in (f" - {target_color.name}", f" {target_color.name}"):
+                candidate = f"{base}{new_sep}"
+                found = db.scalars(select(Material).where(Material.name == candidate).limit(1)).first()
+                if found:
+                    return found
+    if source_material.family:
+        matches = list(
+            db.scalars(
+                select(Material).where(
+                    Material.family == source_material.family,
+                    Material.color_id == target_color_id,
+                )
+            ).all()
+        )
+        if len(matches) == 1:
+            return matches[0]
+    return None
 
 
 def _product_for_target_color(db: Session, source: Product, target_color_id: int) -> Product | None:

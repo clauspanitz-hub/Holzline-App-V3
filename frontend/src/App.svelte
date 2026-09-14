@@ -2556,10 +2556,11 @@
         // Copy BOM from template if present
         if (productModal.templateBom?.length) {
           for (const line of productModal.templateBom) {
-            await api.products.addBom(created.id, {
-              material_id: line.material_id,
-              quantity_required: line.quantity_required,
-            })
+            const payload = { quantity_required: line.quantity_required }
+            if (line.product_id) payload.product_id = line.product_id
+            else if (line.material_id) payload.material_id = line.material_id
+            else continue
+            await api.products.addBom(created.id, payload)
           }
         }
         showFlash('ok', 'Produkt angelegt — Stückliste prüfen/ergänzen.')
