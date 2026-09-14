@@ -1957,6 +1957,139 @@ def manufacture(db: Session, product_id: int, quantity: Decimal, location_id: in
     return ManufactureResult(product=product_read(refreshed), warnings=warnings)
 
 
+def _load_set_variant(db: Session, variant_id: int) -> SetVariant:
+    variant = db.scalars(
+        select(SetVariant)
+        .where(SetVariant.id == variant_id)
+        .options(
+            selectinload(SetVariant.bom_lines).selectinload(SetBomLine.material),
+            selectinload(SetVariant.bom_lines).selectinload(SetBomLine.product),
+            selectinload(SetVariant.product_set),
+        )
+    ).first()
+    if not variant:
+        raise HTTPException(status_code=404, detail="Set-Variante nicht gefunden")
+    return variant
+
+
+def _set_line_label(variant: SetVariant) -> str:
+    set_name = variant.product_set.name if variant.product_set else "Set"
+    return f"{set_name} · {_variant_label(variant)}"
+
+
+def assemble_variant(
+    db: Session, variant_id: int, quantity: Decimal, location_id: int | None
+) -> "AssembleResult":
+    from app.schemas import AssembleBomPreview, AssembleResult
+
+    variant = _load_set_variant(db, variant_id)
+    if not variant.bom_lines:
+        raise HTTPException(status_code=400, detail="Varianten-Stückliste ist leer — Zusammenstellen nicht möglich")
+    location = get_location(db, location_id) if location_id else default_location(db)
+    qty = _q(quantity)
+    warnings: list[str] = []
+    bom_preview: list[AssembleBomPreview] = []
+
+    for line in variant.bom_lines:
+        needed = _q(qty * Decimal(line.quantity_required))
+        if line.material_id is not None:
+            mat_stock = _get_or_create_material_stock(db, line.material_id, location.id)
+            new_stock = _q(Decimal(mat_stock.quantity) - needed)
+            mat_name = line.material.name if line.material else f"#{line.material_id}"
+            unit = line.material.unit.value if line.material and hasattr(line.material.unit, "value") else (
+                str(line.material.unit) if line.material else None
+            )
+            if new_stock < 0:
+                warnings.append(
+                    f"Material „{mat_name}“ an {location.name} wird negativ "
+                    f"(Bestand {new_stock}{(' ' + unit) if unit else ''} nach Abbuchung von {needed})."
+                )
+            mat_stock.quantity = new_stock
+            bom_preview.append(
+                AssembleBomPreview(
+                    kind="material",
+                    name=mat_name,
+                    quantity_required=_q(line.quantity_required),
+                    quantity_total=needed,
+                    unit=unit,
+                )
+            )
+        elif line.product_id is not None:
+            prod_stock = _get_or_create_product_stock(db, line.product_id, location.id)
+            new_stock = _q(Decimal(prod_stock.quantity) - needed)
+            prod_name = line.product.name if line.product else f"#{line.product_id}"
+            if new_stock < 0:
+                warnings.append(
+                    f"Produkt „{prod_name}“ an {location.name} wird negativ "
+                    f"(Bestand {new_stock} nach Abbuchung von {needed})."
+                )
+            prod_stock.quantity = new_stock
+            bom_preview.append(
+                AssembleBomPreview(
+                    kind="product",
+                    name=prod_name,
+                    quantity_required=_q(line.quantity_required),
+                    quantity_total=needed,
+                    unit="Stk",
+                )
+            )
+
+    from app.purchase_todos import cleanup_stale_purchase_todos
+
+    cleanup_stale_purchase_todos(db)
+    db.commit()
+    set_name = variant.product_set.name if variant.product_set else "Set"
+    return AssembleResult(
+        set_name=set_name,
+        variant_label=_variant_label(variant),
+        warnings=warnings,
+        bom=bom_preview,
+    )
+
+
+def assemble_preview(db: Session, variant_id: int, quantity: Decimal) -> "AssembleResult":
+    """BOM-Vorschau ohne Buchung (für Dialog)."""
+    from app.schemas import AssembleBomPreview, AssembleResult
+
+    variant = _load_set_variant(db, variant_id)
+    qty = _q(quantity)
+    bom_preview: list[AssembleBomPreview] = []
+    for line in variant.bom_lines:
+        needed = _q(qty * Decimal(line.quantity_required))
+        if line.material_id is not None:
+            mat_name = line.material.name if line.material else f"#{line.material_id}"
+            unit = line.material.unit.value if line.material and hasattr(line.material.unit, "value") else (
+                str(line.material.unit) if line.material else None
+            )
+            bom_preview.append(
+                AssembleBomPreview(
+                    kind="material",
+                    name=mat_name,
+                    quantity_required=_q(line.quantity_required),
+                    quantity_total=needed,
+                    unit=unit,
+                )
+            )
+        elif line.product_id is not None:
+            prod_name = line.product.name if line.product else f"#{line.product_id}"
+            bom_preview.append(
+                AssembleBomPreview(
+                    kind="product",
+                    name=prod_name,
+                    quantity_required=_q(line.quantity_required),
+                    quantity_total=needed,
+                    unit="Stk",
+                )
+            )
+    set_name = variant.product_set.name if variant.product_set else "Set"
+    return AssembleResult(
+        set_name=set_name,
+        variant_label=_variant_label(variant),
+        warnings=[] if bom_preview else ["Varianten-Stückliste ist leer."],
+        bom=bom_preview,
+    )
+
+
 def _variant_label(variant: SetVariant) -> str:
     parts = [v for v in (variant.option1_value, variant.option2_value, variant.option3_value) if v]
     return " / ".join(parts) if parts else f"Variante #{variant.id}"
@@ -2080,6 +2213,8 @@ def product_set_read(
 
 
 def list_sets(db: Session) -> list[ProductSetRead]:
+    from app.schemas import SetVariantRead
+
     rows = db.scalars(
         select(ProductSet)
         .order_by(ProductSet.name)
@@ -2088,7 +2223,36 @@ def list_sets(db: Session) -> list[ProductSetRead]:
             selectinload(ProductSet.option_mappings),
         )
     ).all()
-    return [product_set_read(db, row, include_variants=False, include_mappings=False) for row in rows]
+    out: list[ProductSetRead] = []
+    for row in rows:
+        variants = [
+            SetVariantRead(
+                id=v.id,
+                option1_name=v.option1_name,
+                option1_value=v.option1_value,
+                option2_name=v.option2_name,
+                option2_value=v.option2_value,
+                option3_name=v.option3_name,
+                option3_value=v.option3_value,
+                label=_variant_label(v),
+                buildable_quantity=0,
+                bom=[],
+            )
+            for v in row.variants
+        ]
+        out.append(
+            ProductSetRead(
+                id=row.id,
+                name=row.name,
+                handle=row.handle,
+                count_materials_in_buildability=row.count_materials_in_buildability,
+                variant_count=len(row.variants),
+                mapping_count=len(row.option_mappings),
+                variants=variants,
+                option_mappings=[],
+            )
+        )
+    return out
 
 
 def create_set(db: Session, payload: ProductSetCreate) -> ProductSetRead:
@@ -2719,19 +2883,27 @@ def _todo_read(todo: WorkTodo) -> "TodoRead":
     from app.schemas import TodoRead
 
     order = todo.order
+    line = todo.line
+    variant = line.set_variant if line is not None else None
+    set_obj = variant.product_set if variant is not None else None
+    kind = todo.kind if todo.kind in ("manufacture", "create_article", "purchase", "assemble") else "create_article"
     return TodoRead(
         id=todo.id,
         order_id=todo.order_id,
         order_line_id=todo.order_line_id,
-        kind=todo.kind if todo.kind in ("manufacture", "create_article", "purchase") else "create_article",
+        kind=kind,
         category=todo.category if todo.category in ("workshop", "purchase") else "workshop",
         status=todo.status if todo.status in ("open", "done") else "open",
         title=todo.title,
         quantity=_q(todo.quantity),
         product_id=todo.product_id,
         material_id=todo.material_id,
+        set_variant_id=variant.id if variant else (line.set_variant_id if line else None),
+        set_id=set_obj.id if set_obj else (variant.set_id if variant else None),
         product_name=todo.product.name if todo.product else None,
         material_name=todo.material.name if todo.material else None,
+        set_name=set_obj.name if set_obj else None,
+        variant_label=_variant_label(variant) if variant else None,
         order_label=_order_display(order) if order else None,
         created_at=todo.created_at,
         completed_at=todo.completed_at,
@@ -2741,6 +2913,8 @@ def _todo_read(todo: WorkTodo) -> "TodoRead":
 def _line_read(line: OrderLine, include_todos: bool = True) -> "OrderLineRead":
     from app.schemas import OrderLineRead
 
+    variant = line.set_variant
+    set_obj = variant.product_set if variant is not None else None
     return OrderLineRead(
         id=line.id,
         quantity=_q(line.quantity),
@@ -2749,8 +2923,12 @@ def _line_read(line: OrderLine, include_todos: bool = True) -> "OrderLineRead":
         shop_title=line.shop_title,
         product_id=line.product_id,
         material_id=line.material_id,
+        set_variant_id=line.set_variant_id,
+        set_id=set_obj.id if set_obj else (variant.set_id if variant else None),
         product_name=line.product.name if line.product else None,
         material_name=line.material.name if line.material else None,
+        set_name=set_obj.name if set_obj else None,
+        variant_label=_variant_label(variant) if variant else None,
         suggested_product_id=line.suggested_product_id,
         suggested_product_name=line.suggested_product.name if line.suggested_product else None,
         todos=[_todo_read(t) for t in line.todos] if include_todos else [],
@@ -2789,12 +2967,20 @@ def _order_load(db: Session, order_id: int) -> CustomerOrder:
         .options(
             selectinload(CustomerOrder.lines).selectinload(OrderLine.product),
             selectinload(CustomerOrder.lines).selectinload(OrderLine.material),
+            selectinload(CustomerOrder.lines)
+            .selectinload(OrderLine.set_variant)
+            .selectinload(SetVariant.product_set),
             selectinload(CustomerOrder.lines).selectinload(OrderLine.suggested_product),
             selectinload(CustomerOrder.lines).selectinload(OrderLine.todos).selectinload(WorkTodo.product),
             selectinload(CustomerOrder.lines).selectinload(OrderLine.todos).selectinload(WorkTodo.material),
+            selectinload(CustomerOrder.lines).selectinload(OrderLine.todos).selectinload(WorkTodo.line),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.product),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.material),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.order),
+            selectinload(CustomerOrder.todos)
+            .selectinload(WorkTodo.line)
+            .selectinload(OrderLine.set_variant)
+            .selectinload(SetVariant.product_set),
         )
     ).first()
     if not order:
@@ -2844,6 +3030,20 @@ def _sync_line_todos(db: Session, line: OrderLine) -> None:
     db.flush()
 
     qty = _q(line.quantity)
+    if line.set_variant_id is not None:
+        variant = line.set_variant or _load_set_variant(db, line.set_variant_id)
+        db.add(
+            WorkTodo(
+                order_id=line.order_id,
+                order_line_id=line.id,
+                kind="assemble",
+                category="workshop",
+                status="open",
+                title=f"Zusammenstellen: {_set_line_label(variant)}",
+                quantity=qty,
+            )
+        )
+        return
     if line.product_id is None and line.material_id is None:
         db.add(
             WorkTodo(
@@ -2893,14 +3093,23 @@ def create_order(db: Session, payload: "OrderCreate") -> "OrderRead":
         label = (item.label or "").strip()
         product = _load_product(db, item.product_id) if item.product_id else None
         material = _load_material(db, item.material_id) if item.material_id else None
+        variant = _load_set_variant(db, item.set_variant_id) if item.set_variant_id else None
         if not label:
-            label = product.name if product else (material.name if material else "")
+            if product:
+                label = product.name
+            elif material:
+                label = material.name
+            elif variant:
+                label = _set_line_label(variant)
+            else:
+                label = ""
         line = OrderLine(
             order_id=order.id,
             quantity=_q(item.quantity),
             label=label,
             product_id=product.id if product else None,
             material_id=material.id if material else None,
+            set_variant_id=variant.id if variant else None,
         )
         db.add(line)
         db.flush()
@@ -2919,10 +3128,17 @@ def list_orders(db: Session, status: str | None = None) -> list["OrderRead"]:
         .options(
             selectinload(CustomerOrder.lines).selectinload(OrderLine.product),
             selectinload(CustomerOrder.lines).selectinload(OrderLine.material),
+            selectinload(CustomerOrder.lines)
+            .selectinload(OrderLine.set_variant)
+            .selectinload(SetVariant.product_set),
             selectinload(CustomerOrder.lines).selectinload(OrderLine.suggested_product),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.product),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.material),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.order),
+            selectinload(CustomerOrder.todos)
+            .selectinload(WorkTodo.line)
+            .selectinload(OrderLine.set_variant)
+            .selectinload(SetVariant.product_set),
         )
     )
     if status in ("review", "open", "ready", "shipped"):
@@ -2989,10 +3205,19 @@ def link_order_line(db: Session, order_id: int, line_id: int, payload: "OrderLin
     if payload.unassign:
         line.product_id = None
         line.material_id = None
+        line.set_variant_id = None
+    elif payload.set_variant_id:
+        variant = _load_set_variant(db, payload.set_variant_id)
+        line.set_variant_id = variant.id
+        line.product_id = None
+        line.material_id = None
+        line.suggested_product_id = None
+        line.label = _set_line_label(variant)
     elif payload.product_id:
         product = _load_product(db, payload.product_id)
         line.product_id = product.id
         line.material_id = None
+        line.set_variant_id = None
         line.suggested_product_id = None
         if order.origin not in ("shopify", "etsy"):
             line.label = product.name
@@ -3011,12 +3236,13 @@ def link_order_line(db: Session, order_id: int, line_id: int, payload: "OrderLin
         material = _load_material(db, payload.material_id)
         line.material_id = material.id
         line.product_id = None
+        line.set_variant_id = None
         line.label = material.name
     elif payload.quantity is None:
-        raise HTTPException(status_code=400, detail="Produkt, Material oder Menge angeben")
+        raise HTTPException(status_code=400, detail="Produkt, Material, Set-Variante oder Menge angeben")
     if payload.quantity is not None:
         line.quantity = _q(payload.quantity)
-    if payload.product_id or payload.material_id:
+    if payload.product_id or payload.material_id or payload.set_variant_id:
         _complete_create_article_todos(line)
     if order.status != "review":
         _sync_line_todos(db, line)
@@ -3035,7 +3261,7 @@ def queue_create_article(db: Session, order_id: int, line_id: int) -> "OrderRead
     line = next((ln for ln in order.lines if ln.id == line_id), None)
     if line is None:
         raise HTTPException(status_code=404, detail="Position nicht gefunden")
-    if line.product_id is not None or line.material_id is not None:
+    if line.product_id is not None or line.material_id is not None or line.set_variant_id is not None:
         raise HTTPException(status_code=400, detail="Position ist bereits zugeordnet")
     existing = next(
         (t for t in line.todos if t.status == "open" and t.kind == "create_article"),
@@ -3188,6 +3414,9 @@ def list_todos(
             selectinload(WorkTodo.product),
             selectinload(WorkTodo.material),
             selectinload(WorkTodo.order),
+            selectinload(WorkTodo.line)
+            .selectinload(OrderLine.set_variant)
+            .selectinload(SetVariant.product_set),
         )
     )
     if category in ("workshop", "purchase"):
@@ -3225,6 +3454,9 @@ def complete_todo(db: Session, todo_id: int) -> "TodoRead":
             selectinload(WorkTodo.product),
             selectinload(WorkTodo.material),
             selectinload(WorkTodo.order),
+            selectinload(WorkTodo.line)
+            .selectinload(OrderLine.set_variant)
+            .selectinload(SetVariant.product_set),
         )
     ).first()
     return _todo_read(todo)

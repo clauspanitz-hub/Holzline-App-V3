@@ -35,6 +35,8 @@ from app.schemas import (
     LoginRequest,
     ManufactureRequest,
     ManufactureResult,
+    AssembleRequest,
+    AssembleResult,
     MaterialBulkUpdate,
     MaterialCreate,
     MaterialRead,
@@ -389,6 +391,24 @@ def manufacture(
     db: Session = Depends(get_db),
 ) -> ManufactureResult:
     return services.manufacture(db, product_id, payload.quantity, payload.location_id)
+
+
+@router.get("/sets/variants/{variant_id}/assemble-preview", response_model=AssembleResult)
+def assemble_preview(
+    variant_id: int,
+    quantity: float = Query(1),
+    db: Session = Depends(get_db),
+) -> AssembleResult:
+    return services.assemble_preview(db, variant_id, quantity)
+
+
+@router.post("/sets/variants/{variant_id}/assemble", response_model=AssembleResult)
+def assemble_variant(
+    variant_id: int,
+    payload: AssembleRequest,
+    db: Session = Depends(get_db),
+) -> AssembleResult:
+    return services.assemble_variant(db, variant_id, payload.quantity, payload.location_id)
 
 
 @router.get("/sets", response_model=list[ProductSetRead])

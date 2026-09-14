@@ -327,6 +327,26 @@ class ManufactureResult(BaseModel):
     warnings: list[str]
 
 
+class AssembleRequest(BaseModel):
+    quantity: Quantity = Field(gt=0)
+    location_id: int | None = None
+
+
+class AssembleBomPreview(BaseModel):
+    kind: Literal["product", "material"]
+    name: str
+    quantity_required: Quantity
+    quantity_total: Quantity
+    unit: str | None = None
+
+
+class AssembleResult(BaseModel):
+    set_name: str
+    variant_label: str
+    warnings: list[str] = []
+    bom: list[AssembleBomPreview] = []
+
+
 class TransferRequest(BaseModel):
     from_location_id: int
     to_location_id: int
@@ -701,18 +721,25 @@ class OrderLineCreate(BaseModel):
     quantity: Quantity = Field(gt=0)
     product_id: int | None = None
     material_id: int | None = None
+    set_variant_id: int | None = None
     label: str | None = Field(default=None, max_length=300)
 
     @model_validator(mode="after")
     def need_product_or_label(self) -> "OrderLineCreate":
-        if self.product_id is None and self.material_id is None and not (self.label or "").strip():
-            raise ValueError("Position braucht Produkt, Material oder Freitext")
+        ids = [self.product_id, self.material_id, self.set_variant_id]
+        if sum(1 for x in ids if x is not None) > 1:
+            raise ValueError("Nur eines von Produkt, Material oder Set-Variante")
+        if self.product_id is None and self.material_id is None and self.set_variant_id is None and not (
+            self.label or ""
+        ).strip():
+            raise ValueError("Position braucht Produkt, Material, Set-Variante oder Freitext")
         return self
 
 
 class OrderLineLink(BaseModel):
     product_id: int | None = None
     material_id: int | None = None
+    set_variant_id: int | None = None
     quantity: Quantity | None = None
     unassign: bool = False
 
@@ -750,15 +777,19 @@ class TodoRead(BaseModel):
     id: int
     order_id: int | None = None
     order_line_id: int | None = None
-    kind: Literal["manufacture", "create_article", "purchase"]
+    kind: Literal["manufacture", "create_article", "purchase", "assemble"]
     category: Literal["workshop", "purchase"]
     status: Literal["open", "done"]
     title: str
     quantity: Quantity
     product_id: int | None = None
     material_id: int | None = None
+    set_variant_id: int | None = None
+    set_id: int | None = None
     product_name: str | None = None
     material_name: str | None = None
+    set_name: str | None = None
+    variant_label: str | None = None
     order_label: str | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
@@ -783,8 +814,12 @@ class OrderLineRead(BaseModel):
     shop_title: str | None = None
     product_id: int | None = None
     material_id: int | None = None
+    set_variant_id: int | None = None
+    set_id: int | None = None
     product_name: str | None = None
     material_name: str | None = None
+    set_name: str | None = None
+    variant_label: str | None = None
     suggested_product_id: int | None = None
     suggested_product_name: str | None = None
     todos: list[TodoRead] = []

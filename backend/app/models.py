@@ -440,6 +440,9 @@ class OrderLine(Base):
     shop_title: Mapped[str | None] = mapped_column(String(300), nullable=True)
     product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
     material_id: Mapped[int | None] = mapped_column(ForeignKey("materials.id", ondelete="SET NULL"), nullable=True)
+    set_variant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("set_variants.id", ondelete="SET NULL"), nullable=True
+    )
     suggested_product_id: Mapped[int | None] = mapped_column(
         ForeignKey("products.id", ondelete="SET NULL"), nullable=True
     )
@@ -447,6 +450,7 @@ class OrderLine(Base):
     order: Mapped[CustomerOrder] = relationship(back_populates="lines")
     product: Mapped[Product | None] = relationship(foreign_keys=[product_id])
     material: Mapped[Material | None] = relationship()
+    set_variant: Mapped[SetVariant | None] = relationship()
     suggested_product: Mapped[Product | None] = relationship(foreign_keys=[suggested_product_id])
     todos: Mapped[list["WorkTodo"]] = relationship(back_populates="line", cascade="all, delete-orphan")
 
@@ -472,7 +476,7 @@ class WorkTodo(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), nullable=True)
     order_line_id: Mapped[int | None] = mapped_column(ForeignKey("order_lines.id", ondelete="CASCADE"), nullable=True)
-    kind: Mapped[str] = mapped_column(String(30), nullable=False)  # manufacture | create_article | purchase
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)  # manufacture | create_article | purchase | assemble
     category: Mapped[str] = mapped_column(String(20), nullable=False, default="workshop")  # workshop | purchase
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")  # open | done
     title: Mapped[str] = mapped_column(String(300), nullable=False)

@@ -78,6 +78,7 @@
   let materialModal = $state(null)
   let productModal = $state(null)
   let manufactureModal = $state(null)
+  let assembleModal = $state(null) // { todo, set_name, variant_label, bom, warnings }
   let purchaseModal = $state(null)
   let transferModal = $state(null)
   let transformModal = $state(null)
@@ -96,6 +97,9 @@
   let orderForm = $state(emptyOrderForm())
   let manufactureTodoId = $state(null)
   let purchaseTodoId = $state(null)
+  let assembleTodoId = $state(null)
+  let assembleForm = $state({ location_id: '', quantity: '1' })
+  let assemblePreview = $state(null)
   let articleChoiceTodo = $state(null)
   let ignoredHandlesModal = $state(false)
   let ignoredHandles = $state([])
@@ -233,7 +237,7 @@
   }
 
   function emptyOrderLine() {
-    return { product_id: '', label: '', quantity: '1' }
+    return { product_id: '', set_variant_id: '', label: '', quantity: '1' }
   }
 
   function emptyOrderForm() {
@@ -245,14 +249,43 @@
     }
   }
 
+  function variantOptionLabel(setItem, variant) {
+    const parts = [variant.option1_value, variant.option2_value, variant.option3_value].filter(Boolean)
+    const vLabel = parts.length ? parts.join(' / ') : variant.label || `Variante #${variant.id}`
+    return `${setItem.name} · ${vLabel}`
+  }
+
+  function allSetVariantOptions() {
+    const out = []
+    for (const s of sets) {
+      for (const v of s.variants || []) {
+        out.push({ id: v.id, setId: s.id, label: variantOptionLabel(s, v) })
+      }
+    }
+    return out
+  }
+
   function onOrderProductPicked(index, productId) {
     const lines = [...orderForm.lines]
-    lines[index] = { ...lines[index], product_id: productId }
+    lines[index] = { ...lines[index], product_id: productId, set_variant_id: productId ? '' : lines[index].set_variant_id }
     if (productId) {
       const product = products.find((p) => String(p.id) === String(productId))
       if (product) lines[index].label = product.name
     }
     if (productId && index === lines.length - 1) {
+      lines.push(emptyOrderLine())
+    }
+    orderForm.lines = lines
+  }
+
+  function onOrderSetVariantPicked(index, variantId) {
+    const lines = [...orderForm.lines]
+    lines[index] = { ...lines[index], set_variant_id: variantId, product_id: variantId ? '' : lines[index].product_id }
+    if (variantId) {
+      const opt = allSetVariantOptions().find((o) => String(o.id) === String(variantId))
+      if (opt) lines[index].label = opt.label
+    }
+    if (variantId && index === lines.length - 1) {
       lines.push(emptyOrderLine())
     }
     orderForm.lines = lines
@@ -270,8 +303,10 @@
     if (!open.length) return ''
     const fertigen = open.filter((t) => t.kind === 'manufacture').length
     const anlegen = open.filter((t) => t.kind === 'create_article').length
+    const assemble = open.filter((t) => t.kind === 'assemble').length
     const bits = []
     if (fertigen) bits.push(`${fertigen}× Fertigen`)
+    if (assemble) bits.push(`${assemble}× Zusammenstellen`)
     if (anlegen) bits.push(`${anlegen}× Anlegen`)
     if (!bits.length) bits.push(`${open.length} offen`)
     return bits.join(', ')
@@ -298,6 +333,7 @@
     if (kind === 'manufacture') return 'Fertigen'
     if (kind === 'create_article') return 'Artikel anlegen'
     if (kind === 'purchase') return 'Einkauf'
+    if (kind === 'assemble') return 'Zusammenstellen'
     return kind
   }
 
@@ -716,6 +752,14 @@
       openPurchase(material, { quantity: todo.quantity, todoId: todo.id })
       return
     }
+    if (todo.kind === 'assemble') {
+      if (!todo.set_variant_id) {
+        showFlash('error', 'Keine Set-Variante an diesem Todo.')
+        return
+      }
+      openAssemble(todo)
+      return
+    }
     if (todo.kind === 'create_article') {
       const order = orders.find((o) => o.id === todo.order_id)
       const line = orderLineForTodo(todo)
@@ -775,11 +819,12 @@
       .map((ln) => ({
         quantity: ln.quantity,
         product_id: ln.product_id ? Number(ln.product_id) : null,
+        set_variant_id: ln.set_variant_id ? Number(ln.set_variant_id) : null,
         label: (ln.label || '').trim() || null,
       }))
-      .filter((ln) => ln.product_id || ln.label)
+      .filter((ln) => ln.product_id || ln.set_variant_id || ln.label)
     if (!lines.length) {
-      showFlash('error', 'Mindestens eine Position (Produkt oder Freitext).')
+      showFlash('error', 'Mindestens eine Position (Produkt, Set oder Freitext).')
       return
     }
     saving = true
@@ -912,6 +957,74 @@
       loadedBuckets.orders = false
       await refresh()
       if (result?.notices?.length) showFlash('warn', result.notices.join(' '))
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function setReviewLineSetVariant(order, line, variantId) {
+    saving = true
+    try {
+      let result
+      if (variantId) {
+        result = await api.orders.linkLine(order.id, line.id, { set_variant_id: Number(variantId) })
+      } else {
+        result = await api.orders.linkLine(order.id, line.id, { unassign: true })
+      }
+      loadedBuckets.orders = false
+      await refresh()
+      if (result?.notices?.length) showFlash('warn', result.notices.join(' '))
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function openAssemble(todo) {
+    assembleTodoId = todo.id
+    assembleForm = {
+      quantity: String(todo.quantity ?? 1),
+      location_id: String(locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || ''),
+    }
+    assemblePreview = null
+    assembleModal = {
+      todo,
+      set_name: todo.set_name || 'Set',
+      variant_label: todo.variant_label || '',
+      set_variant_id: todo.set_variant_id,
+    }
+    try {
+      const preview = await api.sets.assemblePreview(todo.set_variant_id, todo.quantity)
+      assemblePreview = preview
+      assembleModal = {
+        ...assembleModal,
+        set_name: preview.set_name,
+        variant_label: preview.variant_label,
+      }
+    } catch (error) {
+      assemblePreview = { bom: [], warnings: [error.message] }
+    }
+  }
+
+  async function runAssemble() {
+    if (!assembleModal?.set_variant_id) return
+    saving = true
+    try {
+      const result = await api.sets.assemble(assembleModal.set_variant_id, {
+        quantity: assembleForm.quantity,
+        location_id: Number(assembleForm.location_id),
+      })
+      if (assembleTodoId) {
+        await api.todos.complete(assembleTodoId)
+        assembleTodoId = null
+      }
+      assembleModal = null
+      assemblePreview = null
+      await refresh()
+      showFlash(result.warnings?.length ? 'warn' : 'ok', result.warnings?.join(' ') || 'Zusammenstellen gebucht.')
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -1521,7 +1634,7 @@
           ),
         )
       }
-      if (['sets', 'import'].includes(t) && !loadedBuckets.sets) {
+      if (['overview', 'orders', 'todos', 'sets', 'import'].includes(t) && !loadedBuckets.sets) {
         jobs.push(
           api.sets.list().then((s) => {
             sets = s
@@ -4490,7 +4603,19 @@
                       onchange={(v) => setReviewLineProduct(order, ln, v)}
                     />
                   </label>
-                  {#if !ln.product_id && !ln.material_id}
+                  <label class="review-line-assign">Set-Variante
+                    <select
+                      value={ln.set_variant_id || ''}
+                      disabled={saving}
+                      onchange={(e) => setReviewLineSetVariant(order, ln, e.currentTarget.value)}
+                    >
+                      <option value="">— kein Set —</option>
+                      {#each allSetVariantOptions() as opt}
+                        <option value={opt.id}>{opt.label}</option>
+                      {/each}
+                    </select>
+                  </label>
+                  {#if !ln.product_id && !ln.material_id && !ln.set_variant_id}
                     <div class="row-actions" style="margin-top:.35rem">
                       <button
                         type="button"
@@ -4545,9 +4670,20 @@
               <FamilySelect
                 value={line.product_id}
                 items={products}
-                emptyLabel="Freitext / später anlegen"
+                emptyLabel="Freitext / Set / später"
                 onchange={(v) => onOrderProductPicked(i, v)}
               />
+            </label>
+            <label>Set-Variante
+              <select
+                value={line.set_variant_id}
+                onchange={(e) => onOrderSetVariantPicked(i, e.currentTarget.value)}
+              >
+                <option value="">— kein Set —</option>
+                {#each allSetVariantOptions() as opt}
+                  <option value={opt.id}>{opt.label}</option>
+                {/each}
+              </select>
             </label>
             <label>Menge<input type="number" step={qtyStep(0)} min="1" bind:value={line.quantity} required /></label>
             <div class="row-actions">
@@ -4555,7 +4691,7 @@
                 <button type="button" class="btn secondary" onclick={() => { orderForm.lines = orderForm.lines.filter((_, j) => j !== i) }}>Entfernen</button>
               {/if}
             </div>
-            {#if !line.product_id}
+            {#if !line.product_id && !line.set_variant_id}
               <label class="order-line-free">Freitext
                 <input bind:value={line.label} placeholder="z. B. Schild Mia 2026" />
               </label>
@@ -5521,6 +5657,41 @@
         <div class="modal-actions">
           <button type="button" class="btn secondary" onclick={() => { manufactureModal = null; manufactureTodoId = null }}>Abbrechen</button>
           <button class="btn" disabled={saving}>Fertigen</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}
+
+{#if assembleModal}
+  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (assembleModal = null, assembleTodoId = null, assemblePreview = null)}>
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Zusammenstellen: {assembleModal.set_name}{#if assembleModal.variant_label} · {assembleModal.variant_label}{/if}</h3>
+      <form class="form-grid" onsubmit={(e) => { e.preventDefault(); runAssemble() }}>
+        <label>Menge<input type="number" step={qtyStep(0)} min="1" bind:value={assembleForm.quantity} required readonly /></label>
+        <label>Standort
+          <select bind:value={assembleForm.location_id}>{#each locations as l}<option value={l.id}>{l.name}</option>{/each}</select>
+        </label>
+        {#if assemblePreview?.bom?.length}
+          <div style="grid-column:1/-1">
+            <p class="empty" style="margin:0 0 .35rem">Abbuchung laut Stückliste:</p>
+            <ul class="plain-list">
+              {#each assemblePreview.bom as row}
+                <li class="bom-line">
+                  <div>{row.kind === 'material' ? 'Material' : 'Produkt'} <strong>{row.name}</strong></div>
+                  <div class="empty">{formatQty(row.quantity_total)}{row.unit ? ` ${row.unit}` : ''}</div>
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {:else if assemblePreview}
+          <p class="empty" style="grid-column:1/-1">{assemblePreview.warnings?.join(' ') || 'Keine Stücklistenzeilen.'}</p>
+        {:else}
+          <p class="empty" style="grid-column:1/-1">Stückliste wird geladen…</p>
+        {/if}
+        <div class="modal-actions">
+          <button type="button" class="btn secondary" onclick={() => { assembleModal = null; assembleTodoId = null; assemblePreview = null }}>Abbrechen</button>
+          <button class="btn" disabled={saving || !assemblePreview?.bom?.length}>Zusammenstellen</button>
         </div>
       </form>
     </div>

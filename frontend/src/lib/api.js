@@ -180,6 +180,10 @@ export const api = {
       request(`/api/sets/${id}/variants/${variantId}/bom`, { method: 'POST', body: JSON.stringify(body) }),
     removeBom: (id, variantId, lineId) =>
       request(`/api/sets/${id}/variants/${variantId}/bom/${lineId}`, { method: 'DELETE' }),
+    assemblePreview: (variantId, quantity) =>
+      request(`/api/sets/variants/${variantId}/assemble-preview?quantity=${encodeURIComponent(quantity)}`),
+    assemble: (variantId, body) =>
+      request(`/api/sets/variants/${variantId}/assemble`, { method: 'POST', body: JSON.stringify(body) }),
     importShopify: (file) => {
       const form = new FormData()
       form.append('file', file)

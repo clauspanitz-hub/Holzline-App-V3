@@ -191,6 +191,7 @@ def init_db() -> None:
         migrate_color_hex(engine, db)
         migrate_material_decimal_places(engine)
         migrate_purchase_todos(engine)
+        migrate_order_line_set_variant(engine)
         seed_admin_user(db)
         from app.services import backfill_incomplete_tags, ensure_system_incomplete_tags
 
@@ -610,6 +611,23 @@ def migrate_color_hex(engine, db: Session) -> None:
         if guessed:
             color.hex = guessed
     db.commit()
+
+
+def migrate_order_line_set_variant(engine) -> None:
+    """Set-Variante an Bestellposition (ADR 0020)."""
+    insp = inspect(engine)
+    if "order_lines" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("order_lines")}
+    if "set_variant_id" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE order_lines ADD COLUMN set_variant_id INTEGER "
+                "REFERENCES set_variants(id) ON DELETE SET NULL"
+            )
+        )
 
 
 def migrate_purchase_todos(engine) -> None:
