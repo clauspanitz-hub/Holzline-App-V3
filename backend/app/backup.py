@@ -20,10 +20,12 @@ from app import services
 from app.models import (
     Color,
     ColorMedium,
+    CustomerOrder,
     Location,
     Material,
     MaterialStock,
     OptionMapping,
+    OrderLine,
     Product,
     ProductMaterial,
     ProductSet,
@@ -34,6 +36,7 @@ from app.models import (
     StockMovementKind,
     Tag,
     Unit,
+    WorkTodo,
     material_tags,
     product_tags,
 )
@@ -450,7 +453,16 @@ def _validate_envelope(payload: Any) -> None:
 
 
 def _wipe_app_data(db: Session) -> None:
-    """App-Daten löschen — FK-sichere Reihenfolge. Standorte bleiben erhalten."""
+    """App-Daten löschen — FK-sichere Reihenfolge. Standorte und Benutzer bleiben erhalten.
+
+    Bestellungen/Todos sind nicht im Backup-Format. Würden sie stehen bleiben,
+    setzte das anschließende Produkt-Löschen ihre product_id/material_id auf NULL
+    (ON DELETE SET NULL). Shopify-Sync überspringt die Nummern danach als
+    bereits vorhanden — die Aufträge bleiben dauerhaft ohne Zuordnung.
+    """
+    db.execute(delete(WorkTodo))
+    db.execute(delete(OrderLine))
+    db.execute(delete(CustomerOrder))
     db.execute(delete(StockMovement))
     db.execute(delete(SetBomLine))
     db.execute(delete(OptionMapping))
