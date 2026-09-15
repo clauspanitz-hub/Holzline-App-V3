@@ -71,6 +71,7 @@
     const replaceOk = confirm(
       'Alle bestehenden Daten ersetzen?\n\n' +
         'WARNUNG: Der gesamte App-Stand wird durch die Sicherung ersetzt. ' +
+        'Bestellungen und Todos sind nicht in der JSON-Datei und werden mitgelöscht. ' +
         'Dies kann nicht rückgängig gemacht werden.\n\n' +
         'Wirklich fortfahren?',
     )

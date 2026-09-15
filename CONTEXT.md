@@ -180,7 +180,7 @@ Eigene Ansicht für Bestand von Quellprodukten (mit „Wird zu“) an MA1/MA2, i
 _Avoid_: Nur Tabellenfilter statt eigener Überblick; Tags als alleinige „bei MA“-Anzeige; Bearbeiten-Dialog auf Bei Mitarbeitern; Stammdaten-Pflege im MA-Überblick
 
 **Datensicherung** (Export/Import):
-Vollständiger App-Stand als eine JSON-Datei zum Herunterladen und Wiederherstellen (Kataloge, Materialien, Produkte, Bestände, Sets u. a.). Bewegungs-Historie optional per Checkbox (Standard: aus). Beim Import wählt der Nutzer: **Ersetzen** (bestehende Daten werden geleert/ersetzt) oder **Zusammenführen** (Match über Name bzw. SKU/Handle/Farbe+Medium; fehlende anlegen, Stammdaten aktualisieren; Bestände je Standort beim Match **setzen**, nicht addieren) — jeweils mit Bestätigung. Kein Ersatz für Host-Backups der SQLite-Datei.
+Vollständiger App-Stand als eine JSON-Datei zum Herunterladen und Wiederherstellen (Kataloge, Materialien, Produkte, Bestände, Sets u. a.). Bewegungs-Historie optional per Checkbox (Standard: aus). Beim Import wählt der Nutzer: **Ersetzen** (bestehende Daten werden geleert/ersetzt; Bestellungen und Todos sind nicht in der JSON-Datei und werden mitgeleert, sonst hingen sie ohne Produktzuordnung) oder **Zusammenführen** (Match über Name bzw. SKU/Handle/Farbe+Medium; fehlende anlegen, Stammdaten aktualisieren; Bestände je Standort beim Match **setzen**, nicht addieren; Bestellungen bleiben) — jeweils mit Bestätigung. Kein Ersatz für Host-Backups der SQLite-Datei.
 _Avoid_: Stiller Import ohne Moduswahl; Merge über interne IDs als Normalfall; Bestände beim Merge addieren; nur Excel-CSVs als einzige Sicherung
 
 **Übersicht** (Listen):
