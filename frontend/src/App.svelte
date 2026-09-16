@@ -29,6 +29,9 @@
   let units = $state([])
   let locations = $state([])
   let media = $state([])
+  let shops = $state([])
+  let purchaseSourceGroups = $state([])
+  let newShopName = $state('')
   let colors = $state([])
   let allTags = $state([])
   let catalogFilter = $state(emptyCatalogFilter())
@@ -36,6 +39,10 @@
   let overviewIncompleteOpen = $state(false)
   let overviewIgnoredOpen = $state(false)
   let overviewOrdersOpen = $state(true)
+  let overviewTodosOpen = $state(true)
+  let overviewTageslageOpen = $state(true)
+  let tageslage = $state(null)
+  let tageslageLoading = $state(false)
   let extraMatCriticalOpen = $state(false)
   let extraMatIncompleteOpen = $state(false)
   let extraMatIgnoredOpen = $state(false)
@@ -45,8 +52,9 @@
   let sellingPriceConflicts = $state(null)
   let sellingPriceStage = $state('ask')
   let sellingPricePicks = $state({})
-  let overviewTodosOpen = $state(true)
   let shippedOrdersOpen = $state(false)
+  let manualOrderOpen = $state(false)
+  let etsyMails = $state([])
   let colorSuggestions = $state([])
   let loading = $state(true)
   let flash = $state(null)
@@ -54,6 +62,7 @@
   let flashClearTimer = null
   let saveOkTimer = null
   let saving = $state(false)
+  let pendingDeleteOrderId = $state(null)
 
   /** Clientseitige Suche/Sortierung je Listen-Block */
   let listUi = $state({
@@ -72,6 +81,7 @@
   let materialModal = $state(null)
   let productModal = $state(null)
   let manufactureModal = $state(null)
+  let assembleModal = $state(null) // { todo, set_name, variant_label, bom, warnings }
   let purchaseModal = $state(null)
   let transferModal = $state(null)
   let transformModal = $state(null)
@@ -89,6 +99,10 @@
   let todoStatusFilter = $state('open')
   let orderForm = $state(emptyOrderForm())
   let manufactureTodoId = $state(null)
+  let purchaseTodoId = $state(null)
+  let assembleTodoId = $state(null)
+  let assembleForm = $state({ location_id: '', quantity: '1' })
+  let assemblePreview = $state(null)
   let articleChoiceTodo = $state(null)
   let ignoredHandlesModal = $state(false)
   let ignoredHandles = $state([])
@@ -192,6 +206,10 @@
       purchase_quantity: '1',
       purchase_price: '0',
       min_stock: '',
+      reorder_quantity: '',
+      alternatives_note: '',
+      products_note: '',
+      purchase_sources: [emptyPurchaseSource(true)],
       is_template: false,
       decimal_places: 0,
       family: '',
@@ -200,6 +218,69 @@
       color_id: '',
       tagIds: [],
     }
+  }
+
+  function emptyPurchaseSource(preferred = false) {
+    return { shop_id: '', shop_name: '', url: '', note: '', is_preferred: !!preferred }
+  }
+
+  function normalizePurchaseSources(rows) {
+    const filled = (rows || []).filter((r) => String(r.url || '').trim())
+    if (!filled.length) return []
+    const anyPref = filled.some((r) => r.is_preferred)
+    return filled.map((r, i) => ({
+      shop_id: r.shop_id ? Number(r.shop_id) : null,
+      shop_name: (r.shop_name || '').trim() || null,
+      url: String(r.url).trim(),
+      note: (r.note || '').trim() || null,
+      is_preferred: anyPref ? !!r.is_preferred : i === 0,
+    }))
+  }
+
+  function materialSourcesForForm(material) {
+    const rows = (material.purchase_sources || []).map((s) => ({
+      shop_id: s.shop_id ? String(s.shop_id) : '',
+      shop_name: s.shop_name || '',
+      url: s.url || '',
+      note: s.note || '',
+      is_preferred: !!s.is_preferred,
+    }))
+    if (!rows.length) return [emptyPurchaseSource(true)]
+    if (!rows.some((r) => r.is_preferred)) rows[0].is_preferred = true
+    if (rows[rows.length - 1].url) rows.push(emptyPurchaseSource(false))
+    return rows
+  }
+
+  async function onSourceUrlBlur(index) {
+    const row = materialForm.purchase_sources[index]
+    if (!row?.url?.trim()) return
+    try {
+      const sug = await api.shops.suggestFromUrl(row.url.trim())
+      if (!row.shop_id && sug.existing_shop_id) {
+        materialForm.purchase_sources[index].shop_id = String(sug.existing_shop_id)
+        materialForm.purchase_sources[index].shop_name = sug.suggested_name
+      } else if (!row.shop_id && !row.shop_name) {
+        materialForm.purchase_sources[index].shop_name = sug.suggested_name
+      }
+      ensureTrailingSourceRow()
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function ensureTrailingSourceRow() {
+    const rows = materialForm.purchase_sources || []
+    const last = rows[rows.length - 1]
+    if (last && String(last.url || '').trim()) {
+      materialForm.purchase_sources = [...rows, emptyPurchaseSource(false)]
+    }
+  }
+
+  function setPreferredSource(index) {
+    materialForm.purchase_sources = materialForm.purchase_sources.map((r, i) => ({
+      ...r,
+      is_preferred: i === index,
+    }))
   }
   function emptyProduct() {
     return {
@@ -225,7 +306,7 @@
   }
 
   function emptyOrderLine() {
-    return { product_id: '', label: '', quantity: '1' }
+    return { product_id: '', set_variant_id: '', label: '', quantity: '1' }
   }
 
   function emptyOrderForm() {
@@ -237,14 +318,43 @@
     }
   }
 
+  function variantOptionLabel(setItem, variant) {
+    const parts = [variant.option1_value, variant.option2_value, variant.option3_value].filter(Boolean)
+    const vLabel = parts.length ? parts.join(' / ') : variant.label || `Variante #${variant.id}`
+    return `${setItem.name} · ${vLabel}`
+  }
+
+  function allSetVariantOptions() {
+    const out = []
+    for (const s of sets) {
+      for (const v of s.variants || []) {
+        out.push({ id: v.id, setId: s.id, label: variantOptionLabel(s, v) })
+      }
+    }
+    return out
+  }
+
   function onOrderProductPicked(index, productId) {
     const lines = [...orderForm.lines]
-    lines[index] = { ...lines[index], product_id: productId }
+    lines[index] = { ...lines[index], product_id: productId, set_variant_id: productId ? '' : lines[index].set_variant_id }
     if (productId) {
       const product = products.find((p) => String(p.id) === String(productId))
       if (product) lines[index].label = product.name
     }
     if (productId && index === lines.length - 1) {
+      lines.push(emptyOrderLine())
+    }
+    orderForm.lines = lines
+  }
+
+  function onOrderSetVariantPicked(index, variantId) {
+    const lines = [...orderForm.lines]
+    lines[index] = { ...lines[index], set_variant_id: variantId, product_id: variantId ? '' : lines[index].product_id }
+    if (variantId) {
+      const opt = allSetVariantOptions().find((o) => String(o.id) === String(variantId))
+      if (opt) lines[index].label = opt.label
+    }
+    if (variantId && index === lines.length - 1) {
       lines.push(emptyOrderLine())
     }
     orderForm.lines = lines
@@ -257,6 +367,31 @@
     return 'offen'
   }
 
+  function orderOpenTodoHint(order) {
+    const open = (order.todos || []).filter((t) => t.status === 'open')
+    if (!open.length) return ''
+    const fertigen = open.filter((t) => t.kind === 'manufacture').length
+    const anlegen = open.filter((t) => t.kind === 'create_article').length
+    const assemble = open.filter((t) => t.kind === 'assemble').length
+    const bits = []
+    if (fertigen) bits.push(`${fertigen}× Fertigen`)
+    if (assemble) bits.push(`${assemble}× Zusammenstellen`)
+    if (anlegen) bits.push(`${anlegen}× Anlegen`)
+    if (!bits.length) bits.push(`${open.length} offen`)
+    return bits.join(', ')
+  }
+
+  function lineHasCreateTodo(order, line) {
+    return (order.todos || []).some(
+      (t) => t.order_line_id === line.id && t.status === 'open' && t.kind === 'create_article',
+    )
+  }
+
+  function orderLineForTodo(todo) {
+    const order = orders.find((o) => o.id === todo.order_id)
+    return order?.lines?.find((ln) => ln.id === todo.order_line_id) || null
+  }
+
   function orderOriginLabel(origin) {
     if (origin === 'shopify') return 'Shopify'
     if (origin === 'etsy') return 'Etsy'
@@ -267,6 +402,7 @@
     if (kind === 'manufacture') return 'Fertigen'
     if (kind === 'create_article') return 'Artikel anlegen'
     if (kind === 'purchase') return 'Einkauf'
+    if (kind === 'assemble') return 'Zusammenstellen'
     return kind
   }
 
@@ -676,8 +812,60 @@
       openManufacture(product, { quantity: todo.quantity, todoId: todo.id })
       return
     }
+    if (todo.kind === 'purchase') {
+      const material = materials.find((m) => m.id === todo.material_id)
+      if (!material) {
+        showFlash('error', 'Material nicht gefunden.')
+        return
+      }
+      openPurchase(material, { quantity: todo.quantity, todoId: todo.id })
+      return
+    }
+    if (todo.kind === 'assemble') {
+      if (!todo.set_variant_id) {
+        showFlash('error', 'Keine Set-Variante an diesem Todo.')
+        return
+      }
+      openAssemble(todo)
+      return
+    }
     if (todo.kind === 'create_article') {
+      const order = orders.find((o) => o.id === todo.order_id)
+      const line = orderLineForTodo(todo)
+      if (order && (order.origin === 'shopify' || order.origin === 'etsy')) {
+        openCreateProductFromOrderLine(order, line || { label: todoLabelForCreate(todo), quantity: todo.quantity })
+        return
+      }
       articleChoiceTodo = todo
+    }
+  }
+
+  async function generatePurchaseTodos() {
+    const ignoredCount = ignoredCriticalMaterials.length
+    let includeIgnored = false
+    if (ignoredCount > 0) {
+      includeIgnored = window.confirm(
+        `${ignoredCount} ignorierte kritische Materialien. Mitnehmen?`,
+      )
+    }
+    saving = true
+    try {
+      const result = await api.todos.purchaseFromCritical({ include_ignored: includeIgnored })
+      await refresh()
+      const parts = []
+      if (result.created) parts.push(`${result.created} neu`)
+      if (result.skipped_existing) parts.push(`${result.skipped_existing} schon offen`)
+      if (result.skipped_ignored && !includeIgnored) parts.push(`${result.skipped_ignored} ignoriert übersprungen`)
+      if (result.deleted_stale) parts.push(`${result.deleted_stale} veraltet entfernt`)
+      showFlash('ok', parts.length ? `Einkauf-Todos: ${parts.join(', ')}.` : 'Keine neuen Einkauf-Todos.')
+      if (result.created) {
+        todoCategoryFilter = 'purchase'
+        selectTab('todos')
+      }
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
     }
   }
 
@@ -700,11 +888,12 @@
       .map((ln) => ({
         quantity: ln.quantity,
         product_id: ln.product_id ? Number(ln.product_id) : null,
+        set_variant_id: ln.set_variant_id ? Number(ln.set_variant_id) : null,
         label: (ln.label || '').trim() || null,
       }))
-      .filter((ln) => ln.product_id || ln.label)
+      .filter((ln) => ln.product_id || ln.set_variant_id || ln.label)
     if (!lines.length) {
-      showFlash('error', 'Mindestens eine Position (Produkt oder Freitext).')
+      showFlash('error', 'Mindestens eine Position (Produkt, Set oder Freitext).')
       return
     }
     saving = true
@@ -739,10 +928,15 @@
   }
 
   async function deleteOrder(order) {
-    if (!confirm('Bestellung löschen?')) return
+    if (pendingDeleteOrderId !== order.id) {
+      pendingDeleteOrderId = order.id
+      return
+    }
     saving = true
     try {
       await api.orders.remove(order.id)
+      pendingDeleteOrderId = null
+      loadedBuckets.orders = false
       await refresh()
       showFlash('ok', 'Bestellung gelöscht.')
     } catch (error) {
@@ -761,9 +955,44 @@
       const bits = []
       if (result.created) bits.push(`${result.created} neu`)
       if (result.claimed) bits.push(`${result.claimed} übernommen`)
+      if (result.suggested) bits.push(`${result.suggested} Vorschlag`)
       if (result.skipped) bits.push(`${result.skipped} übersprungen`)
       showFlash('ok', bits.length ? `Shopify: ${bits.join(', ')}.` : 'Shopify: keine neuen Aufträge.')
       if (result.errors?.length) showFlash('error', result.errors[0])
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function parseEtsyMails() {
+    saving = true
+    try {
+      const result = await api.orders.parseEtsyMails()
+      loadedBuckets.orders = false
+      await refresh()
+      const bits = []
+      if (result.fetched) bits.push(`${result.fetched} geholt`)
+      if (result.created) bits.push(`${result.created} Bestellung`)
+      if (result.suggested) bits.push(`${result.suggested} Vorschlag`)
+      if (result.duplicates) bits.push(`${result.duplicates} Doppel`)
+      if (result.failed) bits.push(`${result.failed} Fehler`)
+      showFlash('ok', bits.length ? `Etsy-Mail: ${bits.join(', ')}.` : 'Etsy-Mail: nichts Neues.')
+      if (result.errors?.length) showFlash('error', result.errors[0])
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function ignoreEtsyMail(mail) {
+    saving = true
+    try {
+      await api.orders.ignoreEtsyMail(mail.id)
+      etsyMails = etsyMails.filter((m) => m.id !== mail.id)
+      showFlash('ok', 'Mail ignoriert.')
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -788,13 +1017,83 @@
   async function setReviewLineProduct(order, line, productId) {
     saving = true
     try {
+      let result
       if (productId) {
-        await api.orders.linkLine(order.id, line.id, { product_id: Number(productId) })
+        result = await api.orders.linkLine(order.id, line.id, { product_id: Number(productId) })
       } else {
-        await api.orders.linkLine(order.id, line.id, { unassign: true })
+        result = await api.orders.linkLine(order.id, line.id, { unassign: true })
       }
       loadedBuckets.orders = false
       await refresh()
+      if (result?.notices?.length) showFlash('warn', result.notices.join(' '))
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function setReviewLineSetVariant(order, line, variantId) {
+    saving = true
+    try {
+      let result
+      if (variantId) {
+        result = await api.orders.linkLine(order.id, line.id, { set_variant_id: Number(variantId) })
+      } else {
+        result = await api.orders.linkLine(order.id, line.id, { unassign: true })
+      }
+      loadedBuckets.orders = false
+      await refresh()
+      if (result?.notices?.length) showFlash('warn', result.notices.join(' '))
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function openAssemble(todo) {
+    assembleTodoId = todo.id
+    assembleForm = {
+      quantity: String(todo.quantity ?? 1),
+      location_id: String(locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || ''),
+    }
+    assemblePreview = null
+    assembleModal = {
+      todo,
+      set_name: todo.set_name || 'Set',
+      variant_label: todo.variant_label || '',
+      set_variant_id: todo.set_variant_id,
+    }
+    try {
+      const preview = await api.sets.assemblePreview(todo.set_variant_id, todo.quantity)
+      assemblePreview = preview
+      assembleModal = {
+        ...assembleModal,
+        set_name: preview.set_name,
+        variant_label: preview.variant_label,
+      }
+    } catch (error) {
+      assemblePreview = { bom: [], warnings: [error.message] }
+    }
+  }
+
+  async function runAssemble() {
+    if (!assembleModal?.set_variant_id) return
+    saving = true
+    try {
+      const result = await api.sets.assemble(assembleModal.set_variant_id, {
+        quantity: assembleForm.quantity,
+        location_id: Number(assembleForm.location_id),
+      })
+      if (assembleTodoId) {
+        await api.todos.complete(assembleTodoId)
+        assembleTodoId = null
+      }
+      assembleModal = null
+      assemblePreview = null
+      await refresh()
+      showFlash(result.warnings?.length ? 'warn' : 'ok', result.warnings?.join(' ') || 'Zusammenstellen gebucht.')
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -1301,14 +1600,28 @@
     return c ? String(c.medium_id) : ''
   }
 
+  async function loadTageslage({ refresh: force = false } = {}) {
+    if (!authUser || authUser.role === 'mitarbeiter') return
+    tageslageLoading = true
+    try {
+      tageslage = await api.overview.tageslage(force)
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      tageslageLoading = false
+    }
+  }
+
   async function refresh({ silent = false } = {}) {
     loadedBuckets = { catalog: false, inventory: false, orders: false, sets: false, queue: false }
     await ensureTabData({ silent })
+    if (tab === 'overview') await loadTageslage()
   }
 
   async function selectTab(next) {
     tab = next
     await ensureTabData({ silent: true })
+    if (next === 'overview') await loadTageslage()
   }
 
   async function ensureTabData({ silent = false } = {}) {
@@ -1341,13 +1654,20 @@
       const jobs = []
       if (!loadedBuckets.catalog) {
         jobs.push(
-          Promise.all([api.units(), api.locations(), api.media.list(), api.colors.list(), api.tags.list()]).then(
-            ([u, l, med, c, tags]) => {
+          Promise.all([
+            api.units(),
+            api.locations(),
+            api.media.list(),
+            api.colors.list(),
+            api.tags.list(),
+            api.shops.list(),
+          ]).then(([u, l, med, c, tags, shopRows]) => {
               units = u
               locations = l
               media = med
               colors = c
               allTags = tags
+              shops = shopRows
               const drafts = { ...catalogNewColorDrafts }
               for (const row of med) {
                 if (drafts[row.id] == null) drafts[row.id] = ''
@@ -1371,23 +1691,29 @@
       }
       if (t !== 'users' && !loadedBuckets.inventory) {
         jobs.push(
-          Promise.all([api.materials.list(), api.products.list()]).then(([m, p]) => {
-            materials = m
-            products = p
-            loadedBuckets.inventory = true
-          }),
+          Promise.all([api.materials.list(), api.products.list(), api.purchaseSources.overview()]).then(
+            ([m, p, overview]) => {
+              materials = m
+              products = p
+              purchaseSourceGroups = overview || []
+              loadedBuckets.inventory = true
+            },
+          ),
         )
       }
       if (['overview', 'orders', 'todos'].includes(t) && !loadedBuckets.orders) {
         jobs.push(
-          Promise.all([api.orders.list(), api.todos.list()]).then(([o, td]) => {
-            orders = o
-            todos = td
-            loadedBuckets.orders = true
-          }),
+          Promise.all([api.orders.list(), api.todos.list(), api.orders.listEtsyMails().catch(() => [])]).then(
+            ([o, td, mails]) => {
+              orders = o
+              todos = td
+              etsyMails = mails || []
+              loadedBuckets.orders = true
+            },
+          ),
         )
       }
-      if (['sets', 'import'].includes(t) && !loadedBuckets.sets) {
+      if (['overview', 'orders', 'todos', 'sets', 'import'].includes(t) && !loadedBuckets.sets) {
         jobs.push(
           api.sets.list().then((s) => {
             sets = s
@@ -1949,6 +2275,10 @@
         purchase_quantity: String(template.purchase_quantity ?? 1),
         purchase_price: String(template.purchase_price ?? template.cost_per_unit ?? 0),
         min_stock: template.min_stock != null ? qtyInputValue(template.min_stock, itemDecimals(template)) : '',
+        reorder_quantity:
+          template.reorder_quantity != null
+            ? qtyInputValue(template.reorder_quantity, itemDecimals(template))
+            : '',
         family: template.family || '',
         decimal_places: itemDecimals(template),
         stock_quantity: '0',
@@ -1971,6 +2301,13 @@
       purchase_quantity: String(material.purchase_quantity ?? 1),
       purchase_price: String(material.purchase_price ?? material.cost_per_unit ?? 0),
       min_stock: material.min_stock != null ? qtyInputValue(material.min_stock, itemDecimals(material)) : '',
+      reorder_quantity:
+        material.reorder_quantity != null
+          ? qtyInputValue(material.reorder_quantity, itemDecimals(material))
+          : '',
+      alternatives_note: material.alternatives_note || '',
+      products_note: material.products_note || '',
+      purchase_sources: materialSourcesForForm(material),
       is_template: !!material.is_template,
       decimal_places: itemDecimals(material),
       family: material.family || '',
@@ -1985,7 +2322,7 @@
     captureEditBaseline('material')
   }
 
-  function openCreateProduct(template = null, { name = '', orderLink = null } = {}) {
+  function openCreateProduct(template = null, { name = '', sku = '', family = '', mediumId = '', colorId = '', orderLink = null } = {}) {
     editNav = null
     productForm = emptyProduct()
     productForm.location_id = String(locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || '')
@@ -2009,7 +2346,77 @@
       showProductTags = productForm.tagIds.length > 0
     }
     if (name) productForm.name = name
+    if (sku) productForm.sku = sku
+    if (family) productForm.family = family
+    if (mediumId) productForm.medium_id = String(mediumId)
+    if (colorId) productForm.color_id = String(colorId)
     productModal = { mode: 'create', product: null, templateBom: template?.bom ? [...template.bom] : [], orderLink }
+  }
+
+  /** Shop-Titel → Farbe (eindeutig) + Familie/Basis als Vorschlag. */
+  function suggestPrefillFromShopLine(line) {
+    const title = String(line?.shop_title || line?.label || '').trim()
+    const sku = String(line?.shop_sku || '').trim()
+    const tokens = title.split(/[\s,;|/–—\-]+/).filter((t) => t.length > 1)
+    const hitIds = new Set()
+    const hits = []
+    for (const token of tokens) {
+      for (const c of matchColorsPool(colors, token)) {
+        if (!hitIds.has(c.id)) {
+          hitIds.add(c.id)
+          hits.push(c)
+        }
+      }
+    }
+    for (const c of colors) {
+      if (title.toLowerCase().includes(String(c.name || '').toLowerCase()) && !hitIds.has(c.id)) {
+        hitIds.add(c.id)
+        hits.push(c)
+      }
+    }
+    let colorId = ''
+    let mediumId = ''
+    let family = ''
+    if (hits.length === 1) {
+      const c = hits[0]
+      colorId = String(c.id)
+      mediumId = c.medium_id ? String(c.medium_id) : mediumIdFromColor(c.id)
+      const colorName = c.name
+      let base = title
+      const inRe = new RegExp(`\\s+in\\s+${colorName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*$`, 'i')
+      base = base.replace(inRe, '').trim()
+      if (base.toLowerCase().endsWith(colorName.toLowerCase())) {
+        base = base.slice(0, base.length - colorName.length).trim()
+      }
+      base = base.split(/[–—|]/)[0].trim()
+      family = base.slice(0, 120)
+    } else {
+      family = title.split(/[–—|]/)[0].trim().slice(0, 120)
+    }
+    return { name: title, sku, family, mediumId, colorId }
+  }
+
+  function openCreateProductFromOrderLine(order, line) {
+    const pre = suggestPrefillFromShopLine(line)
+    openCreateProduct(null, {
+      ...pre,
+      orderLink: { orderId: order.id, lineId: line.id },
+    })
+  }
+
+  async function queueCreateArticleFromReview(order, line) {
+    saving = true
+    try {
+      const result = await api.orders.queueCreate(order.id, line.id)
+      loadedBuckets.orders = false
+      await refresh()
+      const notice = (result.notices || [])[0]
+      showFlash('ok', notice === 'bereits vorgemerkt' ? 'Bereits vorgemerkt.' : 'Auf Anlege-Liste (Todos).')
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
   }
 
   function openEditProduct(product, { ids, keepNav = false } = {}) {
@@ -2309,6 +2716,51 @@
     }
   }
 
+  async function commitNewShop() {
+    const name = newShopName.trim()
+    if (!name || saving) return
+    saving = true
+    try {
+      await api.shops.create({ name })
+      newShopName = ''
+      await refresh({ silent: true })
+      showFlash('ok', `Shop „${name}“ angelegt.`)
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function renameShop(shop, nextName) {
+    const name = String(nextName || '').trim()
+    if (!name || name === shop.name || saving) return
+    saving = true
+    try {
+      await api.shops.update(shop.id, { name })
+      await refresh({ silent: true })
+      showFlash('ok', 'Shop umbenannt.')
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function deleteShop(shop) {
+    if (!confirm(`Shop „${shop.name}“ löschen?`)) return
+    saving = true
+    try {
+      await api.shops.remove(shop.id)
+      await refresh({ silent: true })
+      showFlash('ok', `Shop „${shop.name}“ gelöscht.`)
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
   function applySuggestion(s) {
     if (productModal && s.kind === 'material') {
       bomForm.kind = 'material'
@@ -2333,14 +2785,24 @@
     manufactureModal = product
   }
 
-  function openPurchase(material) {
+  function openPurchase(material, { quantity = null, todoId = null } = {}) {
+    const fallback =
+      material.reorder_quantity != null
+        ? material.reorder_quantity
+        : material.last_purchase_quantity != null
+          ? material.last_purchase_quantity
+          : material.purchase_quantity
     purchaseForm = {
-      quantity: '',
+      quantity:
+        quantity != null
+          ? qtyInputValue(quantity, itemDecimals(material))
+          : qtyInputValue(fallback, itemDecimals(material)),
       location_id: String(
         materialLocations.find((x) => x.name === 'Hamburg')?.id || materialLocations[0]?.id || '',
       ),
       purchase_price: String(material.purchase_price ?? 0),
     }
+    purchaseTodoId = todoId
     purchaseModal = material
   }
 
@@ -2404,6 +2866,12 @@
       if (materialModal.mode === 'create' || nextMaterialTags) {
         colorPayload.tag_ids = materialModal.mode === 'create' ? materialForm.tagIds : nextMaterialTags
       }
+      const sourcesPayload = normalizePurchaseSources(materialForm.purchase_sources)
+      const notesPayload = {
+        alternatives_note: (materialForm.alternatives_note || '').trim() || null,
+        products_note: (materialForm.products_note || '').trim() || null,
+        purchase_sources: sourcesPayload,
+      }
       if (materialModal.mode === 'create') {
         const created = await api.materials.create({
           name: materialForm.name.trim(),
@@ -2411,10 +2879,12 @@
           purchase_quantity: materialForm.purchase_quantity,
           purchase_price: materialForm.purchase_price,
           min_stock: parseOptionalQty(materialForm.min_stock),
+          reorder_quantity: parseOptionalQty(materialForm.reorder_quantity),
           family: materialForm.family.trim() || null,
           decimal_places: itemDecimals(materialForm),
           stock_quantity: materialForm.stock_quantity,
           location_id: Number(materialForm.location_id),
+          ...notesPayload,
           ...colorPayload,
         })
         if (materialModal.orderLink) {
@@ -2435,9 +2905,11 @@
         purchase_quantity: materialForm.purchase_quantity,
         purchase_price: materialForm.purchase_price,
         min_stock: parseOptionalQty(materialForm.min_stock),
+        reorder_quantity: parseOptionalQty(materialForm.reorder_quantity),
         is_template: !!materialForm.is_template,
         family: materialForm.family.trim() || null,
         decimal_places: itemDecimals(materialForm),
+        ...notesPayload,
         ...colorPayload,
       })
       showFlash('ok', 'Material gespeichert.')
@@ -2447,6 +2919,9 @@
         const fresh = materials.find((m) => m.id === materialModal.id)
         if (fresh) {
           materialModal = { ...materialModal, material: fresh }
+          materialForm.alternatives_note = fresh.alternatives_note || ''
+          materialForm.products_note = fresh.products_note || ''
+          materialForm.purchase_sources = materialSourcesForForm(fresh)
           initStockDrafts(fresh)
           captureEditBaseline('material')
         }
@@ -2790,18 +3265,37 @@
       showFlash('error', 'Menge muss größer als 0 sein.')
       return
     }
+    const materialId = purchaseModal.id
+    const todoId = purchaseTodoId
+    const prevReorder = purchaseModal.reorder_quantity
     saving = true
     try {
-      await api.materials.update(purchaseModal.id, {
+      await api.materials.update(materialId, {
         purchase_price: purchaseForm.purchase_price,
+        last_purchase_quantity: qty,
       })
-      await api.materials.deltaStock(purchaseModal.id, {
+      await api.materials.deltaStock(materialId, {
         location_id: Number(purchaseForm.location_id),
         delta: qty,
       })
+      if (todoId) {
+        await api.todos.complete(todoId)
+        purchaseTodoId = null
+      }
       purchaseModal = null
       await refresh()
       showFlash('ok', 'Einkauf gespeichert.')
+      const sameReorder = prevReorder != null && Number(prevReorder) === qty
+      if (!sameReorder) {
+        const updateReorder = window.confirm(
+          `Bestellmenge auf ${formatQty(qty, itemDecimals({ decimal_places: materials.find((m) => m.id === materialId)?.decimal_places }))} setzen?`,
+        )
+        if (updateReorder) {
+          await api.materials.update(materialId, { reorder_quantity: qty })
+          await refresh()
+          showFlash('ok', 'Bestellmenge aktualisiert.')
+        }
+      }
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -3355,8 +3849,17 @@
         <tbody>
           {#each rows as todo}
             <tr class:empty={todo.status === 'done'}>
-              <td><strong>{todoKindLabel(todo.kind)}</strong> · {todo.title}</td>
-              <td>{todo.order_label || `#${todo.order_id}`}</td>
+              <td>
+                <strong>{todoKindLabel(todo.kind)}</strong> · {todo.title}
+                {#if todo.kind === 'purchase' && todo.preferred_source_url}
+                  <div>
+                    <a href={todo.preferred_source_url} target="_blank" rel="noopener noreferrer">
+                      {todo.preferred_shop_name || 'Zum Shop'}
+                    </a>
+                  </div>
+                {/if}
+              </td>
+              <td>{todo.order_label || (todo.order_id ? `#${todo.order_id}` : '—')}</td>
               <td>{formatQty(todo.quantity)}</td>
               <td>{todo.status === 'done' ? 'erledigt' : 'offen'}</td>
               <td class="col-actions">
@@ -3376,7 +3879,14 @@
         <article class="card" class:empty={todo.status === 'done'}>
           <h3>{todoKindLabel(todo.kind)}</h3>
           <p>{todo.title}</p>
-          <p class="empty">{todo.order_label} · {formatQty(todo.quantity)}</p>
+          <p class="empty">{todo.order_label || (todo.order_id ? `#${todo.order_id}` : 'Mindestbestand')} · {formatQty(todo.quantity)}</p>
+          {#if todo.kind === 'purchase' && todo.preferred_source_url}
+            <p style="margin:0">
+              <a href={todo.preferred_source_url} target="_blank" rel="noopener noreferrer">
+                {todo.preferred_shop_name || 'Zum Shop'}
+              </a>
+            </p>
+          {/if}
           {#if todo.status === 'open'}
             <div class="row-actions"><button type="button" class="btn" onclick={() => startTodo(todo)}>Los</button></div>
           {/if}
@@ -3413,14 +3923,27 @@
                 {#each order.lines as ln}
                   <div>{formatQty(ln.quantity)}× {ln.label}</div>
                 {/each}
+                {#if order.note}
+                  <div class="empty" style="margin-top:.25rem">Notiz: {order.note}</div>
+                {/if}
               </td>
-              <td>{orderStatusLabel(order.status)}</td>
+              <td>
+                <div>{orderStatusLabel(order.status)}</div>
+                {#if orderOpenTodoHint(order)}
+                  <div class="empty" style="margin:0">{orderOpenTodoHint(order)}</div>
+                {/if}
+              </td>
               <td class="col-actions">
                 {#if order.status === 'ready'}
                   <button type="button" class="btn" onclick={() => markOrderShipped(order)}>Versendet</button>
                 {/if}
                 {#if order.status !== 'shipped'}
-                  <button type="button" class="btn secondary" onclick={() => deleteOrder(order)}>Löschen</button>
+                  {#if pendingDeleteOrderId === order.id}
+                    <button type="button" class="btn danger" disabled={saving} onclick={() => deleteOrder(order)}>Wirklich löschen?</button>
+                    <button type="button" class="btn secondary" disabled={saving} onclick={() => (pendingDeleteOrderId = null)}>Abbrechen</button>
+                  {:else}
+                    <button type="button" class="btn secondary" disabled={saving} onclick={() => deleteOrder(order)}>Löschen</button>
+                  {/if}
                 {/if}
               </td>
             </tr>
@@ -3434,16 +3957,27 @@
       {#each rows as order}
         <article class="card" class:empty={order.status === 'shipped'}>
           <h3>{order.customer_name || order.external_number || `Bestellung ${order.id}`}</h3>
-          <p class="empty">{formatDateTime(order.ordered_on)} · {orderOriginLabel(order.origin)} · {orderStatusLabel(order.status)}</p>
+          <p class="empty">
+            {formatDateTime(order.ordered_on)} · {orderOriginLabel(order.origin)} · {orderStatusLabel(order.status)}
+            {#if orderOpenTodoHint(order)} · {orderOpenTodoHint(order)}{/if}
+          </p>
           {#each order.lines as ln}
             <p>{formatQty(ln.quantity)}× {ln.label}</p>
           {/each}
+          {#if order.note}
+            <p class="empty">Notiz: {order.note}</p>
+          {/if}
           <div class="row-actions">
             {#if order.status === 'ready'}
               <button type="button" class="btn" onclick={() => markOrderShipped(order)}>Versendet</button>
             {/if}
             {#if order.status !== 'shipped'}
-              <button type="button" class="btn secondary" onclick={() => deleteOrder(order)}>Löschen</button>
+              {#if pendingDeleteOrderId === order.id}
+                <button type="button" class="btn danger" disabled={saving} onclick={() => deleteOrder(order)}>Wirklich löschen?</button>
+                <button type="button" class="btn secondary" disabled={saving} onclick={() => (pendingDeleteOrderId = null)}>Abbrechen</button>
+              {:else}
+                <button type="button" class="btn secondary" disabled={saving} onclick={() => deleteOrder(order)}>Löschen</button>
+              {/if}
             {/if}
           </div>
         </article>
@@ -3584,6 +4118,74 @@
       {/if}
     </section>
 
+    <section class="panel tageslage-panel" class:collapsed={!overviewTageslageOpen}>
+      <div class="panel-header">
+        <h2>
+          <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewTageslageOpen = !overviewTageslageOpen)}>
+            {overviewTageslageOpen ? '▼' : '▶'} Tageslage
+            {#if tageslage?.cache_date}<span class="empty">({tageslage.cache_date})</span>{/if}
+          </button>
+        </h2>
+        <button
+          type="button"
+          class="btn secondary"
+          disabled={tageslageLoading || saving}
+          onclick={() => loadTageslage({ refresh: true })}
+        >Aktualisieren</button>
+      </div>
+      {#if overviewTageslageOpen}
+        {#if tageslageLoading && !tageslage}
+          <p class="empty">Lade Tageslage…</p>
+        {:else if tageslage}
+          <div class="tageslage-stats">
+            <span><strong>{tageslage.stats?.current_orders ?? 0}</strong> aktuelle Bestellungen</span>
+            <span><strong>{tageslage.stats?.review_orders ?? 0}</strong> zur Prüfung</span>
+            <span><strong>{tageslage.stats?.open_todos ?? 0}</strong> offene Todos</span>
+            {#if tageslage.stats?.todos_by_kind}
+              <span class="empty">
+                Fertigen {tageslage.stats.todos_by_kind.manufacture || 0}
+                · Anlegen {tageslage.stats.todos_by_kind.create_article || 0}
+              </span>
+            {/if}
+          </div>
+          {#if tageslage.summary}
+            <p class="tageslage-summary">{tageslage.summary}</p>
+          {/if}
+          {#if tageslage.next_steps?.length}
+            <h3 class="tageslage-next-title">Als Nächstes</h3>
+            <ol class="tageslage-next">
+              {#each tageslage.next_steps as step, i (i)}
+                <li>
+                  <span>{step.text}</span>
+                  {#if step.todo_id}
+                    {#each todos.filter((t) => t.id === step.todo_id && t.status === 'open') as todo (todo.id)}
+                      <button type="button" class="btn" onclick={() => startTodo(todo)}>Los</button>
+                    {/each}
+                  {/if}
+                </li>
+              {/each}
+            </ol>
+          {/if}
+          {#if tageslage.quote}
+            <blockquote class="tageslage-quote">{tageslage.quote}</blockquote>
+          {/if}
+          {#if tageslage.error}
+            <p class="empty">
+              {#if tageslage.error === 'rate_limit'}
+                Gemini-Kontingent erreicht — Fallback aktiv. Später „Aktualisieren“.
+              {:else if tageslage.error === 'model_404'}
+                Gemini-Modell nicht gefunden — Fallback aktiv.
+              {:else}
+                Kurzlage ggf. unvollständig (API) — Fallback aktiv.
+              {/if}
+            </p>
+          {/if}
+        {:else}
+          <p class="empty">Tageslage noch nicht geladen.</p>
+        {/if}
+      {/if}
+    </section>
+
     <section class="panel" class:collapsed={!overviewCriticalOpen}>
       <div class="panel-header">
         <h2>
@@ -3592,6 +4194,9 @@
             <span class="empty">({displayedOverviewProducts.length + displayedOverviewMaterials.length})</span>
           </button>
         </h2>
+        <button type="button" class="btn secondary" disabled={saving} onclick={() => generatePurchaseTodos()}>
+          Einkauf-Todos erzeugen
+        </button>
       </div>
       {#if overviewCriticalOpen}
         <p class="empty">
@@ -3824,13 +4429,14 @@
       onPatch={(item, patch) => patchGapItem('material', item, patch)}
       onAdjustStock={(item, body) => adjustGapStock('material', item, body)}
       onPurchase={openPurchase}
+      onGeneratePurchaseTodos={generatePurchaseTodos}
     />
     <section class="panel">
       <div class="panel-header">
         <h2>Materialien</h2>
         <div class="row-actions">
           <button class="btn secondary" onclick={() => openBulkMaterials()}>Aus Farben…</button>
-          <button class="btn" onclick={openCreateMaterial}>Neu</button>
+          <button class="btn" onclick={() => openCreateMaterial()}>Neu</button>
         </div>
       </div>
       {#if selectedMaterialIds.length}
@@ -3964,7 +4570,7 @@
         <div class="row-actions">
           <button class="btn secondary" disabled={saving} onclick={suggestFamilies}>Familien vorschlagen</button>
           <button class="btn secondary" onclick={() => openBulkProducts()}>Aus Farben…</button>
-          <button class="btn" onclick={openCreateProduct}>Neu</button>
+          <button class="btn" onclick={() => openCreateProduct()}>Neu</button>
         </div>
       </div>
       {#if selectedProductIds.length}
@@ -4077,35 +4683,122 @@
     <section class="panel">
       <div class="panel-header">
         <h2>Bestellungen</h2>
-        <button type="button" class="btn secondary" onclick={syncShopifyOrders} disabled={saving}>Shopify abrufen</button>
+        <div class="row-actions">
+          <button type="button" class="btn secondary" onclick={syncShopifyOrders} disabled={saving}>Shopify abrufen</button>
+          <button type="button" class="btn secondary" onclick={parseEtsyMails} disabled={saving}>Etsy-Mails parsen</button>
+        </div>
       </div>
       <p class="empty" style="margin-top:0">
-        Oben Aufträge zur Prüfung (Shop, unklare Zuordnung). Dann aktuelle Aufträge (offen und versandbereit). Darunter Schnellerfassung. Versendete unten ausklappbar.
+        Oben Etsy-Mail-Warteschlange und Aufträge zur Prüfung. Dann aktuelle Aufträge. Schnellerfassung zugeklappt. Versendete unten.
       </p>
+
+      <h3>Etsy-Mails {#if etsyMails.length}<span class="empty">({etsyMails.length})</span>{/if}</h3>
+      {#if etsyMails.length}
+        <div class="review-orders">
+          {#each etsyMails as mail (mail.id)}
+            <article class="review-order">
+              <h3>{mail.subject || `Mail ${mail.id}`}</h3>
+              <p class="empty">
+                {mail.status === 'duplicate' ? 'Doppel' : mail.status === 'error' ? 'Fehler' : 'wartet'}
+                {#if mail.from_addr} · {mail.from_addr}{/if}
+              </p>
+              {#if mail.error_message}
+                <p class="flash error" style="margin:.35rem 0">{mail.error_message}</p>
+              {/if}
+              {#if mail.body_preview}
+                <p class="empty" style="white-space:pre-wrap">{mail.body_preview}</p>
+              {/if}
+              <div class="row-actions">
+                <button type="button" class="btn secondary" onclick={() => ignoreEtsyMail(mail)} disabled={saving}>Ignorieren</button>
+                {#if mail.status === 'pending'}
+                  <span class="empty">Wird beim Parsen verarbeitet</span>
+                {/if}
+              </div>
+            </article>
+          {/each}
+        </div>
+      {:else}
+        <p class="empty">Keine Mails in der Warteschlange. „Etsy-Mails parsen“ holt zuerst neue aus dem Postfach.</p>
+      {/if}
 
       <h3>Zur Prüfung {#if reviewOrders.length}<span class="empty">({reviewOrders.length})</span>{/if}</h3>
       {#if reviewOrders.length}
-        <div class="table-wrap">
-          {#each reviewOrders as order}
-            <article class="card" style="margin-bottom:1rem">
+        <div class="review-orders">
+          {#each reviewOrders as order (order.id)}
+            <article class="review-order">
               <h3>{order.customer_name || order.external_number || `Bestellung ${order.id}`}</h3>
               <p class="empty">{formatDateTime(order.ordered_on)} · {orderOriginLabel(order.origin)} · {order.external_number || ''}</p>
-              {#each order.lines as ln}
-                <div class="order-line" style="margin-top:0.6rem">
-                  <p style="margin:0 0 0.3rem">{formatQty(ln.quantity)}× {ln.label}</p>
-                  <label>Produkt
+              {#if order.note}
+                <p class="tageslage-summary" style="margin:.4rem 0">Notiz: {order.note}</p>
+              {/if}
+              {#each order.lines as ln (ln.id)}
+                <div class="review-line">
+                  <p class="review-line-shop">
+                    <span class="review-line-qty">{formatQty(ln.quantity)}×</span>
+                    {ln.shop_title || ln.label}
+                  </p>
+                  {#if ln.suggested_product_id && !ln.product_id}
+                    <div class="review-suggest">
+                      <p>Vorschlag: <strong>{ln.suggested_product_name || 'Produkt'}</strong></p>
+                      <button
+                        type="button"
+                        class="btn"
+                        disabled={saving}
+                        onclick={() => setReviewLineProduct(order, ln, ln.suggested_product_id)}
+                      >Übernehmen</button>
+                    </div>
+                  {/if}
+                  <label class="review-line-assign">Lagerprodukt
                     <FamilySelect
                       value={ln.product_id || ''}
                       items={products}
                       emptyLabel="unzugeordnet"
+                      inline
                       onchange={(v) => setReviewLineProduct(order, ln, v)}
                     />
                   </label>
+                  <label class="review-line-assign">Set-Variante
+                    <select
+                      value={ln.set_variant_id || ''}
+                      disabled={saving}
+                      onchange={(e) => setReviewLineSetVariant(order, ln, e.currentTarget.value)}
+                    >
+                      <option value="">— kein Set —</option>
+                      {#each allSetVariantOptions() as opt}
+                        <option value={opt.id}>{opt.label}</option>
+                      {/each}
+                    </select>
+                  </label>
+                  {#if !ln.product_id && !ln.material_id && !ln.set_variant_id}
+                    <div class="row-actions" style="margin-top:.35rem">
+                      <button
+                        type="button"
+                        class="btn secondary"
+                        disabled={saving}
+                        onclick={() => openCreateProductFromOrderLine(order, ln)}
+                      >Produkt erzeugen</button>
+                      {#if lineHasCreateTodo(order, ln)}
+                        <span class="empty">vorgemerkt</span>
+                      {:else}
+                        <button
+                          type="button"
+                          class="btn secondary"
+                          disabled={saving}
+                          onclick={() => queueCreateArticleFromReview(order, ln)}
+                        >Auf Liste</button>
+                      {/if}
+                    </div>
+                  {/if}
                 </div>
               {/each}
-              <div class="row-actions" style="margin-top:0.8rem">
+              <div class="row-actions">
                 <button type="button" class="btn" onclick={() => approveOrder(order)} disabled={saving}>Abnicken</button>
-                <button type="button" class="btn secondary" onclick={() => deleteOrder(order)} disabled={saving}>Löschen</button>
+                {#if pendingDeleteOrderId === order.id}
+                  <button type="button" class="btn danger" onclick={() => deleteOrder(order)} disabled={saving}>Wirklich löschen?</button>
+                  <button type="button" class="btn secondary" onclick={() => (pendingDeleteOrderId = null)} disabled={saving}>Abbrechen</button>
+                {:else}
+                  <button type="button" class="btn secondary" onclick={() => deleteOrder(order)} disabled={saving}>Löschen</button>
+                {/if}
               </div>
             </article>
           {/each}
@@ -4117,8 +4810,11 @@
       <h3 style="margin-top:1.5rem">Aktuelle Bestellungen</h3>
       {@render ordersMarkup(currentOrders, 'Keine aktuellen Bestellungen.')}
 
-      <h3 style="margin-top:1.5rem">Neue Bestellung</h3>
-      <form class="form-grid" onsubmit={(e) => { e.preventDefault(); submitOrder() }}>
+      <button type="button" class="group-toggle overview-section-toggle" style="margin-top:1.5rem" onclick={() => (manualOrderOpen = !manualOrderOpen)}>
+        {manualOrderOpen ? '▼' : '▶'} Neue Bestellung (Schnellerfassung)
+      </button>
+      {#if manualOrderOpen}
+      <form class="form-grid" style="margin-top:.75rem" onsubmit={(e) => { e.preventDefault(); submitOrder() }}>
         <label>Datum und Uhrzeit<input type="datetime-local" bind:value={orderForm.ordered_on} required /></label>
         <label>Kunde (optional)<input bind:value={orderForm.customer_name} placeholder="Name" /></label>
         <label>Nummer (optional)<input bind:value={orderForm.external_number} placeholder="später Shopify/Etsy" /></label>
@@ -4128,9 +4824,20 @@
               <FamilySelect
                 value={line.product_id}
                 items={products}
-                emptyLabel="Freitext / später anlegen"
+                emptyLabel="Freitext / Set / später"
                 onchange={(v) => onOrderProductPicked(i, v)}
               />
+            </label>
+            <label>Set-Variante
+              <select
+                value={line.set_variant_id}
+                onchange={(e) => onOrderSetVariantPicked(i, e.currentTarget.value)}
+              >
+                <option value="">— kein Set —</option>
+                {#each allSetVariantOptions() as opt}
+                  <option value={opt.id}>{opt.label}</option>
+                {/each}
+              </select>
             </label>
             <label>Menge<input type="number" step={qtyStep(0)} min="1" bind:value={line.quantity} required /></label>
             <div class="row-actions">
@@ -4138,7 +4845,7 @@
                 <button type="button" class="btn secondary" onclick={() => { orderForm.lines = orderForm.lines.filter((_, j) => j !== i) }}>Entfernen</button>
               {/if}
             </div>
-            {#if !line.product_id}
+            {#if !line.product_id && !line.set_variant_id}
               <label class="order-line-free">Freitext
                 <input bind:value={line.label} placeholder="z. B. Schild Mia 2026" />
               </label>
@@ -4150,6 +4857,7 @@
           <button class="btn" type="submit" disabled={saving}>Bestellung anlegen</button>
         </div>
       </form>
+      {/if}
 
       <button type="button" class="group-toggle overview-section-toggle" style="margin-top:1.5rem" onclick={() => (shippedOrdersOpen = !shippedOrdersOpen)}>
         {shippedOrdersOpen ? '▼' : '▶'} Versendete Bestellungen
@@ -4163,9 +4871,12 @@
     <section class="panel">
       <div class="panel-header">
         <h2>Todos</h2>
+        <button type="button" class="btn secondary" disabled={saving} onclick={() => generatePurchaseTodos()}>
+          Einkauf-Todos erzeugen
+        </button>
       </div>
       <p class="empty" style="margin-top:0">
-        Werkstatt zuerst. Einkauf-Todos aus Mindestbestand kommen im nächsten Schritt — der Filter ist schon da.
+        Werkstatt zuerst. Einkauf-Todos für kritische Materialien per Knopf — höchstens eines offen pro Material.
       </p>
       <div class="filter-bar form-grid">
         <label>Art
@@ -4183,7 +4894,7 @@
           </select>
         </label>
       </div>
-      {@render todosMarkup(displayedTodos(), todoCategoryFilter === 'purchase' ? 'Einkauf-Todos kommen im nächsten Schritt (Mindestbestand).' : 'Keine Todos.')}
+      {@render todosMarkup(displayedTodos(), todoCategoryFilter === 'purchase' ? 'Keine offenen Einkauf-Todos.' : 'Keine Todos.')}
     </section>
   {:else if tab === 'staff'}
     <section class="panel">
@@ -4495,6 +5206,88 @@
           </table>
         </div>
       </div>
+
+      <div class="catalog-block">
+        <h3>Shops (Einkauf)</h3>
+        <p class="empty" style="margin-top:0">Shops gruppieren Bezugsquellen. Domains werden beim Speichern einer Material-URL vorgeschlagen.</p>
+        <div class="table-wrap catalog-table-wrap">
+          <table class="catalog-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Domain</th>
+                <th class="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each shops as s}
+                <tr>
+                  <td>
+                    <input
+                      class="catalog-cell"
+                      type="text"
+                      value={s.name}
+                      disabled={saving}
+                      onblur={(e) => renameShop(s, e.currentTarget.value)}
+                      aria-label={`Shop ${s.name}`}
+                    />
+                  </td>
+                  <td><span class="empty">{s.domain_hint || '—'}</span></td>
+                  <td class="col-actions">
+                    <button type="button" class="btn-icon danger" title="Löschen" aria-label="Shop löschen" disabled={saving} onclick={() => deleteShop(s)}>✕</button>
+                  </td>
+                </tr>
+              {:else}
+                <tr><td colspan="3" class="empty">Noch keine Shops.</td></tr>
+              {/each}
+              <tr class="catalog-new-row">
+                <td>
+                  <input
+                    class="catalog-cell"
+                    type="text"
+                    bind:value={newShopName}
+                    placeholder="Neuer Shop…"
+                    disabled={saving}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        commitNewShop()
+                      }
+                    }}
+                    onblur={commitNewShop}
+                    aria-label="Neuer Shop"
+                  />
+                </td>
+                <td colspan="2" class="col-actions"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="catalog-block">
+        <h3>Link-Übersicht (Bezugsquellen)</h3>
+        {#each purchaseSourceGroups as group}
+          <div style="margin-bottom:1rem">
+            <h4 style="margin:0 0 .35rem">{group.shop_name}{#if group.domain_hint} <span class="empty">({group.domain_hint})</span>{/if}</h4>
+            {#if group.sources?.length}
+              <ul style="margin:0;padding-left:1.2rem">
+                {#each group.sources as src}
+                  <li>
+                    <a href={src.url} target="_blank" rel="noopener noreferrer">{src.material_name}</a>
+                    {#if src.is_preferred} <span class="empty">bevorzugt</span>{/if}
+                    {#if src.note} <span class="empty">— {src.note}</span>{/if}
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <p class="empty" style="margin:0">Keine Links.</p>
+            {/if}
+          </div>
+        {:else}
+          <p class="empty">Noch keine Bezugsquellen an Materialien.</p>
+        {/each}
+      </div>
     </section>
   {:else if tab === 'import'}
     <section class="panel">
@@ -4746,6 +5539,56 @@
         <label>Mindestbestand (optional)
           <input type="number" step={qtyStep(materialForm.decimal_places)} min="0" bind:value={materialForm.min_stock} placeholder="leer = keiner" />
         </label>
+        <label>Bestellmenge (optional)
+          <input type="number" step={qtyStep(materialForm.decimal_places)} min="0" bind:value={materialForm.reorder_quantity} placeholder="leer = Packung / zuletzt" />
+        </label>
+        <fieldset class="tag-picker">
+          <legend>Bezugsquellen</legend>
+          <p class="empty" style="margin:0 0 .5rem">Shop-Produkt-URL je Quelle. Neue Zeile erscheint, sobald die letzte URL gefüllt ist. Eine Quelle als bevorzugt markieren.</p>
+          {#each materialForm.purchase_sources as row, i}
+            <div class="form-grid" style="margin-bottom:.75rem;padding-bottom:.75rem;border-bottom:1px solid var(--border, #ddd)">
+              <label class="tag-check">
+                <input type="radio" name="preferred-source" checked={row.is_preferred} onchange={() => setPreferredSource(i)} />
+                Bevorzugt
+              </label>
+              <label>Shop
+                <select
+                  bind:value={row.shop_id}
+                  onchange={() => {
+                    const s = shops.find((x) => String(x.id) === String(row.shop_id))
+                    if (s) row.shop_name = s.name
+                  }}
+                >
+                  <option value="">aus URL / neu</option>
+                  {#each shops as s}<option value={s.id}>{s.name}</option>{/each}
+                </select>
+              </label>
+              {#if !row.shop_id}
+                <label>Shop-Name
+                  <input bind:value={row.shop_name} placeholder="wird aus URL vorgeschlagen" />
+                </label>
+              {/if}
+              <label>URL
+                <input type="url" bind:value={row.url} placeholder="https://…" onblur={() => onSourceUrlBlur(i)} oninput={ensureTrailingSourceRow} />
+              </label>
+              <label>Notiz
+                <input bind:value={row.note} placeholder="optional" />
+              </label>
+            </div>
+          {/each}
+        </fieldset>
+        <label>Alternativen (Freitext)
+          <textarea rows="2" bind:value={materialForm.alternatives_note} placeholder="z. B. anderes Filament / Lieferant"></textarea>
+        </label>
+        <label>Produktbezug (Freitext, ergänzend zur Stückliste)
+          <textarea rows="2" bind:value={materialForm.products_note} placeholder="optional"></textarea>
+        </label>
+        {#if materialModal.mode === 'edit' && (materialModal.material?.used_in_products || []).length}
+          <p class="empty" style="margin:0">
+            In Stücklisten:
+            {(materialModal.material.used_in_products || []).map((p) => p.name).join(', ')}
+          </p>
+        {/if}
         <label>Materialfamilie
           <input list="material-family-suggestions" bind:value={materialForm.family} placeholder="optional" />
         </label>
@@ -5103,10 +5946,52 @@
   </div>
 {/if}
 
+{#if assembleModal}
+  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (assembleModal = null, assembleTodoId = null, assemblePreview = null)}>
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3>Zusammenstellen: {assembleModal.set_name}{#if assembleModal.variant_label} · {assembleModal.variant_label}{/if}</h3>
+      <form class="form-grid" onsubmit={(e) => { e.preventDefault(); runAssemble() }}>
+        <label>Menge<input type="number" step={qtyStep(0)} min="1" bind:value={assembleForm.quantity} required readonly /></label>
+        <label>Standort
+          <select bind:value={assembleForm.location_id}>{#each locations as l}<option value={l.id}>{l.name}</option>{/each}</select>
+        </label>
+        {#if assemblePreview?.bom?.length}
+          <div style="grid-column:1/-1">
+            <p class="empty" style="margin:0 0 .35rem">Abbuchung laut Stückliste:</p>
+            <ul class="plain-list">
+              {#each assemblePreview.bom as row}
+                <li class="bom-line">
+                  <div>{row.kind === 'material' ? 'Material' : 'Produkt'} <strong>{row.name}</strong></div>
+                  <div class="empty">{formatQty(row.quantity_total)}{row.unit ? ` ${row.unit}` : ''}</div>
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {:else if assemblePreview}
+          <p class="empty" style="grid-column:1/-1">{assemblePreview.warnings?.join(' ') || 'Keine Stücklistenzeilen.'}</p>
+        {:else}
+          <p class="empty" style="grid-column:1/-1">Stückliste wird geladen…</p>
+        {/if}
+        <div class="modal-actions">
+          <button type="button" class="btn secondary" onclick={() => { assembleModal = null; assembleTodoId = null; assemblePreview = null }}>Abbrechen</button>
+          <button class="btn" disabled={saving || !assemblePreview?.bom?.length}>Zusammenstellen</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}
+
 {#if purchaseModal}
-  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (purchaseModal = null)}>
+  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (purchaseModal = null, purchaseTodoId = null)}>
     <div class="modal" role="dialog" aria-modal="true">
       <h3>Einkauf: {purchaseModal.name}</h3>
+      {#if purchaseModal.preferred_source_url}
+        <p style="margin:0 0 .75rem">
+          <a href={purchaseModal.preferred_source_url} target="_blank" rel="noopener noreferrer">
+            {purchaseModal.preferred_shop_name || 'Bevorzugte Bezugsquelle öffnen'}
+          </a>
+        </p>
+      {/if}
       <form class="form-grid" onsubmit={(e) => { e.preventDefault(); submitPurchase() }}>
         <label>Menge ({purchaseModal.unit})
           <input type="number" step={qtyStep(itemDecimals(purchaseModal))} min={qtyStep(itemDecimals(purchaseModal))} bind:value={purchaseForm.quantity} required />
@@ -5119,7 +6004,7 @@
         </label>
         <p class="empty" style="margin:0">Bisher: {formatMoney(purchaseModal.purchase_price)}</p>
         <div class="modal-actions">
-          <button type="button" class="btn secondary" onclick={() => (purchaseModal = null)}>Abbrechen</button>
+          <button type="button" class="btn secondary" onclick={() => { purchaseModal = null; purchaseTodoId = null }}>Abbrechen</button>
           <button class="btn" disabled={saving}>Speichern</button>
         </div>
       </form>

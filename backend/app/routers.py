@@ -35,6 +35,8 @@ from app.schemas import (
     LoginRequest,
     ManufactureRequest,
     ManufactureResult,
+    AssembleRequest,
+    AssembleResult,
     MaterialBulkUpdate,
     MaterialCreate,
     MaterialRead,
@@ -67,11 +69,22 @@ from app.schemas import (
     OrderLineLink,
     OrderRead,
     OrderUpdate,
+    IncomingMailRead,
+    EtsyMailParseResult,
     ShopifyOrderSyncResult,
+    TageslageRead,
     TodoRead,
+    PurchaseTodosGenerateRequest,
+    PurchaseTodosGenerateResult,
     StockAdjustRequest,
     StockDeltaRequest,
     StockMovementRead,
+    ShopCreate,
+    ShopRead,
+    ShopSuggestRequest,
+    ShopSuggestResult,
+    ShopUpdate,
+    PurchaseSourceOverviewGroup,
     TagCreate,
     TagRead,
     TagUpdate,
@@ -89,6 +102,16 @@ router = APIRouter(prefix="/api")
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@router.get("/overview/tageslage", response_model=TageslageRead)
+def overview_tageslage(
+    refresh: bool = False,
+    db: Session = Depends(get_db),
+) -> TageslageRead:
+    from app.tageslage import get_tageslage
+
+    return TageslageRead.model_validate(get_tageslage(db, force_refresh=refresh))
 
 
 @router.get("/units", response_model=list[UnitInfo])
@@ -154,6 +177,67 @@ def update_tag(tag_id: int, payload: TagUpdate, db: Session = Depends(get_db)) -
 @router.delete("/tags/{tag_id}", status_code=204)
 def delete_tag(tag_id: int, db: Session = Depends(get_db)) -> None:
     services.delete_tag(db, tag_id)
+
+
+@router.get("/shops", response_model=list[ShopRead])
+def list_shops(db: Session = Depends(get_db)) -> list[ShopRead]:
+    from app import purchase_sources as ps
+
+    return [ShopRead(id=s.id, name=s.name, domain_hint=s.domain_hint) for s in ps.list_shops(db)]
+
+
+@router.post("/shops", response_model=ShopRead, status_code=201)
+def create_shop(payload: ShopCreate, _: AdminUser, db: Session = Depends(get_db)) -> ShopRead:
+    from app import purchase_sources as ps
+
+    s = ps.create_shop(db, payload.name, payload.domain_hint)
+    return ShopRead(id=s.id, name=s.name, domain_hint=s.domain_hint)
+
+
+@router.patch("/shops/{shop_id}", response_model=ShopRead)
+def update_shop(shop_id: int, payload: ShopUpdate, _: AdminUser, db: Session = Depends(get_db)) -> ShopRead:
+    from app import purchase_sources as ps
+
+    s = ps.update_shop(db, shop_id, name=payload.name, domain_hint=payload.domain_hint)
+    return ShopRead(id=s.id, name=s.name, domain_hint=s.domain_hint)
+
+
+@router.delete("/shops/{shop_id}", status_code=204)
+def delete_shop(shop_id: int, _: AdminUser, db: Session = Depends(get_db)) -> None:
+    from app import purchase_sources as ps
+
+    ps.delete_shop(db, shop_id)
+
+
+@router.post("/shops/suggest-from-url", response_model=ShopSuggestResult)
+def suggest_shop_from_url(payload: ShopSuggestRequest, db: Session = Depends(get_db)) -> ShopSuggestResult:
+    from app import purchase_sources as ps
+    from sqlalchemy import select
+    from app.models import Shop
+
+    name = ps.shop_name_from_url(payload.url) or "Shop"
+    try:
+        from urllib.parse import urlparse
+
+        host = urlparse(payload.url if "://" in payload.url else "https://" + payload.url).hostname or ""
+        host = host.lower().removeprefix("www.")
+    except Exception:
+        host = None
+    existing = db.scalars(select(Shop).where(Shop.name == name)).first()
+    if not existing and host:
+        existing = db.scalars(select(Shop).where(Shop.domain_hint == host)).first()
+    return ShopSuggestResult(
+        suggested_name=existing.name if existing else name,
+        domain_hint=existing.domain_hint if existing else host,
+        existing_shop_id=existing.id if existing else None,
+    )
+
+
+@router.get("/purchase-sources/overview", response_model=list[PurchaseSourceOverviewGroup])
+def purchase_sources_overview(db: Session = Depends(get_db)) -> list[PurchaseSourceOverviewGroup]:
+    from app import purchase_sources as ps
+
+    return [PurchaseSourceOverviewGroup(**g) for g in ps.list_sources_overview(db)]
 
 
 @router.get("/suggestions/by-color/{color_id}", response_model=list[ColorMatchSuggestion])
@@ -376,6 +460,24 @@ def manufacture(
     return services.manufacture(db, product_id, payload.quantity, payload.location_id)
 
 
+@router.get("/sets/variants/{variant_id}/assemble-preview", response_model=AssembleResult)
+def assemble_preview(
+    variant_id: int,
+    quantity: float = Query(1),
+    db: Session = Depends(get_db),
+) -> AssembleResult:
+    return services.assemble_preview(db, variant_id, quantity)
+
+
+@router.post("/sets/variants/{variant_id}/assemble", response_model=AssembleResult)
+def assemble_variant(
+    variant_id: int,
+    payload: AssembleRequest,
+    db: Session = Depends(get_db),
+) -> AssembleResult:
+    return services.assemble_variant(db, variant_id, payload.quantity, payload.location_id)
+
+
 @router.get("/sets", response_model=list[ProductSetRead])
 def list_sets(db: Session = Depends(get_db)) -> list[ProductSetRead]:
     return services.list_sets(db)
@@ -568,6 +670,26 @@ def sync_shopify_orders(db: Session = Depends(get_db)) -> ShopifyOrderSyncResult
     return services.import_shopify_orders(db)
 
 
+@router.get("/orders/etsy-mails", response_model=list[IncomingMailRead])
+def get_etsy_mails(db: Session = Depends(get_db)) -> list[IncomingMailRead]:
+    return services.list_etsy_mails(db)
+
+
+@router.post("/orders/etsy-mails/fetch")
+def fetch_etsy_mails(db: Session = Depends(get_db)) -> dict:
+    return services.fetch_etsy_mails(db)
+
+
+@router.post("/orders/etsy-mails/parse", response_model=EtsyMailParseResult)
+def parse_etsy_mails(db: Session = Depends(get_db)) -> EtsyMailParseResult:
+    return services.parse_etsy_mails(db)
+
+
+@router.post("/orders/etsy-mails/{mail_id}/ignore", status_code=204)
+def ignore_etsy_mail(mail_id: int, db: Session = Depends(get_db)) -> None:
+    services.ignore_etsy_mail(db, mail_id)
+
+
 @router.post("/orders/{order_id}/approve", response_model=OrderRead)
 def approve_order(order_id: int, db: Session = Depends(get_db)) -> OrderRead:
     return services.approve_order(db, order_id)
@@ -598,6 +720,11 @@ def link_order_line(
     return services.link_order_line(db, order_id, line_id, payload)
 
 
+@router.post("/orders/{order_id}/lines/{line_id}/queue-create", response_model=OrderRead)
+def queue_create_article(order_id: int, line_id: int, db: Session = Depends(get_db)) -> OrderRead:
+    return services.queue_create_article(db, order_id, line_id)
+
+
 @router.get("/todos", response_model=list[TodoRead])
 def list_todos(
     category: Literal["workshop", "purchase"] | None = None,
@@ -605,6 +732,15 @@ def list_todos(
     db: Session = Depends(get_db),
 ) -> list[TodoRead]:
     return services.list_todos(db, category=category, status=status)
+
+
+@router.post("/todos/purchase-from-critical", response_model=PurchaseTodosGenerateResult)
+def purchase_todos_from_critical(
+    payload: PurchaseTodosGenerateRequest,
+    _: AdminUser,
+    db: Session = Depends(get_db),
+) -> PurchaseTodosGenerateResult:
+    return services.generate_purchase_todos(db, include_ignored=payload.include_ignored)
 
 
 @router.post("/todos/{todo_id}/complete", response_model=TodoRead)

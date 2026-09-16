@@ -1,4 +1,4 @@
-"""Shop-Zeile → Produkt: SKU, sonst Name/Farbe, sonst unzugeordnet."""
+"""Shop-Zeile → Produkt: SKU, Shop-Zuordnung, sonst Name/Farbe, sonst unzugeordnet."""
 
 from __future__ import annotations
 
@@ -14,19 +14,39 @@ def _fold(value: str | None) -> str:
     return (value or "").strip().casefold()
 
 
+def sku_key(sku: str | None) -> str | None:
+    text = _fold(sku)
+    return text[:100] or None
+
+
+def title_key(title: str | None, variant_title: str | None = None) -> str:
+    title_s = (title or "").strip()
+    variant_s = (variant_title or "").strip()
+    if variant_s and title_s:
+        folded_title = _fold(title_s)
+        if folded_title.endswith(_fold(variant_s)) or " - " in title_s:
+            return folded_title[:300]
+        return _fold(f"{title_s} - {variant_s}")[:300]
+    return _fold(title_s)[:300]
+
+
 def match_product_for_shop_line(
     products: list,
     *,
     sku: str | None,
     title: str,
     variant_title: str | None = None,
-) -> Product | None:
+    mapped=None,
+):
     usable = [p for p in products if not bool(getattr(p, "is_template", False))]
-    sku_key = _fold(sku)
-    if sku_key:
-        sku_hits = [p for p in usable if _fold(p.sku) == sku_key]
+    sk = sku_key(sku)
+    if sk:
+        sku_hits = [p for p in usable if _fold(p.sku) == sk]
         if len(sku_hits) == 1:
             return sku_hits[0]
+
+    if mapped is not None:
+        return mapped
 
     title_s = (title or "").strip()
     variant_s = (variant_title or "").strip()

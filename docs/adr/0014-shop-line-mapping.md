@@ -1,0 +1,3 @@
+# Shop-Zuordnung in der DB, Gemini nur als Vorschlag
+
+Shopify-Shoptexte treffen Lagerproduktnamen selten. Das Gedächtnis ist eine **Shop-Zuordnung** (Herkunft Shopify + Shop-SKU oder sonst Titel plus Variante → Produkt), nur nach menschlicher Bestätigung in **zur Prüfung**. Gemini schlägt nach dem manuellen Abruf vor (auch für schon vorhandene unzugeordnete Prüfungszeilen), setzt nichts still und speichert nichts selbst. Modell und Free-Tier: ADR `0017`. Shop-SKU füllt die Produkt-SKU nur wenn leer; keine selbst erfundenen SKUs und kein Schreiben in den Shop. Letzte Bestätigung gewinnt (mit Hinweis); Zeile leeren löscht das Gedächtnis nicht; Etsy später eigene Identitäten.

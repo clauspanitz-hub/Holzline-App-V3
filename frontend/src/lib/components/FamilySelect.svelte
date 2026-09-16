@@ -7,6 +7,7 @@
     emptyLabel = 'wählen…',
     formatItem = (item) => item?.name ?? '',
     disabled = false,
+    inline = false,
     onchange,
   } = $props()
 
@@ -70,7 +71,7 @@
   })
 </script>
 
-<div class="family-select" class:open bind:this={rootEl}>
+<div class="family-select" class:open class:inline bind:this={rootEl}>
   <button
     type="button"
     class="family-select-trigger"

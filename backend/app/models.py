@@ -14,6 +14,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Table,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -96,6 +97,20 @@ class Color(Base):
     products: Mapped[list["Product"]] = relationship(back_populates="color")
 
 
+class Shop(Base):
+    """Einkaufs-Shop zur Gruppierung von Bezugsquellen (ADR 0021)."""
+
+    __tablename__ = "shops"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    domain_hint: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    sources: Mapped[list["MaterialPurchaseSource"]] = relationship(back_populates="shop")
+
+
 class Material(Base):
     __tablename__ = "materials"
 
@@ -106,6 +121,10 @@ class Material(Base):
     purchase_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=Decimal("0"))
     cost_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False, default=Decimal("0"))
     min_stock: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    reorder_quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    last_purchase_quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    alternatives_note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    products_note: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     decimal_places: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     family: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -120,6 +139,25 @@ class Material(Base):
     tags: Mapped[list[Tag]] = relationship(secondary=material_tags)
     product_links: Mapped[list["ProductMaterial"]] = relationship(back_populates="material")
     stocks: Mapped[list["MaterialStock"]] = relationship(back_populates="material", cascade="all, delete-orphan")
+    purchase_sources: Mapped[list["MaterialPurchaseSource"]] = relationship(
+        back_populates="material",
+        cascade="all, delete-orphan",
+        order_by="MaterialPurchaseSource.id",
+    )
+
+
+class MaterialPurchaseSource(Base):
+    __tablename__ = "material_purchase_sources"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("materials.id", ondelete="CASCADE"), nullable=False)
+    shop_id: Mapped[int] = mapped_column(ForeignKey("shops.id", ondelete="RESTRICT"), nullable=False)
+    url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_preferred: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    material: Mapped[Material] = relationship(back_populates="purchase_sources")
+    shop: Mapped[Shop] = relationship(back_populates="sources")
 
 
 class Product(Base):
@@ -408,6 +446,7 @@ class CustomerOrder(Base):
     ordered_on: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     customer_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     external_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
     origin: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")  # manual | shopify | etsy
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")  # review | open | ready | shipped
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -432,22 +471,47 @@ class OrderLine(Base):
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
     label: Mapped[str] = mapped_column(String(300), nullable=False)
+    shop_sku: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    shop_title: Mapped[str | None] = mapped_column(String(300), nullable=True)
     product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
     material_id: Mapped[int | None] = mapped_column(ForeignKey("materials.id", ondelete="SET NULL"), nullable=True)
+    set_variant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("set_variants.id", ondelete="SET NULL"), nullable=True
+    )
+    suggested_product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("products.id", ondelete="SET NULL"), nullable=True
+    )
 
     order: Mapped[CustomerOrder] = relationship(back_populates="lines")
-    product: Mapped[Product | None] = relationship()
+    product: Mapped[Product | None] = relationship(foreign_keys=[product_id])
     material: Mapped[Material | None] = relationship()
+    set_variant: Mapped[SetVariant | None] = relationship()
+    suggested_product: Mapped[Product | None] = relationship(foreign_keys=[suggested_product_id])
     todos: Mapped[list["WorkTodo"]] = relationship(back_populates="line", cascade="all, delete-orphan")
+
+
+class ShopLineMap(Base):
+    """Gemerkte Shop-Zeile (Herkunft + Titel, optional SKU) → Lagerprodukt."""
+
+    __tablename__ = "shop_line_maps"
+    __table_args__ = (UniqueConstraint("origin", "title_key", name="uq_shop_line_map_title"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    origin: Mapped[str] = mapped_column(String(20), nullable=False)
+    title_key: Mapped[str] = mapped_column(String(300), nullable=False)
+    sku_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+
+    product: Mapped[Product] = relationship()
 
 
 class WorkTodo(Base):
     __tablename__ = "todos"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
-    order_line_id: Mapped[int] = mapped_column(ForeignKey("order_lines.id", ondelete="CASCADE"), nullable=False)
-    kind: Mapped[str] = mapped_column(String(30), nullable=False)  # manufacture | create_article | purchase
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id", ondelete="CASCADE"), nullable=True)
+    order_line_id: Mapped[int | None] = mapped_column(ForeignKey("order_lines.id", ondelete="CASCADE"), nullable=True)
+    kind: Mapped[str] = mapped_column(String(30), nullable=False)  # manufacture | create_article | purchase | assemble
     category: Mapped[str] = mapped_column(String(20), nullable=False, default="workshop")  # workshop | purchase
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")  # open | done
     title: Mapped[str] = mapped_column(String(300), nullable=False)
@@ -457,7 +521,40 @@ class WorkTodo(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    order: Mapped[CustomerOrder] = relationship(back_populates="todos")
-    line: Mapped[OrderLine] = relationship(back_populates="todos")
+    order: Mapped[CustomerOrder | None] = relationship(back_populates="todos")
+    line: Mapped[OrderLine | None] = relationship(back_populates="todos")
     product: Mapped[Product | None] = relationship()
     material: Mapped[Material | None] = relationship()
+
+
+class TageslageCache(Base):
+    """Gemini-Text der Tageslage, 1× pro Kalendertag."""
+
+    __tablename__ = "tageslage_cache"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cache_date: Mapped[str] = mapped_column(String(10), nullable=False, unique=True)  # YYYY-MM-DD
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    quote: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    next_steps_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class IncomingMail(Base):
+    """IMAP-Rohmail in der Warteschlange (Etsy-Parser u. a.)."""
+
+    __tablename__ = "incoming_mails"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    origin: Mapped[str] = mapped_column(String(20), nullable=False, default="etsy")
+    message_id: Mapped[str] = mapped_column(String(300), nullable=False, unique=True)
+    subject: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    from_addr: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    body_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    # pending | duplicate | error
+    error_message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)

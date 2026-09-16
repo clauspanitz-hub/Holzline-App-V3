@@ -473,6 +473,8 @@ table .row-actions .btn {
 
 .family-select {
   position: relative;
+  min-width: 0;
+  width: 100%;
 }
 
 .family-select-trigger {
@@ -488,6 +490,11 @@ table .row-actions .btn {
   background: #1a221a;
   color: var(--ink);
   text-align: left;
+}
+
+.family-select-trigger span:not(.family-select-caret) {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .family-select-caret {
@@ -523,7 +530,7 @@ table .row-actions .btn {
 .family-select-group,
 .family-select-option {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.35rem;
   width: 100%;
   padding: 0.35rem 0.45rem;
@@ -532,6 +539,15 @@ table .row-actions .btn {
   background: transparent;
   color: inherit;
   text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.family-select.inline .family-select-panel {
+  position: static;
+  max-height: min(28rem, 70vh);
+  margin-top: 0.35rem;
+  box-shadow: none;
 }
 
 .family-select-group {
@@ -1035,6 +1051,77 @@ select {
   }
 }
 
+.review-orders {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.review-order {
+  min-width: 0;
+  overflow: visible;
+  padding: 0.9rem 1rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+}
+
+.review-order h3 {
+  margin: 0 0 0.25rem;
+  font-size: 1.15rem;
+  overflow-wrap: anywhere;
+}
+
+.review-order > .empty {
+  margin: 0 0 0.35rem;
+}
+
+.review-line {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line);
+}
+
+.review-line-shop {
+  margin: 0;
+  font-size: 1.08rem;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.review-line-qty {
+  color: var(--accent);
+  margin-right: 0.25rem;
+}
+
+.review-line-assign {
+  min-width: 0;
+}
+
+.review-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem 0.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px dashed var(--accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.review-suggest p {
+  margin: 0;
+  flex: 1 1 12rem;
+}
+
+.review-order .row-actions {
+  margin-top: 0.9rem;
+}
+
 .order-line {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 5.5rem auto;
@@ -1236,6 +1323,48 @@ select {
   align-items: center;
   gap: 0.35rem;
   font-size: 0.95rem;
+}
+
+.tageslage-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin: 0 0 0.85rem;
+  font-size: 0.95rem;
+}
+
+.tageslage-summary {
+  margin: 0 0 1rem;
+  line-height: 1.45;
+  max-width: 52rem;
+}
+
+.tageslage-next-title {
+  margin: 0 0 0.4rem;
+  font-size: 1.05rem;
+}
+
+.tageslage-next {
+  margin: 0 0 1rem;
+  padding-left: 1.25rem;
+  max-width: 52rem;
+}
+
+.tageslage-next li {
+  margin: 0.35rem 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.75rem;
+}
+
+.tageslage-quote {
+  margin: 0;
+  padding: 0.65rem 0.9rem;
+  border-left: 3px solid var(--accent, #c45c26);
+  color: var(--muted);
+  font-style: italic;
+  max-width: 40rem;
 }
 
 @media (max-width: 760px) {

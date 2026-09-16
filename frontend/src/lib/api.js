@@ -67,6 +67,17 @@ export const api = {
     update: (id, body) => request(`/api/tags/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     remove: (id) => request(`/api/tags/${id}`, { method: 'DELETE' }),
   },
+  shops: {
+    list: () => request('/api/shops'),
+    create: (body) => request('/api/shops', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) => request(`/api/shops/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    remove: (id) => request(`/api/shops/${id}`, { method: 'DELETE' }),
+    suggestFromUrl: (url) =>
+      request('/api/shops/suggest-from-url', { method: 'POST', body: JSON.stringify({ url }) }),
+  },
+  purchaseSources: {
+    overview: () => request('/api/purchase-sources/overview'),
+  },
   suggestions: {
     byColor: (colorId, { materials = true, products = true } = {}) =>
       request(`/api/suggestions/by-color/${colorId}?materials=${materials}&products=${products}`),
@@ -180,6 +191,10 @@ export const api = {
       request(`/api/sets/${id}/variants/${variantId}/bom`, { method: 'POST', body: JSON.stringify(body) }),
     removeBom: (id, variantId, lineId) =>
       request(`/api/sets/${id}/variants/${variantId}/bom/${lineId}`, { method: 'DELETE' }),
+    assemblePreview: (variantId, quantity) =>
+      request(`/api/sets/variants/${variantId}/assemble-preview?quantity=${encodeURIComponent(quantity)}`),
+    assemble: (variantId, body) =>
+      request(`/api/sets/variants/${variantId}/assemble`, { method: 'POST', body: JSON.stringify(body) }),
     importShopify: (file) => {
       const form = new FormData()
       form.append('file', file)
@@ -224,8 +239,13 @@ export const api = {
     remove: (id) => request(`/api/orders/${id}`, { method: 'DELETE' }),
     approve: (id) => request(`/api/orders/${id}/approve`, { method: 'POST' }),
     syncShopify: () => request('/api/orders/shopify-sync', { method: 'POST' }),
+    listEtsyMails: () => request('/api/orders/etsy-mails'),
+    parseEtsyMails: () => request('/api/orders/etsy-mails/parse', { method: 'POST' }),
+    ignoreEtsyMail: (id) => request(`/api/orders/etsy-mails/${id}/ignore`, { method: 'POST' }),
     linkLine: (orderId, lineId, body) =>
       request(`/api/orders/${orderId}/lines/${lineId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    queueCreate: (orderId, lineId) =>
+      request(`/api/orders/${orderId}/lines/${lineId}/queue-create`, { method: 'POST' }),
   },
   todos: {
     list: ({ category, status } = {}) => {
@@ -236,6 +256,12 @@ export const api = {
       return request(`/api/todos${qs ? `?${qs}` : ''}`)
     },
     complete: (id) => request(`/api/todos/${id}/complete`, { method: 'POST' }),
+    purchaseFromCritical: (body = {}) =>
+      request('/api/todos/purchase-from-critical', { method: 'POST', body: JSON.stringify(body) }),
+  },
+  overview: {
+    tageslage: (refresh = false) =>
+      request(`/api/overview/tageslage${refresh ? '?refresh=true' : ''}`),
   },
 }
 

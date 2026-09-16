@@ -3,7 +3,7 @@ from decimal import Decimal
 from math import floor
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -15,6 +15,7 @@ from app.models import (
     CustomerOrder,
     Location,
     Material,
+    MaterialPurchaseSource,
     MaterialStock,
     OptionMapping,
     OrderLine,
@@ -820,7 +821,32 @@ def product_incomplete_fields(product: Product) -> list[str]:
 
 
 def material_read(material: Material) -> MaterialRead:
+    from app.purchase_sources import preferred_source
+    from app.schemas import MaterialUsedInProduct, PurchaseSourceRead
+
     total = _material_stock_total(material)
+    sources = []
+    for src in getattr(material, "purchase_sources", None) or []:
+        sources.append(
+            PurchaseSourceRead(
+                id=src.id,
+                shop_id=src.shop_id,
+                shop_name=src.shop.name if src.shop else "?",
+                url=src.url,
+                note=src.note,
+                is_preferred=bool(src.is_preferred),
+            )
+        )
+    pref = preferred_source(material) if sources else None
+    used: list[MaterialUsedInProduct] = []
+    seen: set[int] = set()
+    for link in getattr(material, "product_links", None) or []:
+        prod = getattr(link, "product", None)
+        if prod is None or prod.id in seen:
+            continue
+        seen.add(prod.id)
+        used.append(MaterialUsedInProduct(id=prod.id, name=prod.name))
+    used.sort(key=lambda x: x.name.casefold())
     return MaterialRead(
         id=material.id,
         name=material.name,
@@ -829,6 +855,10 @@ def material_read(material: Material) -> MaterialRead:
         purchase_price=material.purchase_price,
         cost_per_unit=material.cost_per_unit,
         min_stock=material.min_stock,
+        reorder_quantity=getattr(material, "reorder_quantity", None),
+        last_purchase_quantity=getattr(material, "last_purchase_quantity", None),
+        alternatives_note=getattr(material, "alternatives_note", None),
+        products_note=getattr(material, "products_note", None),
         is_template=bool(getattr(material, "is_template", False)),
         decimal_places=int(getattr(material, "decimal_places", 0) or 0),
         family=material.family,
@@ -836,6 +866,10 @@ def material_read(material: Material) -> MaterialRead:
         color_id=material.color_id,
         color=color_read(material.color),
         tags=[TagRead.model_validate(t) for t in material.tags],
+        purchase_sources=sources,
+        used_in_products=used,
+        preferred_source_url=pref.url if pref else None,
+        preferred_shop_name=pref.shop.name if pref and pref.shop else None,
         stock_total=total,
         is_negative=total < 0 or any(s.quantity < 0 for s in material.stocks),
         stocks=_stock_rows_material(material),
@@ -888,6 +922,8 @@ def _load_material(db: Session, material_id: int) -> Material:
             selectinload(Material.stocks).selectinload(MaterialStock.location),
             selectinload(Material.color).selectinload(Color.medium),
             selectinload(Material.tags),
+            selectinload(Material.purchase_sources).selectinload(MaterialPurchaseSource.shop),
+            selectinload(Material.product_links).selectinload(ProductMaterial.product),
         )
     ).first()
     if not material:
@@ -912,6 +948,8 @@ def list_materials(
             selectinload(Material.stocks).selectinload(MaterialStock.location),
             selectinload(Material.color).selectinload(Color.medium),
             selectinload(Material.tags),
+            selectinload(Material.purchase_sources).selectinload(MaterialPurchaseSource.shop),
+            selectinload(Material.product_links).selectinload(ProductMaterial.product),
         )
     )
     if tag:
@@ -936,6 +974,9 @@ def create_material(db: Session, payload: MaterialCreate) -> MaterialRead:
         purchase_price=purchase_price,
         cost_per_unit=_unit_cost(purchase_price, purchase_quantity),
         min_stock=_q(payload.min_stock) if payload.min_stock is not None else None,
+        reorder_quantity=_q(payload.reorder_quantity) if payload.reorder_quantity is not None else None,
+        alternatives_note=(payload.alternatives_note or "").strip() or None,
+        products_note=(payload.products_note or "").strip() or None,
         family=(payload.family.strip() if payload.family else None),
         color_id=color.id if color else None,
         decimal_places=int(payload.decimal_places or 0),
@@ -944,6 +985,14 @@ def create_material(db: Session, payload: MaterialCreate) -> MaterialRead:
     db.add(material)
     try:
         db.flush()
+        if payload.purchase_sources:
+            from app.purchase_sources import replace_material_sources
+
+            replace_material_sources(
+                db,
+                material,
+                [s.model_dump() for s in payload.purchase_sources],
+            )
         db.add(
             MaterialStock(
                 material_id=material.id,
@@ -1089,6 +1138,7 @@ def update_material(db: Session, material_id: int, payload: MaterialUpdate) -> M
     before_missing = material_incomplete_fields_raw(material)
     data = payload.model_dump(exclude_unset=True)
     tag_ids = data.pop("tag_ids", None)
+    sources_payload = data.pop("purchase_sources", None)
     if "name" in data and data["name"] is not None:
         data["name"] = data["name"].strip()
     if "purchase_quantity" in data and data["purchase_quantity"] is not None:
@@ -1097,6 +1147,16 @@ def update_material(db: Session, material_id: int, payload: MaterialUpdate) -> M
         data["purchase_price"] = _m(data["purchase_price"])
     if "min_stock" in data:
         data["min_stock"] = _q(data["min_stock"]) if data["min_stock"] is not None else None
+    if "reorder_quantity" in data:
+        data["reorder_quantity"] = _q(data["reorder_quantity"]) if data["reorder_quantity"] is not None else None
+    if "last_purchase_quantity" in data:
+        data["last_purchase_quantity"] = (
+            _q(data["last_purchase_quantity"]) if data["last_purchase_quantity"] is not None else None
+        )
+    if "alternatives_note" in data:
+        data["alternatives_note"] = (data["alternatives_note"] or "").strip() or None
+    if "products_note" in data:
+        data["products_note"] = (data["products_note"] or "").strip() or None
     if "family" in data and data["family"] is not None:
         data["family"] = data["family"].strip() or None
     if "color_id" in data:
@@ -1106,6 +1166,10 @@ def update_material(db: Session, material_id: int, payload: MaterialUpdate) -> M
         setattr(material, key, value)
     if tag_ids is not None:
         material.tags = resolve_tags(db, tag_ids)
+    if sources_payload is not None:
+        from app.purchase_sources import replace_material_sources
+
+        replace_material_sources(db, material, sources_payload)
     material.cost_per_unit = _unit_cost(Decimal(material.purchase_price), Decimal(material.purchase_quantity))
     sync_incomplete_tags(db, material, before_missing=before_missing)
     _stamp_update(material)
@@ -1176,6 +1240,10 @@ def adjust_material_stock(db: Session, material_id: int, payload: StockAdjustReq
     get_location(db, payload.location_id)
     row = _get_or_create_material_stock(db, material_id, payload.location_id)
     row.quantity = _q(payload.quantity)
+    db.flush()
+    from app.purchase_todos import cleanup_stale_purchase_todos
+
+    cleanup_stale_purchase_todos(db)
     db.commit()
     return material_read(_load_material(db, material_id))
 
@@ -1185,6 +1253,10 @@ def delta_material_stock(db: Session, material_id: int, payload: StockDeltaReque
     get_location(db, payload.location_id)
     row = _get_or_create_material_stock(db, material_id, payload.location_id)
     row.quantity = _q(Decimal(row.quantity) + Decimal(payload.delta))
+    db.flush()
+    from app.purchase_todos import cleanup_stale_purchase_todos
+
+    cleanup_stale_purchase_todos(db)
     db.commit()
     return material_read(_load_material(db, material_id))
 
@@ -1208,6 +1280,10 @@ def transfer_material(db: Session, material_id: int, payload: TransferRequest) -
         material_id=material_id,
         note=payload.note,
     )
+    db.flush()
+    from app.purchase_todos import cleanup_stale_purchase_todos
+
+    cleanup_stale_purchase_todos(db)
     db.commit()
     return material_read(_load_material(db, material_id))
 
@@ -1936,6 +2012,139 @@ def manufacture(db: Session, product_id: int, quantity: Decimal, location_id: in
     return ManufactureResult(product=product_read(refreshed), warnings=warnings)
 
 
+def _load_set_variant(db: Session, variant_id: int) -> SetVariant:
+    variant = db.scalars(
+        select(SetVariant)
+        .where(SetVariant.id == variant_id)
+        .options(
+            selectinload(SetVariant.bom_lines).selectinload(SetBomLine.material),
+            selectinload(SetVariant.bom_lines).selectinload(SetBomLine.product),
+            selectinload(SetVariant.product_set),
+        )
+    ).first()
+    if not variant:
+        raise HTTPException(status_code=404, detail="Set-Variante nicht gefunden")
+    return variant
+
+
+def _set_line_label(variant: SetVariant) -> str:
+    set_name = variant.product_set.name if variant.product_set else "Set"
+    return f"{set_name} · {_variant_label(variant)}"
+
+
+def assemble_variant(
+    db: Session, variant_id: int, quantity: Decimal, location_id: int | None
+) -> "AssembleResult":
+    from app.schemas import AssembleBomPreview, AssembleResult
+
+    variant = _load_set_variant(db, variant_id)
+    if not variant.bom_lines:
+        raise HTTPException(status_code=400, detail="Varianten-Stückliste ist leer — Zusammenstellen nicht möglich")
+    location = get_location(db, location_id) if location_id else default_location(db)
+    qty = _q(quantity)
+    warnings: list[str] = []
+    bom_preview: list[AssembleBomPreview] = []
+
+    for line in variant.bom_lines:
+        needed = _q(qty * Decimal(line.quantity_required))
+        if line.material_id is not None:
+            mat_stock = _get_or_create_material_stock(db, line.material_id, location.id)
+            new_stock = _q(Decimal(mat_stock.quantity) - needed)
+            mat_name = line.material.name if line.material else f"#{line.material_id}"
+            unit = line.material.unit.value if line.material and hasattr(line.material.unit, "value") else (
+                str(line.material.unit) if line.material else None
+            )
+            if new_stock < 0:
+                warnings.append(
+                    f"Material „{mat_name}“ an {location.name} wird negativ "
+                    f"(Bestand {new_stock}{(' ' + unit) if unit else ''} nach Abbuchung von {needed})."
+                )
+            mat_stock.quantity = new_stock
+            bom_preview.append(
+                AssembleBomPreview(
+                    kind="material",
+                    name=mat_name,
+                    quantity_required=_q(line.quantity_required),
+                    quantity_total=needed,
+                    unit=unit,
+                )
+            )
+        elif line.product_id is not None:
+            prod_stock = _get_or_create_product_stock(db, line.product_id, location.id)
+            new_stock = _q(Decimal(prod_stock.quantity) - needed)
+            prod_name = line.product.name if line.product else f"#{line.product_id}"
+            if new_stock < 0:
+                warnings.append(
+                    f"Produkt „{prod_name}“ an {location.name} wird negativ "
+                    f"(Bestand {new_stock} nach Abbuchung von {needed})."
+                )
+            prod_stock.quantity = new_stock
+            bom_preview.append(
+                AssembleBomPreview(
+                    kind="product",
+                    name=prod_name,
+                    quantity_required=_q(line.quantity_required),
+                    quantity_total=needed,
+                    unit="Stk",
+                )
+            )
+
+    from app.purchase_todos import cleanup_stale_purchase_todos
+
+    cleanup_stale_purchase_todos(db)
+    db.commit()
+    set_name = variant.product_set.name if variant.product_set else "Set"
+    return AssembleResult(
+        set_name=set_name,
+        variant_label=_variant_label(variant),
+        warnings=warnings,
+        bom=bom_preview,
+    )
+
+
+def assemble_preview(db: Session, variant_id: int, quantity: Decimal) -> "AssembleResult":
+    """BOM-Vorschau ohne Buchung (für Dialog)."""
+    from app.schemas import AssembleBomPreview, AssembleResult
+
+    variant = _load_set_variant(db, variant_id)
+    qty = _q(quantity)
+    bom_preview: list[AssembleBomPreview] = []
+    for line in variant.bom_lines:
+        needed = _q(qty * Decimal(line.quantity_required))
+        if line.material_id is not None:
+            mat_name = line.material.name if line.material else f"#{line.material_id}"
+            unit = line.material.unit.value if line.material and hasattr(line.material.unit, "value") else (
+                str(line.material.unit) if line.material else None
+            )
+            bom_preview.append(
+                AssembleBomPreview(
+                    kind="material",
+                    name=mat_name,
+                    quantity_required=_q(line.quantity_required),
+                    quantity_total=needed,
+                    unit=unit,
+                )
+            )
+        elif line.product_id is not None:
+            prod_name = line.product.name if line.product else f"#{line.product_id}"
+            bom_preview.append(
+                AssembleBomPreview(
+                    kind="product",
+                    name=prod_name,
+                    quantity_required=_q(line.quantity_required),
+                    quantity_total=needed,
+                    unit="Stk",
+                )
+            )
+    set_name = variant.product_set.name if variant.product_set else "Set"
+    return AssembleResult(
+        set_name=set_name,
+        variant_label=_variant_label(variant),
+        warnings=[] if bom_preview else ["Varianten-Stückliste ist leer."],
+        bom=bom_preview,
+    )
+
+
 def _variant_label(variant: SetVariant) -> str:
     parts = [v for v in (variant.option1_value, variant.option2_value, variant.option3_value) if v]
     return " / ".join(parts) if parts else f"Variante #{variant.id}"
@@ -2059,6 +2268,8 @@ def product_set_read(
 
 
 def list_sets(db: Session) -> list[ProductSetRead]:
+    from app.schemas import SetVariantRead
+
     rows = db.scalars(
         select(ProductSet)
         .order_by(ProductSet.name)
@@ -2067,7 +2278,36 @@ def list_sets(db: Session) -> list[ProductSetRead]:
             selectinload(ProductSet.option_mappings),
         )
     ).all()
-    return [product_set_read(db, row, include_variants=False, include_mappings=False) for row in rows]
+    out: list[ProductSetRead] = []
+    for row in rows:
+        variants = [
+            SetVariantRead(
+                id=v.id,
+                option1_name=v.option1_name,
+                option1_value=v.option1_value,
+                option2_name=v.option2_name,
+                option2_value=v.option2_value,
+                option3_name=v.option3_name,
+                option3_value=v.option3_value,
+                label=_variant_label(v),
+                buildable_quantity=0,
+                bom=[],
+            )
+            for v in row.variants
+        ]
+        out.append(
+            ProductSetRead(
+                id=row.id,
+                name=row.name,
+                handle=row.handle,
+                count_materials_in_buildability=row.count_materials_in_buildability,
+                variant_count=len(row.variants),
+                mapping_count=len(row.option_mappings),
+                variants=variants,
+                option_mappings=[],
+            )
+        )
+    return out
 
 
 def create_set(db: Session, payload: ProductSetCreate) -> ProductSetRead:
@@ -2695,22 +2935,34 @@ def _order_display(order: CustomerOrder) -> str:
 
 
 def _todo_read(todo: WorkTodo) -> "TodoRead":
+    from app.purchase_sources import preferred_source
     from app.schemas import TodoRead
 
     order = todo.order
+    line = todo.line
+    variant = line.set_variant if line is not None else None
+    set_obj = variant.product_set if variant is not None else None
+    kind = todo.kind if todo.kind in ("manufacture", "create_article", "purchase", "assemble") else "create_article"
+    pref = preferred_source(todo.material) if kind == "purchase" and todo.material else None
     return TodoRead(
         id=todo.id,
         order_id=todo.order_id,
         order_line_id=todo.order_line_id,
-        kind=todo.kind if todo.kind in ("manufacture", "create_article", "purchase") else "create_article",
+        kind=kind,
         category=todo.category if todo.category in ("workshop", "purchase") else "workshop",
         status=todo.status if todo.status in ("open", "done") else "open",
         title=todo.title,
         quantity=_q(todo.quantity),
         product_id=todo.product_id,
         material_id=todo.material_id,
+        set_variant_id=variant.id if variant else (line.set_variant_id if line else None),
+        set_id=set_obj.id if set_obj else (variant.set_id if variant else None),
         product_name=todo.product.name if todo.product else None,
         material_name=todo.material.name if todo.material else None,
+        set_name=set_obj.name if set_obj else None,
+        variant_label=_variant_label(variant) if variant else None,
+        preferred_source_url=pref.url if pref else None,
+        preferred_shop_name=pref.shop.name if pref and pref.shop else None,
         order_label=_order_display(order) if order else None,
         created_at=todo.created_at,
         completed_at=todo.completed_at,
@@ -2720,19 +2972,33 @@ def _todo_read(todo: WorkTodo) -> "TodoRead":
 def _line_read(line: OrderLine, include_todos: bool = True) -> "OrderLineRead":
     from app.schemas import OrderLineRead
 
+    variant = line.set_variant
+    set_obj = variant.product_set if variant is not None else None
     return OrderLineRead(
         id=line.id,
         quantity=_q(line.quantity),
         label=line.label,
+        shop_sku=line.shop_sku,
+        shop_title=line.shop_title,
         product_id=line.product_id,
         material_id=line.material_id,
+        set_variant_id=line.set_variant_id,
+        set_id=set_obj.id if set_obj else (variant.set_id if variant else None),
         product_name=line.product.name if line.product else None,
         material_name=line.material.name if line.material else None,
+        set_name=set_obj.name if set_obj else None,
+        variant_label=_variant_label(variant) if variant else None,
+        suggested_product_id=line.suggested_product_id,
+        suggested_product_name=line.suggested_product.name if line.suggested_product else None,
         todos=[_todo_read(t) for t in line.todos] if include_todos else [],
     )
 
 
-def _order_read(order: CustomerOrder, include_line_todos: bool = True) -> "OrderRead":
+def _order_read(
+    order: CustomerOrder,
+    include_line_todos: bool = True,
+    notices: list[str] | None = None,
+) -> "OrderRead":
     from app.schemas import OrderRead
 
     status = order.status if order.status in ("review", "open", "ready", "shipped") else "open"
@@ -2742,12 +3008,14 @@ def _order_read(order: CustomerOrder, include_line_todos: bool = True) -> "Order
         ordered_on=order.ordered_on,
         customer_name=order.customer_name,
         external_number=order.external_number,
+        note=order.note,
         origin=origin,
         status=status,
         lines=[_line_read(ln, include_todos=include_line_todos) for ln in order.lines],
         todos=[_todo_read(t) for t in order.todos],
         created_at=order.created_at,
         updated_at=order.updated_at,
+        notices=notices or [],
     )
 
 
@@ -2758,11 +3026,20 @@ def _order_load(db: Session, order_id: int) -> CustomerOrder:
         .options(
             selectinload(CustomerOrder.lines).selectinload(OrderLine.product),
             selectinload(CustomerOrder.lines).selectinload(OrderLine.material),
+            selectinload(CustomerOrder.lines)
+            .selectinload(OrderLine.set_variant)
+            .selectinload(SetVariant.product_set),
+            selectinload(CustomerOrder.lines).selectinload(OrderLine.suggested_product),
             selectinload(CustomerOrder.lines).selectinload(OrderLine.todos).selectinload(WorkTodo.product),
             selectinload(CustomerOrder.lines).selectinload(OrderLine.todos).selectinload(WorkTodo.material),
+            selectinload(CustomerOrder.lines).selectinload(OrderLine.todos).selectinload(WorkTodo.line),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.product),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.material),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.order),
+            selectinload(CustomerOrder.todos)
+            .selectinload(WorkTodo.line)
+            .selectinload(OrderLine.set_variant)
+            .selectinload(SetVariant.product_set),
         )
     ).first()
     if not order:
@@ -2770,12 +3047,30 @@ def _order_load(db: Session, order_id: int) -> CustomerOrder:
     return order
 
 
-def _refresh_order_status(order: CustomerOrder) -> None:
+def _open_todo_count(db: Session, order_id: int) -> int:
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(WorkTodo)
+            .where(WorkTodo.order_id == order_id, WorkTodo.status == "open")
+        )
+        or 0
+    )
+
+
+def _refresh_order_status(db: Session, order: CustomerOrder) -> None:
     if order.status in ("shipped", "review"):
         return
-    has_open = any(t.status == "open" for t in order.todos)
-    order.status = "open" if has_open else "ready"
+    # Explizite Query: ORM-Collection kann nach Todo-Anlage leer/stale sein.
+    order.status = "open" if _open_todo_count(db, order.id) else "ready"
     order.updated_at = _utcnow()
+
+
+def _complete_create_article_todos(line: OrderLine) -> None:
+    for todo in list(line.todos):
+        if todo.status == "open" and todo.kind == "create_article":
+            todo.status = "done"
+            todo.completed_at = _utcnow()
 
 
 def _needs_manufacture(db: Session, product: Product, qty: Decimal) -> bool:
@@ -2794,6 +3089,20 @@ def _sync_line_todos(db: Session, line: OrderLine) -> None:
     db.flush()
 
     qty = _q(line.quantity)
+    if line.set_variant_id is not None:
+        variant = line.set_variant or _load_set_variant(db, line.set_variant_id)
+        db.add(
+            WorkTodo(
+                order_id=line.order_id,
+                order_line_id=line.id,
+                kind="assemble",
+                category="workshop",
+                status="open",
+                title=f"Zusammenstellen: {_set_line_label(variant)}",
+                quantity=qty,
+            )
+        )
+        return
     if line.product_id is None and line.material_id is None:
         db.add(
             WorkTodo(
@@ -2843,21 +3152,30 @@ def create_order(db: Session, payload: "OrderCreate") -> "OrderRead":
         label = (item.label or "").strip()
         product = _load_product(db, item.product_id) if item.product_id else None
         material = _load_material(db, item.material_id) if item.material_id else None
+        variant = _load_set_variant(db, item.set_variant_id) if item.set_variant_id else None
         if not label:
-            label = product.name if product else (material.name if material else "")
+            if product:
+                label = product.name
+            elif material:
+                label = material.name
+            elif variant:
+                label = _set_line_label(variant)
+            else:
+                label = ""
         line = OrderLine(
             order_id=order.id,
             quantity=_q(item.quantity),
             label=label,
             product_id=product.id if product else None,
             material_id=material.id if material else None,
+            set_variant_id=variant.id if variant else None,
         )
         db.add(line)
         db.flush()
         _sync_line_todos(db, line)
     db.flush()
     order = _order_load(db, order.id)
-    _refresh_order_status(order)
+    _refresh_order_status(db, order)
     db.commit()
     return _order_read(_order_load(db, order.id))
 
@@ -2869,14 +3187,32 @@ def list_orders(db: Session, status: str | None = None) -> list["OrderRead"]:
         .options(
             selectinload(CustomerOrder.lines).selectinload(OrderLine.product),
             selectinload(CustomerOrder.lines).selectinload(OrderLine.material),
+            selectinload(CustomerOrder.lines)
+            .selectinload(OrderLine.set_variant)
+            .selectinload(SetVariant.product_set),
+            selectinload(CustomerOrder.lines).selectinload(OrderLine.suggested_product),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.product),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.material),
             selectinload(CustomerOrder.todos).selectinload(WorkTodo.order),
+            selectinload(CustomerOrder.todos)
+            .selectinload(WorkTodo.line)
+            .selectinload(OrderLine.set_variant)
+            .selectinload(SetVariant.product_set),
         )
     )
     if status in ("review", "open", "ready", "shipped"):
         stmt = stmt.where(CustomerOrder.status == status)
-    rows = db.scalars(stmt).unique().all()
+    rows = list(db.scalars(stmt).unique().all())
+    dirty = False
+    for row in rows:
+        if row.status in ("open", "ready"):
+            before = row.status
+            _refresh_order_status(db, row)
+            if row.status != before:
+                dirty = True
+    if dirty:
+        db.commit()
+        rows = list(db.scalars(stmt).unique().all())
     return [_order_read(row, include_line_todos=False) for row in rows]
 
 
@@ -2896,7 +3232,7 @@ def update_order(db: Session, order_id: int, payload: "OrderUpdate") -> "OrderRe
     if "external_number" in data:
         order.external_number = (data["external_number"] or "").strip() or None
     if data.get("status") == "shipped":
-        _refresh_order_status(order)
+        _refresh_order_status(db, order)
         if order.status == "open":
             raise HTTPException(status_code=400, detail="Bestellung hat noch offene Todos")
         order.status = "shipped"
@@ -2924,32 +3260,88 @@ def link_order_line(db: Session, order_id: int, line_id: int, payload: "OrderLin
     line = next((ln for ln in order.lines if ln.id == line_id), None)
     if line is None:
         raise HTTPException(status_code=404, detail="Position nicht gefunden")
+    notices: list[str] = []
     if payload.unassign:
         line.product_id = None
         line.material_id = None
+        line.set_variant_id = None
+    elif payload.set_variant_id:
+        variant = _load_set_variant(db, payload.set_variant_id)
+        line.set_variant_id = variant.id
+        line.product_id = None
+        line.material_id = None
+        line.suggested_product_id = None
+        line.label = _set_line_label(variant)
     elif payload.product_id:
         product = _load_product(db, payload.product_id)
         line.product_id = product.id
         line.material_id = None
-        line.label = product.name
+        line.set_variant_id = None
+        line.suggested_product_id = None
+        if order.origin not in ("shopify", "etsy"):
+            line.label = product.name
+        if order.origin in ("shopify", "etsy"):
+            from app.shop_map import fill_product_sku, remember_shop_line, spread_shop_assignment
+
+            _, map_notices = remember_shop_line(db, origin=order.origin, line=line, product=product)
+            notices.extend(map_notices)
+            notices.extend(fill_product_sku(db, product, line.shop_sku))
+            pulled = spread_shop_assignment(db, origin=order.origin, source=line, product=product)
+            if pulled:
+                notices.append(
+                    f"{pulled} weitere Prüfungszeile(n) mit derselben Shop-Zeile zugeordnet."
+                )
     elif payload.material_id:
         material = _load_material(db, payload.material_id)
         line.material_id = material.id
         line.product_id = None
+        line.set_variant_id = None
         line.label = material.name
     elif payload.quantity is None:
-        raise HTTPException(status_code=400, detail="Produkt, Material oder Menge angeben")
+        raise HTTPException(status_code=400, detail="Produkt, Material, Set-Variante oder Menge angeben")
     if payload.quantity is not None:
         line.quantity = _q(payload.quantity)
+    if payload.product_id or payload.material_id or payload.set_variant_id:
+        _complete_create_article_todos(line)
     if order.status != "review":
         _sync_line_todos(db, line)
         db.flush()
         order = _order_load(db, order_id)
-        _refresh_order_status(order)
+        _refresh_order_status(db, order)
     else:
         db.flush()
     db.commit()
-    return _order_read(_order_load(db, order_id))
+    return _order_read(_order_load(db, order_id), notices=notices)
+
+
+def queue_create_article(db: Session, order_id: int, line_id: int) -> "OrderRead":
+    """Vormerken: Todo Artikel anlegen (auch zur Prüfung). Kein Duplikat."""
+    order = _order_load(db, order_id)
+    line = next((ln for ln in order.lines if ln.id == line_id), None)
+    if line is None:
+        raise HTTPException(status_code=404, detail="Position nicht gefunden")
+    if line.product_id is not None or line.material_id is not None or line.set_variant_id is not None:
+        raise HTTPException(status_code=400, detail="Position ist bereits zugeordnet")
+    existing = next(
+        (t for t in line.todos if t.status == "open" and t.kind == "create_article"),
+        None,
+    )
+    if existing is not None:
+        return _order_read(order, notices=["bereits vorgemerkt"])
+    label = (line.shop_title or line.label or "Artikel").strip()
+    db.add(
+        WorkTodo(
+            order_id=order.id,
+            order_line_id=line.id,
+            kind="create_article",
+            category="workshop",
+            status="open",
+            title=f"Artikel anlegen: {label}",
+            quantity=_q(line.quantity),
+        )
+    )
+    db.commit()
+    return _order_read(_order_load(db, order_id), notices=["vorgemerkt"])
 
 
 def approve_order(db: Session, order_id: int) -> "OrderRead":
@@ -2961,7 +3353,7 @@ def approve_order(db: Session, order_id: int) -> "OrderRead":
     db.flush()
     order = _order_load(db, order_id)
     order.status = "open"
-    _refresh_order_status(order)
+    _refresh_order_status(db, order)
     db.commit()
     return _order_read(_order_load(db, order_id))
 
@@ -2973,10 +3365,95 @@ def import_shopify_orders(db: Session) -> "ShopifyOrderSyncResult":
     if not shopify_configured():
         raise HTTPException(
             status_code=400,
-            detail="Shopify nicht konfiguriert (SHOPIFY_STORE, SHOPIFY_ADMIN_TOKEN)",
+            detail="Shopify nicht konfiguriert (SHOPIFY_STORE, SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET)",
         )
     result = sync_shopify_orders(db)
+    from app.gemini_suggest import suggest_unmatched_shop_lines
+
+    suggested, gemini_error = suggest_unmatched_shop_lines(db, origin="shopify")
+    result["suggested"] = suggested
+    if gemini_error:
+        result.setdefault("errors", []).append(gemini_error)
+    db.commit()
     return ShopifyOrderSyncResult.model_validate(result)
+
+
+def list_etsy_mails(db: Session) -> list["IncomingMailRead"]:
+    from app.etsy_mail import list_queue
+    from app.schemas import IncomingMailRead
+
+    rows = list_queue(db)
+    out: list[IncomingMailRead] = []
+    for row in rows:
+        preview = (row.body_text or "").strip().replace("\n", " ")
+        if len(preview) > 240:
+            preview = preview[:240] + "…"
+        out.append(
+            IncomingMailRead(
+                id=row.id,
+                origin=row.origin,
+                subject=row.subject,
+                from_addr=row.from_addr,
+                status=row.status,
+                error_message=row.error_message,
+                body_preview=preview,
+                received_at=row.received_at,
+                created_at=row.created_at,
+            )
+        )
+    return out
+
+
+def fetch_etsy_mails(db: Session) -> dict:
+    from app.etsy_mail import fetch_new_mails, imap_configured
+
+    if not imap_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="IMAP nicht konfiguriert (IMAP_HOST, IMAP_USER, IMAP_PASSWORD)",
+        )
+    result = fetch_new_mails(db)
+    db.commit()
+    return result
+
+
+def parse_etsy_mails(db: Session) -> "EtsyMailParseResult":
+    from app.etsy_mail import fetch_new_mails, imap_configured, parse_pending_mails
+    from app.gemini_suggest import suggest_unmatched_shop_lines
+    from app.schemas import EtsyMailParseResult
+
+    fetched = 0
+    errors: list[str] = []
+    if imap_configured():
+        fetch_result = fetch_new_mails(db)
+        fetched = int(fetch_result.get("fetched") or 0)
+        errors.extend(fetch_result.get("errors") or [])
+    else:
+        errors.append("IMAP nicht konfiguriert — nur vorhandene Warteschlange")
+
+    parse_result = parse_pending_mails(db)
+    suggested, gemini_error = suggest_unmatched_shop_lines(db, origin="etsy")
+    if gemini_error:
+        errors.append(gemini_error)
+    for err in parse_result.get("errors") or []:
+        if err not in errors:
+            errors.append(err)
+    db.commit()
+    return EtsyMailParseResult(
+        fetched=fetched,
+        created=int(parse_result.get("created") or 0),
+        duplicates=int(parse_result.get("duplicates") or 0),
+        failed=int(parse_result.get("failed") or 0),
+        suggested=suggested,
+        errors=errors,
+    )
+
+
+def ignore_etsy_mail(db: Session, mail_id: int) -> None:
+    from app.etsy_mail import ignore_mail
+
+    ignore_mail(db, mail_id)
+    db.commit()
 
 
 def list_todos(
@@ -2984,13 +3461,23 @@ def list_todos(
     category: str | None = None,
     status: str | None = None,
 ) -> list["TodoRead"]:
+    from app.purchase_todos import cleanup_stale_purchase_todos
+
+    deleted = cleanup_stale_purchase_todos(db)
+    if deleted:
+        db.commit()
     stmt = (
         select(WorkTodo)
         .order_by(WorkTodo.status.asc(), WorkTodo.created_at.desc())
         .options(
             selectinload(WorkTodo.product),
-            selectinload(WorkTodo.material),
+            selectinload(WorkTodo.material)
+            .selectinload(Material.purchase_sources)
+            .selectinload(MaterialPurchaseSource.shop),
             selectinload(WorkTodo.order),
+            selectinload(WorkTodo.line)
+            .selectinload(OrderLine.set_variant)
+            .selectinload(SetVariant.product_set),
         )
     )
     if category in ("workshop", "purchase"):
@@ -3001,6 +3488,14 @@ def list_todos(
     return [_todo_read(row) for row in rows]
 
 
+def generate_purchase_todos(db: Session, include_ignored: bool = False) -> "PurchaseTodosGenerateResult":
+    from app.purchase_todos import generate_purchase_todos as _generate
+    from app.schemas import PurchaseTodosGenerateResult
+
+    result = _generate(db, include_ignored=include_ignored)
+    return PurchaseTodosGenerateResult(**result)
+
+
 def complete_todo(db: Session, todo_id: int) -> "TodoRead":
     todo = db.get(WorkTodo, todo_id)
     if todo is None:
@@ -3008,8 +3503,9 @@ def complete_todo(db: Session, todo_id: int) -> "TodoRead":
     todo.status = "done"
     todo.completed_at = _utcnow()
     db.flush()
-    order = _order_load(db, todo.order_id)
-    _refresh_order_status(order)
+    if todo.order_id is not None:
+        order = _order_load(db, todo.order_id)
+        _refresh_order_status(db, order)
     db.commit()
     db.refresh(todo)
     todo = db.scalars(
@@ -3019,6 +3515,9 @@ def complete_todo(db: Session, todo_id: int) -> "TodoRead":
             selectinload(WorkTodo.product),
             selectinload(WorkTodo.material),
             selectinload(WorkTodo.order),
+            selectinload(WorkTodo.line)
+            .selectinload(OrderLine.set_variant)
+            .selectinload(SetVariant.product_set),
         )
     ).first()
     return _todo_read(todo)

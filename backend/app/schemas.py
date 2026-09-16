@@ -122,10 +122,14 @@ class MaterialBase(BaseModel):
     purchase_quantity: Quantity = Field(default=Decimal("1"), gt=0)
     purchase_price: Money = Decimal("0")
     min_stock: Quantity | None = None
+    reorder_quantity: Quantity | None = None
+    alternatives_note: str | None = Field(default=None, max_length=1000)
+    products_note: str | None = Field(default=None, max_length=1000)
     family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     decimal_places: int = Field(default=0, ge=0, le=3)
     tag_ids: list[int] = []
+    purchase_sources: list["PurchaseSourceWrite"] = []
 
     @field_validator("family")
     @classmethod
@@ -134,6 +138,28 @@ class MaterialBase(BaseModel):
             return None
         stripped = value.strip()
         return stripped or None
+
+
+class PurchaseSourceWrite(BaseModel):
+    shop_id: int | None = None
+    shop_name: str | None = Field(default=None, max_length=200)
+    url: str = Field(min_length=1, max_length=1000)
+    note: str | None = Field(default=None, max_length=500)
+    is_preferred: bool = False
+
+
+class PurchaseSourceRead(BaseModel):
+    id: int
+    shop_id: int
+    shop_name: str
+    url: str
+    note: str | None = None
+    is_preferred: bool = False
+
+
+class MaterialUsedInProduct(BaseModel):
+    id: int
+    name: str
 
 
 class MaterialCreate(MaterialBase):
@@ -147,12 +173,17 @@ class MaterialUpdate(BaseModel):
     purchase_quantity: Quantity | None = Field(default=None, gt=0)
     purchase_price: Money | None = None
     min_stock: Quantity | None = None
+    reorder_quantity: Quantity | None = None
+    last_purchase_quantity: Quantity | None = None
+    alternatives_note: str | None = Field(default=None, max_length=1000)
+    products_note: str | None = Field(default=None, max_length=1000)
     is_template: bool | None = None
     decimal_places: int | None = Field(default=None, ge=0, le=3)
     family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     tag_ids: list[int] | None = None
     overview_ignored: bool | None = None
+    purchase_sources: list[PurchaseSourceWrite] | None = None
 
     @field_validator("family")
     @classmethod
@@ -173,6 +204,10 @@ class MaterialRead(BaseModel):
     purchase_price: Money
     cost_per_unit: UnitCost
     min_stock: Quantity | None = None
+    reorder_quantity: Quantity | None = None
+    last_purchase_quantity: Quantity | None = None
+    alternatives_note: str | None = None
+    products_note: str | None = None
     is_template: bool = False
     decimal_places: int = 0
     family: str | None = None
@@ -180,6 +215,10 @@ class MaterialRead(BaseModel):
     color_id: int | None = None
     color: ColorRead | None = None
     tags: list[TagRead] = []
+    purchase_sources: list[PurchaseSourceRead] = []
+    used_in_products: list[MaterialUsedInProduct] = []
+    preferred_source_url: str | None = None
+    preferred_shop_name: str | None = None
     stock_total: Quantity
     is_negative: bool
     stocks: list[StockByLocation] = []
@@ -188,6 +227,50 @@ class MaterialRead(BaseModel):
     updated_at: datetime | None = None
     created_by: str | None = None
     updated_by: str | None = None
+
+
+class ShopCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    domain_hint: str | None = Field(default=None, max_length=200)
+
+
+class ShopUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    domain_hint: str | None = Field(default=None, max_length=200)
+
+
+class ShopRead(BaseModel):
+    id: int
+    name: str
+    domain_hint: str | None = None
+
+
+class ShopSuggestRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=1000)
+
+
+class ShopSuggestResult(BaseModel):
+    suggested_name: str
+    domain_hint: str | None = None
+    existing_shop_id: int | None = None
+
+
+class PurchaseSourceOverviewEntry(BaseModel):
+    id: int
+    material_id: int
+    material_name: str
+    shop_id: int | None = None
+    shop_name: str
+    url: str
+    note: str | None = None
+    is_preferred: bool = False
+
+
+class PurchaseSourceOverviewGroup(BaseModel):
+    shop_id: int | None = None
+    shop_name: str
+    domain_hint: str | None = None
+    sources: list[PurchaseSourceOverviewEntry] = []
 
 
 class BomLineCreate(BaseModel):
@@ -320,6 +403,26 @@ class ManufactureRequest(BaseModel):
 class ManufactureResult(BaseModel):
     product: ProductRead
     warnings: list[str]
+
+
+class AssembleRequest(BaseModel):
+    quantity: Quantity = Field(gt=0)
+    location_id: int | None = None
+
+
+class AssembleBomPreview(BaseModel):
+    kind: Literal["product", "material"]
+    name: str
+    quantity_required: Quantity
+    quantity_total: Quantity
+    unit: str | None = None
+
+
+class AssembleResult(BaseModel):
+    set_name: str
+    variant_label: str
+    warnings: list[str] = []
+    bom: list[AssembleBomPreview] = []
 
 
 class TransferRequest(BaseModel):
@@ -696,18 +799,25 @@ class OrderLineCreate(BaseModel):
     quantity: Quantity = Field(gt=0)
     product_id: int | None = None
     material_id: int | None = None
+    set_variant_id: int | None = None
     label: str | None = Field(default=None, max_length=300)
 
     @model_validator(mode="after")
     def need_product_or_label(self) -> "OrderLineCreate":
-        if self.product_id is None and self.material_id is None and not (self.label or "").strip():
-            raise ValueError("Position braucht Produkt, Material oder Freitext")
+        ids = [self.product_id, self.material_id, self.set_variant_id]
+        if sum(1 for x in ids if x is not None) > 1:
+            raise ValueError("Nur eines von Produkt, Material oder Set-Variante")
+        if self.product_id is None and self.material_id is None and self.set_variant_id is None and not (
+            self.label or ""
+        ).strip():
+            raise ValueError("Position braucht Produkt, Material, Set-Variante oder Freitext")
         return self
 
 
 class OrderLineLink(BaseModel):
     product_id: int | None = None
     material_id: int | None = None
+    set_variant_id: int | None = None
     quantity: Quantity | None = None
     unassign: bool = False
 
@@ -716,35 +826,82 @@ class ShopifyOrderSyncResult(BaseModel):
     created: int = 0
     skipped: int = 0
     claimed: int = 0
+    suggested: int = 0
+    errors: list[str] = []
+
+
+class IncomingMailRead(BaseModel):
+    id: int
+    origin: str
+    subject: str | None = None
+    from_addr: str | None = None
+    status: str
+    error_message: str | None = None
+    body_preview: str = ""
+    received_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+class EtsyMailParseResult(BaseModel):
+    fetched: int = 0
+    created: int = 0
+    duplicates: int = 0
+    failed: int = 0
+    suggested: int = 0
     errors: list[str] = []
 
 
 class TodoRead(BaseModel):
     id: int
-    order_id: int
-    order_line_id: int
-    kind: Literal["manufacture", "create_article", "purchase"]
+    order_id: int | None = None
+    order_line_id: int | None = None
+    kind: Literal["manufacture", "create_article", "purchase", "assemble"]
     category: Literal["workshop", "purchase"]
     status: Literal["open", "done"]
     title: str
     quantity: Quantity
     product_id: int | None = None
     material_id: int | None = None
+    set_variant_id: int | None = None
+    set_id: int | None = None
     product_name: str | None = None
     material_name: str | None = None
+    set_name: str | None = None
+    variant_label: str | None = None
+    preferred_source_url: str | None = None
+    preferred_shop_name: str | None = None
     order_label: str | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
+
+
+class PurchaseTodosGenerateRequest(BaseModel):
+    include_ignored: bool = False
+
+
+class PurchaseTodosGenerateResult(BaseModel):
+    created: int = 0
+    skipped_existing: int = 0
+    skipped_ignored: int = 0
+    deleted_stale: int = 0
 
 
 class OrderLineRead(BaseModel):
     id: int
     quantity: Quantity
     label: str
+    shop_sku: str | None = None
+    shop_title: str | None = None
     product_id: int | None = None
     material_id: int | None = None
+    set_variant_id: int | None = None
+    set_id: int | None = None
     product_name: str | None = None
     material_name: str | None = None
+    set_name: str | None = None
+    variant_label: str | None = None
+    suggested_product_id: int | None = None
+    suggested_product_name: str | None = None
     todos: list[TodoRead] = []
 
 
@@ -766,9 +923,35 @@ class OrderRead(BaseModel):
     ordered_on: datetime
     customer_name: str | None = None
     external_number: str | None = None
+    note: str | None = None
     origin: Literal["manual", "shopify", "etsy"] = "manual"
     status: Literal["review", "open", "ready", "shipped"]
     lines: list[OrderLineRead] = []
     todos: list[TodoRead] = []
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    notices: list[str] = []
+
+
+class TageslageNextStep(BaseModel):
+    text: str
+    todo_id: int | None = None
+
+
+class TageslageStats(BaseModel):
+    current_orders: int = 0
+    review_orders: int = 0
+    open_todos: int = 0
+    todos_by_kind: dict[str, int] = {}
+    todo_items: list[dict] = []
+    current_order_labels: list[str] = []
+
+
+class TageslageRead(BaseModel):
+    cache_date: str
+    cached: bool = False
+    stats: TageslageStats
+    summary: str = ""
+    quote: str = ""
+    next_steps: list[TageslageNextStep] = []
+    error: str | None = None
