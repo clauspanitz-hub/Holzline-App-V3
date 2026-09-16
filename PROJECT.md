@@ -38,7 +38,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **option_mappings:** Regel Option+Wert → Material/Produkt+Menge; Overrides je Variante möglich
 - **Baubare Menge:** `min(floor(sum_stock/qty))` über relevante Zeilen; Summe über Standorte **ohne Ausschuss**
 
-### Phase 2 (Bestellungen & Auth) — in Arbeit
+### Phase 2 (Bestellungen & Auth) — umgesetzt
 - **users / auth_sessions:** App-Login; Rollen Admin / Mitarbeiter (ADR `0010`)
 - **orders:** Herkunft Shopify/Etsy/Manuell; Status **zur Prüfung** (`review`) / **offen** / **versandbereit** / **versendet**; externe Nummer; Kunde; Bestellzeit; optionale **Notiz** (Personalisierung)
 - **order_lines:** Menge, Label; optional `product_id`, `material_id`, `set_variant_id` (XOR), `shop_sku`, `shop_title`, `suggested_product_id` (Gemini-Vorschlag)
@@ -73,7 +73,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Produkt-Stückliste Material oder Komponenten-Produkt; Fertigen/Kosten/Serie (ADR `0012`)
 - [x] Shopify-CSV-Assistent + Ignorieren-Liste; Import-Warteschlange → Serienanlage (Medium/Farb-Match); `is_on_demand`
 
-### Phase 2: Bestellverwaltung & Eingangskanäle — in Arbeit
+### Phase 2: Bestellverwaltung & Eingangskanäle — Umgesetzt
 - [x] Benutzer mit Rechten (App-Login Admin/Mitarbeiter, ADR `0010`)
 - [x] Manuelle Schnellerfassung + Todo-Liste (Artikel anlegen / Fertigen; kein Set-Zusammenstellen in diesem Schnitt)
 - [x] Shopify-API → Bestellungen (bezahlt, nicht voll erfüllt; Match → offen+Todos, sonst **zur Prüfung**; Abruf nur Knopfdruck; Dev-Dashboard Client-Credentials `SHOPIFY_STORE` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET`; Versendet manuell; ADR `0013`)
