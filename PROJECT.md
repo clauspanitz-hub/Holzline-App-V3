@@ -23,7 +23,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **product_materials:** Produkt-Stückliste — Material **oder** Komponenten-Produkt → Fertigen (ADR `0012`)
 - **Materialherstellkosten:** live aus Produkt-Stückliste
 
-### Phase 1.5 (Standorte & Sets) — umgesetzt
+### Phase 1.5 (Standorte & Sets) — Umgesetzt
 - **locations:** Hamburg, Dahlenburg, In Bearbeitung, MA1, MA2, Ausschuss (virtuell)
 - **material_stocks / product_stocks:** Bestand je Standort, Negativ erlaubt + Warnung
 - **materials / products:** optionales `min_stock` (Mindestbestand) — Übersicht zeigt kritische Artikel (Gesamt ≤ 0 oder unter Mindestbestand)
@@ -75,7 +75,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 
 ### Phase 2: Bestellverwaltung & Eingangskanäle — Umgesetzt
 - [x] Benutzer mit Rechten (App-Login Admin/Mitarbeiter, ADR `0010`)
-- [x] Manuelle Schnellerfassung + Todo-Liste (Artikel anlegen / Fertigen; kein Set-Zusammenstellen in diesem Schnitt)
+- [x] Manuelle Schnellerfassung + Todo-Liste (Artikel anlegen / Fertigen / Zusammenstellen)
 - [x] Shopify-API → Bestellungen (bezahlt, nicht voll erfüllt; Match → offen+Todos, sonst **zur Prüfung**; Abruf nur Knopfdruck; Dev-Dashboard Client-Credentials `SHOPIFY_STORE` / `SHOPIFY_CLIENT_ID` / `SHOPIFY_CLIENT_SECRET`; Versendet manuell; ADR `0013`)
 - [x] Shop-Zuordnung merken + Gemini-Vorschlag nach Abruf (ADR `0014`; `GEMINI_API_KEY` optional; Free + Default `gemini-3.1-flash-lite`, ADR `0017`)
 - [x] Prüfung: Produkt erzeugen / Auf Liste; Status an offene Todos; Hinweis (ADR `0015`)
@@ -84,7 +84,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Einkauf-Todos aus Mindestbestand (Knopf, nur Materialien; ADR `0019`)
 - [x] Zusammenstellen bei Set-Bestellung (Set-Variante an Position, Todo, Abbuchung; ADR `0020`)
 
-### Phase 3: Optimierung & Einkauf (GEPLANT — vorgemerkt aus Grill)
+### Phase 3: Optimierung & Einkauf — Umgesetzt
 - [x] Einkaufsliste aus fehlenden Materialien (Todo-Art Einkauf; umgesetzt als Einkauf-Todos aus Mindestbestand, ADR `0019`)
 - [x] Einkaufsquellen + Alternativen am Material (ADR `0021`)
 - [x] Mindestbestand je Material/Produkt → Warnungen in Übersicht (vorgezogen in 1.5)
