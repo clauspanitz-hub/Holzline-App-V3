@@ -460,7 +460,7 @@ def sync_shopify_orders(db: Session) -> dict:
                 _sync_line_todos(db, line)
         if status == "open":
             loaded = _order_load(db, order.id)
-            _refresh_order_status(loaded)
+            _refresh_order_status(db, loaded)
         created += 1
         by_shop_num[key] = order
         by_any_num[key] = order
