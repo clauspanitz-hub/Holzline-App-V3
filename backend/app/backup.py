@@ -22,6 +22,7 @@ from app.models import (
     ColorMedium,
     Location,
     Material,
+    MaterialPurchaseSource,
     MaterialStock,
     OptionMapping,
     Product,
@@ -30,6 +31,7 @@ from app.models import (
     ProductStock,
     SetBomLine,
     SetVariant,
+    Shop,
     StockMovement,
     StockMovementKind,
     Tag,
@@ -156,6 +158,10 @@ def export_backup(db: Session, include_movements: bool = False) -> dict[str, Any
         "tags": [
             {"name": row.name} for row in db.scalars(select(Tag).order_by(Tag.name)).all()
         ],
+        "shops": [
+            {"name": row.name, "domain_hint": row.domain_hint}
+            for row in db.scalars(select(Shop).order_by(Shop.name)).all()
+        ],
         "materials": [
             _export_material(row)
             for row in db.scalars(select(Material).order_by(Material.name)).all()
@@ -187,12 +193,26 @@ def _export_material(material: Material) -> dict[str, Any]:
         "purchase_price": _num(material.purchase_price),
         "cost_per_unit": _num(material.cost_per_unit),
         "min_stock": _num(material.min_stock),
+        "reorder_quantity": _num(getattr(material, "reorder_quantity", None)),
+        "last_purchase_quantity": _num(getattr(material, "last_purchase_quantity", None)),
+        "alternatives_note": (getattr(material, "alternatives_note", None) or "")[:1000] or None,
+        "products_note": (getattr(material, "products_note", None) or "")[:1000] or None,
         "is_template": bool(getattr(material, "is_template", False)),
         "decimal_places": int(getattr(material, "decimal_places", 0) or 0),
         "family": material.family,
         "overview_ignored": bool(getattr(material, "overview_ignored", False)),
         "color": _color_ref(material.color),
         "tags": sorted(tag.name for tag in material.tags),
+        "purchase_sources": [
+            {
+                "shop_name": src.shop.name if src.shop else None,
+                "url": src.url,
+                "note": src.note,
+                "is_preferred": bool(src.is_preferred),
+            }
+            for src in material.purchase_sources
+            if src.url
+        ],
         "stocks": [
             {"location": stock.location.name, "quantity": _num(stock.quantity)}
             for stock in sorted(material.stocks, key=lambda s: s.location.name)
@@ -317,6 +337,7 @@ class _Ctx:
         self.media: dict[str, ColorMedium] = {}
         self.colors: dict[tuple[str, str], Color] = {}
         self.tags: dict[str, Tag] = {}
+        self.shops: dict[str, Shop] = {}
         self.materials: dict[str, Material] = {}
         self.products: dict[str, Product] = {}
         self.products_by_sku: dict[str, Product] = {}
@@ -333,6 +354,7 @@ class _Ctx:
             (_key(r.name), _key(r.medium.name)): r for r in db.scalars(select(Color)).all()
         }
         self.tags = {_key(r.name): r for r in db.scalars(select(Tag)).all()}
+        self.shops = {_key(r.name): r for r in db.scalars(select(Shop)).all()}
         self.materials = {_key(r.name): r for r in db.scalars(select(Material)).all()}
         products = db.scalars(select(Product)).all()
         self.products = {_key(r.name): r for r in products}
@@ -410,6 +432,7 @@ def import_backup(db: Session, payload: dict[str, Any], mode: str = "merge") -> 
         _import_media(ctx, _as_list(payload, "color_media"))
         _import_colors(ctx, _as_list(payload, "colors"))
         _import_tags(ctx, _as_list(payload, "tags"))
+        _import_shops(ctx, _as_list(payload, "shops"))
         _import_materials(ctx, _as_list(payload, "materials"))
         products = _as_list(payload, "products")
         _import_products(ctx, products)
@@ -464,7 +487,9 @@ def _wipe_app_data(db: Session) -> None:
     # Selbstreferenz auflösen, bevor Produkte gelöscht werden
     db.execute(update(Product).values(transform_target_id=None))
     db.execute(delete(Product))
+    db.execute(delete(MaterialPurchaseSource))
     db.execute(delete(Material))
+    db.execute(delete(Shop))
     db.execute(delete(Color))
     db.execute(delete(ColorMedium))
     db.execute(delete(Tag))
@@ -553,6 +578,30 @@ def _import_tags(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
             ctx.updated["tags"] += 1
 
 
+def _import_shops(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
+    for entry in entries:
+        name = _str_field(entry, "name", context="Shop")
+        existing = ctx.shops.get(_key(name))
+        domain_hint = _opt_str(entry, "domain_hint")
+        if existing is None:
+            shop = Shop(name=name, domain_hint=domain_hint)
+            ctx.db.add(shop)
+            ctx.db.flush()
+            ctx.shops[_key(name)] = shop
+            ctx.created["shops"] += 1
+        else:
+            changed = False
+            if existing.name != name:
+                existing.name = name
+                changed = True
+            if domain_hint is not None and existing.domain_hint != domain_hint:
+                existing.domain_hint = domain_hint
+                changed = True
+            if changed:
+                existing.updated_at = services._utcnow()
+                ctx.updated["shops"] += 1
+
+
 def _parse_unit(entry: dict[str, Any], *, context: str) -> Unit:
     raw = _str_field(entry, "unit", context=context)
     try:
@@ -587,6 +636,63 @@ def _set_stocks(
             row.quantity = services._q(quantity)
 
 
+def _ensure_shop(ctx: _Ctx, name: str, *, domain_hint: str | None = None) -> Shop:
+    shop = ctx.shops.get(_key(name))
+    if shop is not None:
+        return shop
+    shop = Shop(name=name, domain_hint=domain_hint)
+    ctx.db.add(shop)
+    ctx.db.flush()
+    ctx.shops[_key(name)] = shop
+    ctx.created["shops"] += 1
+    return shop
+
+
+def _set_purchase_sources(ctx: _Ctx, material: Material, entries: Any, *, context: str) -> None:
+    """Bezugsquellen am Material ersetzen. Leere Liste löscht alle Quellen."""
+    if not isinstance(entries, list):
+        ctx.warn(f"{context}: Feld „purchase_sources“ muss eine Liste sein — ignoriert")
+        return
+    material.purchase_sources.clear()
+    ctx.db.flush()
+    preferred_seen = False
+    for raw in entries:
+        if not isinstance(raw, dict):
+            ctx.warn(f"{context}: ungültige Bezugsquelle — übersprungen")
+            continue
+        url = _opt_str(raw, "url")
+        if not url:
+            continue
+        shop_name = _opt_str(raw, "shop_name")
+        if not shop_name:
+            ctx.warn(f"{context}: Bezugsquelle ohne Shop-Name — übersprungen")
+            continue
+        shop = ctx.shops.get(_key(shop_name))
+        if shop is None:
+            shop = _ensure_shop(ctx, shop_name)
+        is_preferred = _bool_field(raw, "is_preferred")
+        if is_preferred:
+            preferred_seen = True
+        material.purchase_sources.append(
+            MaterialPurchaseSource(
+                shop_id=shop.id,
+                url=url[:1000],
+                note=(_opt_str(raw, "note") or "")[:500] or None,
+                is_preferred=is_preferred,
+            )
+        )
+    if material.purchase_sources and not preferred_seen:
+        material.purchase_sources[0].is_preferred = True
+    elif preferred_seen:
+        first_pref = True
+        for src in material.purchase_sources:
+            if src.is_preferred:
+                if first_pref:
+                    first_pref = False
+                else:
+                    src.is_preferred = False
+
+
 def _import_materials(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
     for entry in entries:
         name = _str_field(entry, "name", context="Material")
@@ -619,6 +725,18 @@ def _import_materials(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
         material.cost_per_unit = services._unit_cost(purchase_price, purchase_quantity)
         min_stock = _dec_field(entry, "min_stock", context=context)
         material.min_stock = services._q(min_stock) if min_stock is not None else None
+        if "reorder_quantity" in entry:
+            reorder = _dec_field(entry, "reorder_quantity", context=context)
+            material.reorder_quantity = services._q(reorder) if reorder is not None else None
+        if "last_purchase_quantity" in entry:
+            last_qty = _dec_field(entry, "last_purchase_quantity", context=context)
+            material.last_purchase_quantity = services._q(last_qty) if last_qty is not None else None
+        if "alternatives_note" in entry:
+            note = _opt_str(entry, "alternatives_note")
+            material.alternatives_note = note[:1000] if note else None
+        if "products_note" in entry:
+            note = _opt_str(entry, "products_note")
+            material.products_note = note[:1000] if note else None
         material.is_template = _bool_field(entry, "is_template")
         raw_decimals = entry.get("decimal_places", 0)
         try:
@@ -645,6 +763,8 @@ def _import_materials(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
                 material_id=mid, location_id=location_id, quantity=qty
             ),
         )
+        if "purchase_sources" in entry:
+            _set_purchase_sources(ctx, material, entry.get("purchase_sources"), context=context)
         ctx.db.flush()
         if is_new:
             ctx.created["materials"] += 1
