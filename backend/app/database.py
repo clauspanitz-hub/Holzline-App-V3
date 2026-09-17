@@ -4,20 +4,31 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, event, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.config import settings
 
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args)
+_is_sqlite = settings.database_url.startswith("sqlite")
+connect_args = {"check_same_thread": False} if _is_sqlite else {}
+# SQLite + QueuePool exhausts under parallel auth requests (middleware + get_db).
+# NullPool opens/closes per checkout — correct for file-based SQLite.
+_engine_kwargs: dict = {"connect_args": connect_args}
+if _is_sqlite:
+    _engine_kwargs["poolclass"] = NullPool
+
+engine = create_engine(settings.database_url, **_engine_kwargs)
 
 
 @event.listens_for(engine, "connect")
-def _sqlite_foreign_keys(dbapi_connection, connection_record) -> None:  # noqa: ARG001
-    if settings.database_url.startswith("sqlite"):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+def _sqlite_on_connect(dbapi_connection, connection_record) -> None:  # noqa: ARG001
+    if not _is_sqlite:
+        return
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=30000")
+    cursor.close()
 
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

@@ -31,6 +31,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if method == "OPTIONS":
             return await call_next(request)
 
+        # Auth DB work must finish before call_next — never hold a connection
+        # across the route handler (pool exhaustion + SQLite lock contention).
         db = SessionLocal()
         try:
             token = request.cookies.get(SESSION_COOKIE)
@@ -39,7 +41,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 return JSONResponse({"detail": "Nicht angemeldet"}, status_code=401)
             if user.role == UserRole.MITARBEITER and not mitarbeiter_allowed(method, path):
                 return JSONResponse({"detail": "Keine Berechtigung"}, status_code=403)
+            # Detach before close so request.state keeps a usable User instance.
+            _ = (user.id, user.username, user.role, user.is_active)
+            db.expunge(user)
             request.state.user = user
-            return await call_next(request)
         finally:
             db.close()
+
+        return await call_next(request)

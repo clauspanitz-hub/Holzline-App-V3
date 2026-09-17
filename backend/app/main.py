@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.database import SessionLocal, init_db
+from app.database import init_db
 from app.middleware_auth import AuthMiddleware
 from app.routers import router
 
@@ -32,7 +32,7 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 def _imap_poll_loop() -> None:
     from app.config import settings
-    from app.etsy_mail import fetch_new_mails, imap_configured
+    from app.etsy_mail import fetch_new_mails_standalone, imap_configured
 
     hours = float(settings.imap_poll_hours or 6.0)
     if hours < 1:
@@ -43,21 +43,13 @@ def _imap_poll_loop() -> None:
         time.sleep(interval)
         if not imap_configured():
             continue
-        db = SessionLocal()
         try:
-            result = fetch_new_mails(db)
-            db.commit()
+            result = fetch_new_mails_standalone()
             fetched = int(result.get("fetched") or 0)
             if fetched:
                 log.info("IMAP Auto-Abruf: %s neue Mail(s)", fetched)
         except Exception:
             log.exception("IMAP Auto-Abruf fehlgeschlagen")
-            try:
-                db.rollback()
-            except Exception:
-                pass
-        finally:
-            db.close()
 
 
 @app.on_event("startup")

@@ -9,7 +9,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 ## 2. Tech-Stack
 - **Backend:** FastAPI (Python 3.12)
 - **Frontend:** Svelte (Vite) – SPA, ausgeliefert über FastAPI
-- **Datenbank:** SQLite (Datei im Docker-Volume)
+- **Datenbank:** SQLite (Datei im Docker-Volume; NullPool, WAL, busy_timeout — ADR `0022`)
 - **ORM:** SQLAlchemy 2.x (Schema-Init/Migration-Hilfen beim Start)
 - **Container:** Docker & Docker Compose (ein Service)
 - **ADRs:** `docs/adr/`

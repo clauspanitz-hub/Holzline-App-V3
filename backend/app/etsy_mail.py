@@ -26,6 +26,7 @@ from app.order_match import match_product_for_shop_line, normalize_order_number
 log = logging.getLogger(__name__)
 
 BODY_MAX = 20000
+IMAP_SOCKET_TIMEOUT = 30.0
 
 
 def imap_configured() -> bool:
@@ -161,11 +162,12 @@ def _move_to_processed(conn: imaplib.IMAP4_SSL, uid: bytes, processed: str) -> N
         log.warning("IMAP Verschieben fehlgeschlagen: %s", _redact_secret(str(exc)))
 
 
-def fetch_new_mails(db: Session) -> dict[str, Any]:
-    """Neue Mails aus IMAP in die Warteschlange; danach nach „verarbeitet“."""
-    if not imap_configured():
-        return {"fetched": 0, "errors": ["IMAP nicht konfiguriert"]}
+def _existing_message_ids(db: Session) -> set[str]:
+    return {mid for mid in db.scalars(select(IncomingMail.message_id)).all() if mid}
 
+
+def _imap_download(existing_ids: set[str]) -> tuple[list[dict[str, Any]], list[str]]:
+    """IMAP network I/O only — no DB session held by the caller during this call."""
     host = settings.imap_host.strip()
     port = int(settings.imap_port or 993)
     user = settings.imap_user.strip()
@@ -173,34 +175,24 @@ def fetch_new_mails(db: Session) -> dict[str, Any]:
     folder = (settings.imap_folder or "INBOX").strip() or "INBOX"
     processed = (settings.imap_processed_folder or "verarbeitet").strip() or "verarbeitet"
 
-    fetched = 0
+    new_mails: list[dict[str, Any]] = []
     errors: list[str] = []
+    seen = set(existing_ids)
+    conn: imaplib.IMAP4_SSL | None = None
     try:
-        conn = imaplib.IMAP4_SSL(host, port)
+        conn = imaplib.IMAP4_SSL(host, port, timeout=IMAP_SOCKET_TIMEOUT)
+        conn.sock.settimeout(IMAP_SOCKET_TIMEOUT)
         conn.login(user, password)
-    except Exception as exc:
-        safe = _redact_secret(str(exc))
-        log.warning("IMAP Login fehlgeschlagen: %s", safe)
-        return {"fetched": 0, "errors": [f"IMAP: {safe}"]}
-
-    try:
         _ensure_mailbox(conn, processed)
         typ, _ = conn.select(folder)
         if typ != "OK":
-            return {"fetched": 0, "errors": [f"IMAP-Ordner „{folder}“ nicht erreichbar"]}
+            return [], [f"IMAP-Ordner „{folder}“ nicht erreichbar"]
 
         typ, data = conn.uid("SEARCH", None, "ALL")
         if typ != "OK" or not data or not data[0]:
-            return {"fetched": 0, "errors": []}
+            return [], []
 
-        uids = data[0].split()
-        existing_ids = {
-            mid
-            for mid in db.scalars(select(IncomingMail.message_id)).all()
-            if mid
-        }
-
-        for uid in uids:
+        for uid in data[0].split():
             typ, msg_data = conn.uid("FETCH", uid, "(RFC822)")
             if typ != "OK" or not msg_data or not msg_data[0]:
                 continue
@@ -209,42 +201,113 @@ def fetch_new_mails(db: Session) -> dict[str, Any]:
                 continue
             msg = email.message_from_bytes(raw)
             mid = _message_id(msg)
-            if mid in existing_ids:
+            if mid in seen:
                 _move_to_processed(conn, uid, processed)
                 continue
-            body = extract_body_text(msg)
-            row = IncomingMail(
-                origin="etsy",
-                message_id=mid,
-                subject=_decode_header_value(msg.get("Subject"))[:500] or None,
-                from_addr=_decode_header_value(msg.get("From"))[:300] or None,
-                body_text=body,
-                status="pending",
-                received_at=_utcnow(),
-                created_at=_utcnow(),
-                updated_at=_utcnow(),
+            new_mails.append(
+                {
+                    "message_id": mid,
+                    "subject": _decode_header_value(msg.get("Subject"))[:500] or None,
+                    "from_addr": _decode_header_value(msg.get("From"))[:300] or None,
+                    "body_text": extract_body_text(msg),
+                }
             )
-            db.add(row)
-            existing_ids.add(mid)
-            fetched += 1
+            seen.add(mid)
             _move_to_processed(conn, uid, processed)
 
         try:
             conn.expunge()
         except Exception:
             pass
-        db.flush()
     except Exception as exc:
         safe = _redact_secret(str(exc))
         log.warning("IMAP Abruf fehlgeschlagen: %s", safe)
         errors.append(safe)
     finally:
-        try:
-            conn.logout()
-        except Exception:
-            pass
+        if conn is not None:
+            try:
+                conn.logout()
+            except Exception:
+                pass
 
+    return new_mails, errors
+
+
+def _persist_downloaded_mails(db: Session, new_mails: list[dict[str, Any]]) -> int:
+    existing = _existing_message_ids(db)
+    fetched = 0
+    now = _utcnow()
+    for item in new_mails:
+        mid = item["message_id"]
+        if mid in existing:
+            continue
+        db.add(
+            IncomingMail(
+                origin="etsy",
+                message_id=mid,
+                subject=item.get("subject"),
+                from_addr=item.get("from_addr"),
+                body_text=item.get("body_text") or "",
+                status="pending",
+                received_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        existing.add(mid)
+        fetched += 1
+    if fetched:
+        db.flush()
+    return fetched
+
+
+def fetch_new_mails(db: Session) -> dict[str, Any]:
+    """Neue Mails aus IMAP in die Warteschlange; danach nach „verarbeitet“."""
+    if not imap_configured():
+        return {"fetched": 0, "errors": ["IMAP nicht konfiguriert"]}
+
+    # Load IDs, then release the connection before network I/O (Session reusable after close).
+    existing_ids = _existing_message_ids(db)
+    db.commit()
+    db.close()
+
+    new_mails, errors = _imap_download(existing_ids)
+
+    if not new_mails:
+        return {"fetched": 0, "errors": errors}
+
+    fetched = _persist_downloaded_mails(db, new_mails)
     return {"fetched": fetched, "errors": errors}
+
+
+def fetch_new_mails_standalone() -> dict[str, Any]:
+    """Background poll: no Session open across IMAP network I/O."""
+    from app.database import SessionLocal
+
+    if not imap_configured():
+        return {"fetched": 0, "errors": ["IMAP nicht konfiguriert"]}
+
+    db = SessionLocal()
+    try:
+        existing_ids = _existing_message_ids(db)
+        db.commit()
+    finally:
+        db.close()
+
+    new_mails, errors = _imap_download(existing_ids)
+    if not new_mails:
+        return {"fetched": 0, "errors": errors}
+
+    db = SessionLocal()
+    try:
+        fetched = _persist_downloaded_mails(db, new_mails)
+        db.commit()
+        return {"fetched": fetched, "errors": errors}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def _parse_qty(value: Any) -> Decimal:

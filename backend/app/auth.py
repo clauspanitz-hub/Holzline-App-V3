@@ -94,9 +94,19 @@ def create_session(db: Session, user: User) -> str:
     return token
 
 
+# Avoid SQLite write storms from parallel UI fetches (Promise.all).
+SESSION_TOUCH_MIN_INTERVAL = timedelta(minutes=5)
+
+
 def touch_session(db: Session, session: AuthSession) -> None:
     idle = timedelta(hours=settings.session_idle_hours)
     now = _utcnow()
+    last = session.last_seen_at
+    if last is not None:
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        if now - last < SESSION_TOUCH_MIN_INTERVAL:
+            return
     session.last_seen_at = now
     session.expires_at = now + idle
     db.commit()
