@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import email
+import hashlib
 import imaplib
 import json
 import logging
@@ -140,11 +141,14 @@ def _message_id(msg: Message) -> str:
     mid = (msg.get("Message-ID") or msg.get("Message-Id") or "").strip()
     if mid:
         return mid[:300]
-    # Fallback: stabile Kurz-ID aus Betreff+Datum+From
+    # Fallback must be stable across processes (builtin hash() is randomized).
     subject = _decode_header_value(msg.get("Subject"))
     date = msg.get("Date") or ""
     frm = _decode_header_value(msg.get("From"))
-    return f"local-{hash((subject, date, frm)) & 0xFFFFFFFFFFFF:x}"[:300]
+    digest = hashlib.sha256(
+        f"{subject}\n{date}\n{frm}".encode("utf-8", errors="replace")
+    ).hexdigest()
+    return f"local-{digest[:24]}"
 
 
 def _ensure_mailbox(conn: imaplib.IMAP4_SSL, name: str) -> None:
@@ -166,23 +170,41 @@ def _existing_message_ids(db: Session) -> set[str]:
     return {mid for mid in db.scalars(select(IncomingMail.message_id)).all() if mid}
 
 
-def _imap_download(existing_ids: set[str]) -> tuple[list[dict[str, Any]], list[str]]:
-    """IMAP network I/O only — no DB session held by the caller during this call."""
+def _imap_folders() -> tuple[str, str]:
+    folder = (settings.imap_folder or "INBOX").strip() or "INBOX"
+    processed = (settings.imap_processed_folder or "verarbeitet").strip() or "verarbeitet"
+    return folder, processed
+
+
+def _imap_connect() -> imaplib.IMAP4_SSL:
     host = settings.imap_host.strip()
     port = int(settings.imap_port or 993)
     user = settings.imap_user.strip()
     password = settings.imap_password.strip()
-    folder = (settings.imap_folder or "INBOX").strip() or "INBOX"
-    processed = (settings.imap_processed_folder or "verarbeitet").strip() or "verarbeitet"
+    conn = imaplib.IMAP4_SSL(host, port, timeout=IMAP_SOCKET_TIMEOUT)
+    conn.sock.settimeout(IMAP_SOCKET_TIMEOUT)
+    conn.login(user, password)
+    return conn
 
+
+def _imap_logout(conn: imaplib.IMAP4_SSL | None) -> None:
+    if conn is None:
+        return
+    try:
+        conn.logout()
+    except Exception:
+        pass
+
+
+def _imap_download(existing_ids: set[str]) -> tuple[list[dict[str, Any]], list[str]]:
+    """FETCH only. New mails stay in INBOX until they are committed to the DB."""
+    folder, processed = _imap_folders()
     new_mails: list[dict[str, Any]] = []
     errors: list[str] = []
     seen = set(existing_ids)
     conn: imaplib.IMAP4_SSL | None = None
     try:
-        conn = imaplib.IMAP4_SSL(host, port, timeout=IMAP_SOCKET_TIMEOUT)
-        conn.sock.settimeout(IMAP_SOCKET_TIMEOUT)
-        conn.login(user, password)
+        conn = _imap_connect()
         _ensure_mailbox(conn, processed)
         typ, _ = conn.select(folder)
         if typ != "OK":
@@ -202,10 +224,12 @@ def _imap_download(existing_ids: set[str]) -> tuple[list[dict[str, Any]], list[s
             msg = email.message_from_bytes(raw)
             mid = _message_id(msg)
             if mid in seen:
+                # Already in DB from a previous run — safe to archive now.
                 _move_to_processed(conn, uid, processed)
                 continue
             new_mails.append(
                 {
+                    "uid": uid,
                     "message_id": mid,
                     "subject": _decode_header_value(msg.get("Subject"))[:500] or None,
                     "from_addr": _decode_header_value(msg.get("From"))[:300] or None,
@@ -213,7 +237,6 @@ def _imap_download(existing_ids: set[str]) -> tuple[list[dict[str, Any]], list[s
                 }
             )
             seen.add(mid)
-            _move_to_processed(conn, uid, processed)
 
         try:
             conn.expunge()
@@ -224,13 +247,48 @@ def _imap_download(existing_ids: set[str]) -> tuple[list[dict[str, Any]], list[s
         log.warning("IMAP Abruf fehlgeschlagen: %s", safe)
         errors.append(safe)
     finally:
-        if conn is not None:
-            try:
-                conn.logout()
-            except Exception:
-                pass
+        _imap_logout(conn)
 
     return new_mails, errors
+
+
+def _imap_mark_processed(uids: list[bytes]) -> list[str]:
+    """Archive INBOX UIDs after the corresponding rows are committed."""
+    if not uids:
+        return []
+    folder, processed = _imap_folders()
+    errors: list[str] = []
+    conn: imaplib.IMAP4_SSL | None = None
+    try:
+        conn = _imap_connect()
+        _ensure_mailbox(conn, processed)
+        typ, _ = conn.select(folder)
+        if typ != "OK":
+            return [f"IMAP-Ordner „{folder}“ nicht erreichbar"]
+        for uid in uids:
+            _move_to_processed(conn, uid, processed)
+        try:
+            conn.expunge()
+        except Exception:
+            pass
+    except Exception as exc:
+        safe = _redact_secret(str(exc))
+        log.warning("IMAP Archivieren fehlgeschlagen: %s", safe)
+        errors.append(safe)
+    finally:
+        _imap_logout(conn)
+    return errors
+
+
+def _uids_from_mails(new_mails: list[dict[str, Any]]) -> list[bytes]:
+    uids: list[bytes] = []
+    for item in new_mails:
+        uid = item.get("uid")
+        if isinstance(uid, (bytes, bytearray)):
+            uids.append(bytes(uid))
+        elif isinstance(uid, str) and uid:
+            uids.append(uid.encode("ascii", errors="replace"))
+    return uids
 
 
 def _persist_downloaded_mails(db: Session, new_mails: list[dict[str, Any]]) -> int:
@@ -262,14 +320,17 @@ def _persist_downloaded_mails(db: Session, new_mails: list[dict[str, Any]]) -> i
 
 
 def fetch_new_mails(db: Session) -> dict[str, Any]:
-    """Neue Mails aus IMAP in die Warteschlange; danach nach „verarbeitet“."""
+    """Neue Mails aus IMAP in die Warteschlange; danach nach „verarbeitet“.
+
+    Archiviert erst nach erfolgreichem Commit, sonst gehen Etsy-Mails verloren.
+    """
     if not imap_configured():
         return {"fetched": 0, "errors": ["IMAP nicht konfiguriert"]}
 
-    # Load IDs, then release the connection before network I/O (Session reusable after close).
+    # Load IDs, then commit so the SQLite connection is released before IMAP I/O.
+    # Do not close the request session — the caller still owns it.
     existing_ids = _existing_message_ids(db)
     db.commit()
-    db.close()
 
     new_mails, errors = _imap_download(existing_ids)
 
@@ -277,6 +338,8 @@ def fetch_new_mails(db: Session) -> dict[str, Any]:
         return {"fetched": 0, "errors": errors}
 
     fetched = _persist_downloaded_mails(db, new_mails)
+    db.commit()
+    errors.extend(_imap_mark_processed(_uids_from_mails(new_mails)))
     return {"fetched": fetched, "errors": errors}
 
 
@@ -302,12 +365,14 @@ def fetch_new_mails_standalone() -> dict[str, Any]:
     try:
         fetched = _persist_downloaded_mails(db, new_mails)
         db.commit()
-        return {"fetched": fetched, "errors": errors}
     except Exception:
         db.rollback()
         raise
     finally:
         db.close()
+
+    errors.extend(_imap_mark_processed(_uids_from_mails(new_mails)))
+    return {"fetched": fetched, "errors": errors}
 
 
 def _parse_qty(value: Any) -> Decimal:
