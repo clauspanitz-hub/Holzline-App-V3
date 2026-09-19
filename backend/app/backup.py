@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import HTTPException, status
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app import services
 from app.models import (
@@ -22,9 +22,11 @@ from app.models import (
     ColorMedium,
     Location,
     Material,
+    MaterialFamily,
     MaterialStock,
     OptionMapping,
     Product,
+    ProductFamily,
     ProductMaterial,
     ProductSet,
     ProductStock,
@@ -156,13 +158,27 @@ def export_backup(db: Session, include_movements: bool = False) -> dict[str, Any
         "tags": [
             {"name": row.name} for row in db.scalars(select(Tag).order_by(Tag.name)).all()
         ],
+        "material_families": _export_families(
+            db.scalars(select(MaterialFamily).order_by(MaterialFamily.name)).all()
+        ),
+        "product_families": _export_families(
+            db.scalars(select(ProductFamily).order_by(ProductFamily.name)).all()
+        ),
         "materials": [
             _export_material(row)
-            for row in db.scalars(select(Material).order_by(Material.name)).all()
+            for row in db.scalars(
+                select(Material)
+                .options(selectinload(Material.family_ref).selectinload(MaterialFamily.parent))
+                .order_by(Material.name)
+            ).all()
         ],
         "products": [
             _export_product(row)
-            for row in db.scalars(select(Product).order_by(Product.name)).all()
+            for row in db.scalars(
+                select(Product)
+                .options(selectinload(Product.family_ref).selectinload(ProductFamily.parent))
+                .order_by(Product.name)
+            ).all()
         ],
         "product_sets": [
             _export_set(row)
@@ -179,7 +195,35 @@ def export_backup(db: Session, include_movements: bool = False) -> dict[str, Any
     return payload
 
 
+def _export_families(rows: list) -> list[dict[str, Any]]:
+    by_id = {row.id: row for row in rows}
+    parents = [r for r in rows if r.parent_id is None]
+    children = [r for r in rows if r.parent_id is not None]
+    out: list[dict[str, Any]] = []
+    for row in sorted(parents, key=lambda r: r.name.casefold()):
+        out.append({"name": row.name, "parent": None})
+    for row in sorted(
+        children,
+        key=lambda r: ((by_id[r.parent_id].name if r.parent_id in by_id else ""), r.name.casefold()),
+    ):
+        parent = by_id.get(row.parent_id)
+        out.append({"name": row.name, "parent": parent.name if parent else None})
+    return out
+
+
+def _family_export_fields(article) -> dict[str, str | None]:
+    ref = getattr(article, "family_ref", None)
+    if ref is not None:
+        parent = ref.parent
+        return {
+            "family": ref.name,
+            "family_parent": parent.name if parent else None,
+        }
+    return {"family": getattr(article, "family", None), "family_parent": None}
+
+
 def _export_material(material: Material) -> dict[str, Any]:
+    fam = _family_export_fields(material)
     return {
         "name": material.name,
         "unit": material.unit.value,
@@ -189,7 +233,8 @@ def _export_material(material: Material) -> dict[str, Any]:
         "min_stock": _num(material.min_stock),
         "is_template": bool(getattr(material, "is_template", False)),
         "decimal_places": int(getattr(material, "decimal_places", 0) or 0),
-        "family": material.family,
+        "family": fam["family"],
+        "family_parent": fam["family_parent"],
         "overview_ignored": bool(getattr(material, "overview_ignored", False)),
         "color": _color_ref(material.color),
         "tags": sorted(tag.name for tag in material.tags),
@@ -205,6 +250,7 @@ def _export_material(material: Material) -> dict[str, Any]:
 
 
 def _export_product(product: Product) -> dict[str, Any]:
+    fam = _family_export_fields(product)
     return {
         "name": product.name,
         "sku": product.sku,
@@ -212,7 +258,8 @@ def _export_product(product: Product) -> dict[str, Any]:
         "min_stock": _num(product.min_stock),
         "is_template": product.is_template,
         "is_on_demand": bool(getattr(product, "is_on_demand", False)),
-        "family": product.family,
+        "family": fam["family"],
+        "family_parent": fam["family_parent"],
         "overview_ignored": bool(getattr(product, "overview_ignored", False)),
         "color": _color_ref(product.color),
         "transform_target": services.vintage_name_from_uni(product.name),
@@ -317,6 +364,8 @@ class _Ctx:
         self.media: dict[str, ColorMedium] = {}
         self.colors: dict[tuple[str, str], Color] = {}
         self.tags: dict[str, Tag] = {}
+        self.material_families: dict[tuple[str | None, str], MaterialFamily] = {}
+        self.product_families: dict[tuple[str | None, str], ProductFamily] = {}
         self.materials: dict[str, Material] = {}
         self.products: dict[str, Product] = {}
         self.products_by_sku: dict[str, Product] = {}
@@ -333,10 +382,56 @@ class _Ctx:
             (_key(r.name), _key(r.medium.name)): r for r in db.scalars(select(Color)).all()
         }
         self.tags = {_key(r.name): r for r in db.scalars(select(Tag)).all()}
+        self.material_families = {}
+        for row in db.scalars(
+            select(MaterialFamily).options(selectinload(MaterialFamily.parent))
+        ).all():
+            parent_key = _key(row.parent.name) if row.parent else None
+            self.material_families[(parent_key, _key(row.name))] = row
+        self.product_families = {}
+        for row in db.scalars(
+            select(ProductFamily).options(selectinload(ProductFamily.parent))
+        ).all():
+            parent_key = _key(row.parent.name) if row.parent else None
+            self.product_families[(parent_key, _key(row.name))] = row
         self.materials = {_key(r.name): r for r in db.scalars(select(Material)).all()}
         products = db.scalars(select(Product)).all()
         self.products = {_key(r.name): r for r in products}
         self.products_by_sku = {_key(r.sku): r for r in products if r.sku}
+
+    def resolve_family(self, kind: str, entry: dict[str, Any], *, context: str):
+        """family + optional family_parent → Katalogknoten (anlegen falls nötig)."""
+        name = _opt_str(entry, "family")
+        if not name:
+            return None
+        parent_name = _opt_str(entry, "family_parent")
+        registry = self.material_families if kind == "material" else self.product_families
+        Model = MaterialFamily if kind == "material" else ProductFamily
+        parent_key = _key(parent_name) if parent_name else None
+        if parent_name:
+            parent = registry.get((None, parent_key))
+            if parent is None:
+                parent = Model(name=parent_name, parent_id=None)
+                self.db.add(parent)
+                self.db.flush()
+                registry[(None, parent_key)] = parent
+                self.created[f"{kind}_families"] += 1
+            child = registry.get((parent_key, _key(name)))
+            if child is None:
+                child = Model(name=name, parent_id=parent.id)
+                self.db.add(child)
+                self.db.flush()
+                registry[(parent_key, _key(name))] = child
+                self.created[f"{kind}_families"] += 1
+            return child
+        parent = registry.get((None, _key(name)))
+        if parent is None:
+            parent = Model(name=name, parent_id=None)
+            self.db.add(parent)
+            self.db.flush()
+            registry[(None, _key(name))] = parent
+            self.created[f"{kind}_families"] += 1
+        return parent
 
     def resolve_location(self, name: str | None, *, context: str) -> Location | None:
         if not name:
@@ -410,6 +505,8 @@ def import_backup(db: Session, payload: dict[str, Any], mode: str = "merge") -> 
         _import_media(ctx, _as_list(payload, "color_media"))
         _import_colors(ctx, _as_list(payload, "colors"))
         _import_tags(ctx, _as_list(payload, "tags"))
+        _import_families(ctx, "material", _as_list(payload, "material_families"))
+        _import_families(ctx, "product", _as_list(payload, "product_families"))
         _import_materials(ctx, _as_list(payload, "materials"))
         products = _as_list(payload, "products")
         _import_products(ctx, products)
@@ -465,6 +562,8 @@ def _wipe_app_data(db: Session) -> None:
     db.execute(update(Product).values(transform_target_id=None))
     db.execute(delete(Product))
     db.execute(delete(Material))
+    db.execute(delete(ProductFamily))
+    db.execute(delete(MaterialFamily))
     db.execute(delete(Color))
     db.execute(delete(ColorMedium))
     db.execute(delete(Tag))
@@ -553,6 +652,45 @@ def _import_tags(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
             ctx.updated["tags"] += 1
 
 
+def _import_families(ctx: _Ctx, kind: str, entries: list[dict[str, Any]]) -> None:
+    """Zuerst Eltern, dann Unterfamilien."""
+    registry = ctx.material_families if kind == "material" else ctx.product_families
+    Model = MaterialFamily if kind == "material" else ProductFamily
+    parents = [e for e in entries if not _opt_str(e, "parent")]
+    children = [e for e in entries if _opt_str(e, "parent")]
+    for entry in parents:
+        name = _str_field(entry, "name", context=f"{kind}-Familie")
+        key = (None, _key(name))
+        if key in registry:
+            ctx.updated[f"{kind}_families"] += 1
+            continue
+        row = Model(name=name, parent_id=None)
+        ctx.db.add(row)
+        ctx.db.flush()
+        registry[key] = row
+        ctx.created[f"{kind}_families"] += 1
+    for entry in children:
+        name = _str_field(entry, "name", context=f"{kind}-Unterfamilie")
+        parent_name = _opt_str(entry, "parent")
+        assert parent_name
+        parent = registry.get((None, _key(parent_name)))
+        if parent is None:
+            parent = Model(name=parent_name, parent_id=None)
+            ctx.db.add(parent)
+            ctx.db.flush()
+            registry[(None, _key(parent_name))] = parent
+            ctx.created[f"{kind}_families"] += 1
+        key = (_key(parent_name), _key(name))
+        if key in registry:
+            ctx.updated[f"{kind}_families"] += 1
+            continue
+        row = Model(name=name, parent_id=parent.id)
+        ctx.db.add(row)
+        ctx.db.flush()
+        registry[key] = row
+        ctx.created[f"{kind}_families"] += 1
+
+
 def _parse_unit(entry: dict[str, Any], *, context: str) -> Unit:
     raw = _str_field(entry, "unit", context=context)
     try:
@@ -626,7 +764,9 @@ def _import_materials(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
         except (TypeError, ValueError):
             decimals = 0
         material.decimal_places = max(0, min(3, decimals))
-        material.family = _opt_str(entry, "family")
+        from app.families import assign_article_family
+
+        assign_article_family(material, ctx.resolve_family("material", entry, context=context))
         material.overview_ignored = bool(entry.get("overview_ignored") or False)
         color = ctx.resolve_color(entry.get("color"), context=context)
         material.color_id = color.id if color else None
@@ -705,7 +845,9 @@ def _import_products(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
         product.min_stock = services._q(min_stock) if min_stock is not None else None
         product.is_template = _bool_field(entry, "is_template")
         product.is_on_demand = _bool_field(entry, "is_on_demand")
-        product.family = _opt_str(entry, "family")
+        from app.families import assign_article_family
+
+        assign_article_family(product, ctx.resolve_family("product", entry, context=context))
         product.overview_ignored = _bool_field(entry, "overview_ignored")
         color = ctx.resolve_color(entry.get("color"), context=context)
         product.color_id = color.id if color else None
