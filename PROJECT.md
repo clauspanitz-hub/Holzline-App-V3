@@ -88,6 +88,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Einkaufsliste aus fehlenden Materialien (Todo-Art Einkauf; ADR `0019`/`0023`)
 - [x] Einkaufsquellen + Alternativen am Material (ADR `0021`)
 - [x] Mindestbestand je Material/Produkt → Warnungen in Übersicht (vorgezogen in 1.5)
+- [x] Toast-Stack (bis Klick, optional „Zur Stelle?“); Material-Filter Negativbestand (ADR `0024`)
 
 ## 5. Geschäftsregeln (gültig)
 - Keine Reservierungs-/Verschnittlogik.
