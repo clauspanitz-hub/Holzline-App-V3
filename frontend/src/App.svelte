@@ -318,7 +318,6 @@
       location_id: '',
       medium_id: '',
       color_id: '',
-      transform_target_id: '',
       tagIds: [],
     }
   }
@@ -2127,10 +2126,7 @@
   const productGroups = $derived(groupProductsByFamily(displayedProducts))
   const staffQueueProducts = $derived.by(() => {
     const maLocs = locations.filter((l) => STAFF_LOCATION_NAMES.includes(l.name))
-    return products.filter((p) => {
-      if (!p.transform_target_id) return false
-      return maLocs.some((loc) => Number(stockAt(p, loc.id)) > 0)
-    })
+    return products.filter((p) => maLocs.some((loc) => Number(stockAt(p, loc.id)) > 0))
   })
   const displayedStaffQueue = $derived(
     prepareRows(
@@ -2457,7 +2453,6 @@
       location_id: '',
       medium_id: mid,
       color_id: product.color_id ? String(product.color_id) : '',
-      transform_target_id: product.transform_target_id ? String(product.transform_target_id) : '',
       tagIds: (product.tags || []).map((t) => t.id),
     }
     showProductTags = productForm.tagIds.length > 0
@@ -2841,17 +2836,18 @@
   }
 
   function canTransformProduct(product) {
+    // Uni→Vintage per Name (Backend liefert transform_target_* aufgelöst)
     if (!product?.transform_target_id) return false
-    return String(product.name || '').toLowerCase().includes('uni')
+    return /\buni\b/i.test(String(product.name || ''))
   }
 
   function openTransform(product, preferredLocationName = null) {
     if (!canTransformProduct(product)) {
       showFlash(
         'error',
-        product?.transform_target_id
-          ? 'Umwandlung nur für Produkte mit „Uni“ im Namen.'
-          : 'Kein Zielprodukt verknüpft — unter Bearbeiten „Wird zu“ setzen.',
+        /\buni\b/i.test(String(product?.name || ''))
+          ? 'Kein Vintage-Zielprodukt gefunden — Name „Uni“ → „Vintage“ unter Produkte anlegen.'
+          : 'Umwandlung nur für Produkte mit „Uni“ im Namen.',
       )
       return
     }
@@ -3029,9 +3025,6 @@
     try {
       const colorPayload = {
         color_id: productForm.color_id ? Number(productForm.color_id) : null,
-        transform_target_id: productForm.transform_target_id
-          ? Number(productForm.transform_target_id)
-          : null,
       }
       const nextProductTags = tagIdsIfChanged(
         productModal.mode === 'edit' ? productModal.product?.tags : null,
@@ -4954,7 +4947,7 @@
         <h2>Bei Mitarbeitern</h2>
       </div>
       <p class="empty" style="margin-top:0">
-        Quellprodukte mit Bestand an MA1/MA2 (z. B. Uni-Ringe vor Vintage-Bemalung). Umbuchen zurück oder umwandeln, wenn fertig.
+        Quellprodukte mit Bestand an MA1/MA2. Uni wird automatisch zu Vintage (Namensersetzung). Umbuchen zurück oder umwandeln, wenn fertig.
       </p>
       <div class="filter-bar form-grid">
         <label class="list-search">Suche
@@ -4970,7 +4963,7 @@
                   Quellprodukt{sortMark(listUi.staff.sortKey, 'name', listUi.staff.sortDir)}
                 </button>
               </th>
-              <th>Wird zu</th>
+              <th>→ Vintage</th>
               {#each locations.filter((l) => STAFF_LOCATION_NAMES.includes(l.name)) as loc}
                 <th class="num">{loc.name}</th>
               {/each}
@@ -5001,7 +4994,7 @@
             {:else}
               <tr>
                 <td colspan="5" class="empty">
-                  Nichts bei Mitarbeitern — Quellprodukte mit „Wird zu“ und Bestand an MA1/MA2 erscheinen hier.
+                  Nichts bei Mitarbeitern — Produkte mit Bestand an MA1/MA2 erscheinen hier.
                 </td>
               </tr>
             {/each}
@@ -5778,13 +5771,6 @@
             Ist Vorlage
           </label>
         {/if}
-        <label>Wird zu (Umwandlung)
-          <FamilySelect
-            bind:value={productForm.transform_target_id}
-            items={products.filter((p) => !productModal.product || p.id !== productModal.product.id)}
-            emptyLabel="keins"
-          />
-        </label>
         <label>Medium
           <select
             bind:value={productForm.medium_id}

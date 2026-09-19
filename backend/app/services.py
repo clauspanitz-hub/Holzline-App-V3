@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 from math import floor
+import re
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -663,6 +664,7 @@ def list_movements(
 
 
 def _resolve_transform_target(db: Session, product_id: int, target_id: int | None) -> int | None:
+    """Legacy: manuelle Verknüpfung. Neu: Uni→Vintage per Name (siehe vintage_name_from_uni)."""
     if target_id is None:
         return None
     if target_id == product_id:
@@ -674,8 +676,33 @@ def _resolve_transform_target(db: Session, product_id: int, target_id: int | Non
 
 
 def product_name_allows_transform(name: str) -> bool:
-    """Umwandlung nur wenn der Produktname „Uni“ enthält (Groß-/Kleinschreibung egal)."""
-    return "uni" in (name or "").casefold()
+    """Umwandlung nur wenn der Produktname „Uni“ als Wort enthält (Groß-/Kleinschreibung egal)."""
+    return bool(re.search(r"(?i)\bUni\b", name or ""))
+
+
+def vintage_name_from_uni(name: str) -> str | None:
+    """Ersetzt das erste Wort „Uni“ durch „Vintage“. Ohne Uni-Treffer: None."""
+    if not product_name_allows_transform(name):
+        return None
+    new_name, n = re.subn(r"(?i)\bUni\b", "Vintage", name or "", count=1)
+    if n == 0 or new_name == name:
+        return None
+    return new_name
+
+
+def find_uni_transform_target(
+    db: Session,
+    source: Product,
+    *,
+    name_index: dict[str, Product] | None = None,
+) -> Product | None:
+    """Zielprodukt für Uni→Vintage per exaktem Namen (kein manuelles „Wird zu“)."""
+    want = vintage_name_from_uni(source.name)
+    if not want:
+        return None
+    if name_index is not None:
+        return name_index.get(want)
+    return db.scalars(select(Product).where(Product.name == want)).first()
 
 
 def _stock_rows_material(material: Material) -> list[StockByLocation]:
@@ -881,10 +908,10 @@ def material_read(material: Material) -> MaterialRead:
     )
 
 
-def product_read(product: Product) -> ProductRead:
+def product_read(product: Product, *, transform_target: Product | None = None) -> ProductRead:
     total = _product_stock_total(product)
     available = _product_stock_available(product)
-    target = product.transform_target
+    target = transform_target
     return ProductRead(
         id=product.id,
         name=product.name,
@@ -897,7 +924,7 @@ def product_read(product: Product) -> ProductRead:
         overview_ignored=bool(getattr(product, "overview_ignored", False)),
         color_id=product.color_id,
         color=color_read(product.color),
-        transform_target_id=product.transform_target_id,
+        transform_target_id=target.id if target else None,
         transform_target_name=target.name if target else None,
         tags=[TagRead.model_validate(t) for t in product.tags],
         stock_total=total,
@@ -912,6 +939,10 @@ def product_read(product: Product) -> ProductRead:
         created_by=product.created_by,
         updated_by=product.updated_by,
     )
+
+
+def _product_read_with_auto_target(db: Session, product: Product) -> ProductRead:
+    return product_read(product, transform_target=find_uni_transform_target(db, product))
 
 
 def _load_material(db: Session, material_id: int) -> Material:
@@ -1338,8 +1369,15 @@ def list_products(
         stmt = stmt.where(Product.color_id == color_id)
     if medium_id is not None:
         stmt = stmt.join(Product.color).where(Color.medium_id == medium_id)
-    rows = db.scalars(stmt).unique().all()
-    return [product_read(row) for row in rows]
+    rows = list(db.scalars(stmt).unique().all())
+    by_name = {row.name: row for row in rows}
+    return [
+        product_read(
+            row,
+            transform_target=find_uni_transform_target(db, row, name_index=by_name),
+        )
+        for row in rows
+    ]
 
 
 def create_product(db: Session, payload: ProductCreate) -> ProductRead:
@@ -1360,7 +1398,7 @@ def create_product(db: Session, payload: ProductCreate) -> ProductRead:
     db.add(product)
     try:
         db.flush()
-        product.transform_target_id = _resolve_transform_target(db, product.id, payload.transform_target_id)
+        # Uni→Vintage: Ziel per Name, kein manuelles transform_target_id mehr
         db.add(
             ProductStock(
                 product_id=product.id,
@@ -1382,7 +1420,7 @@ def create_product(db: Session, payload: ProductCreate) -> ProductRead:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Produkt konnte nicht gespeichert werden: {exc.orig}",
         ) from exc
-    return product_read(_load_product(db, product.id))
+    return _product_read_with_auto_target(db, _load_product(db, product.id))
 
 
 def _material_for_target_color(db: Session, source_material: Material, target_color_id: int) -> Material | None:
@@ -1594,7 +1632,7 @@ def create_products_from_colors(db: Session, payload: ProductsFromColorsRequest)
         product = _load_product(db, pid)
         sync_incomplete_tags(db, product, before_missing=[])
     db.commit()
-    created = [product_read(_load_product(db, pid)) for pid in created_ids]
+    created = [_product_read_with_auto_target(db, _load_product(db, pid)) for pid in created_ids]
     return ProductsFromColorsResult(created=created, skipped=skipped, warnings=warnings)
 
 
@@ -1614,8 +1652,8 @@ def update_product(db: Session, product_id: int, payload: ProductUpdate) -> Prod
     if "color_id" in data:
         color = get_color(db, data["color_id"])
         data["color_id"] = color.id if color else None
-    if "transform_target_id" in data:
-        data["transform_target_id"] = _resolve_transform_target(db, product.id, data["transform_target_id"])
+    # transform_target_id: Legacy-Feld, UI entfernt — Uni→Vintage per Name
+    data.pop("transform_target_id", None)
     for key, value in data.items():
         setattr(product, key, value)
     if tag_ids is not None:
@@ -1630,7 +1668,7 @@ def update_product(db: Session, product_id: int, payload: ProductUpdate) -> Prod
             status_code=status.HTTP_409_CONFLICT,
             detail="Produktname oder SKU bereits vergeben",
         ) from exc
-    return product_read(_load_product(db, product.id))
+    return _product_read_with_auto_target(db, _load_product(db, product.id))
 
 
 def bulk_update_materials(db: Session, payload: "MaterialBulkUpdate") -> list[MaterialRead]:
@@ -1692,7 +1730,7 @@ def bulk_update_products(db: Session, payload: "ProductBulkUpdate") -> list[Prod
         _stamp_update(product)
         result_ids.append(product.id)
     db.commit()
-    return [product_read(_load_product(db, pid)) for pid in result_ids]
+    return [_product_read_with_auto_target(db, _load_product(db, pid)) for pid in result_ids]
 
 
 def suggest_by_color(
@@ -1818,7 +1856,7 @@ def adjust_product_stock(db: Session, product_id: int, payload: StockAdjustReque
     row = _get_or_create_product_stock(db, product_id, payload.location_id)
     row.quantity = _q(payload.quantity)
     db.commit()
-    return product_read(_load_product(db, product_id))
+    return _product_read_with_auto_target(db, _load_product(db, product_id))
 
 
 def delta_product_stock(db: Session, product_id: int, payload: StockDeltaRequest) -> ProductRead:
@@ -1827,7 +1865,7 @@ def delta_product_stock(db: Session, product_id: int, payload: StockDeltaRequest
     row = _get_or_create_product_stock(db, product_id, payload.location_id)
     row.quantity = _q(Decimal(row.quantity) + Decimal(payload.delta))
     db.commit()
-    return product_read(_load_product(db, product_id))
+    return _product_read_with_auto_target(db, _load_product(db, product_id))
 
 
 def transfer_product(db: Session, product_id: int, payload: TransferRequest) -> ProductRead:
@@ -1850,7 +1888,7 @@ def transfer_product(db: Session, product_id: int, payload: TransferRequest) -> 
         note=payload.note,
     )
     db.commit()
-    return product_read(_load_product(db, product_id))
+    return _product_read_with_auto_target(db, _load_product(db, product_id))
 
 
 def transform_product(
@@ -1866,17 +1904,19 @@ def transform_product(
             status_code=400,
             detail="Umwandlung nur für Produkte mit „Uni“ im Namen",
         )
-    if not source.transform_target_id:
+    target = find_uni_transform_target(db, source)
+    if not target:
+        want = vintage_name_from_uni(source.name) or "Vintage-Variante"
         raise HTTPException(
             status_code=400,
-            detail="Kein Zielprodukt verknüpft — unter Bearbeiten „Wird zu“ setzen",
+            detail=f"Kein Zielprodukt „{want}“ gefunden — bitte unter Produkte anlegen",
         )
-    if source.transform_target_id == source.id:
+    if target.id == source.id:
         raise HTTPException(status_code=400, detail="Zielprodukt darf nicht dasselbe Produkt sein")
     location = get_location(db, payload.location_id)
     qty = _q(payload.quantity)
     source_stock = _get_or_create_product_stock(db, source.id, location.id)
-    target_stock = _get_or_create_product_stock(db, source.transform_target_id, location.id)
+    target_stock = _get_or_create_product_stock(db, target.id, location.id)
     source_stock.quantity = _q(Decimal(source_stock.quantity) - qty)
     target_stock.quantity = _q(Decimal(target_stock.quantity) + qty)
     _record_movement(
@@ -1886,16 +1926,14 @@ def transform_product(
         from_location_id=location.id,
         to_location_id=location.id,
         product_id=source.id,
-        to_product_id=source.transform_target_id,
+        to_product_id=target.id,
         note=payload.note,
         created_by=actor,
     )
     _stamp_update(source)
-    target = db.get(Product, source.transform_target_id)
-    if target:
-        _stamp_update(target)
+    _stamp_update(target)
     db.commit()
-    return product_read(_load_product(db, product_id))
+    return _product_read_with_auto_target(db, _load_product(db, product_id))
 
 
 def add_bom_line(db: Session, product_id: int, payload: BomLineCreate) -> ProductRead:
@@ -1937,7 +1975,7 @@ def add_bom_line(db: Session, product_id: int, payload: BomLineCreate) -> Produc
             status_code=status.HTTP_409_CONFLICT,
             detail="Komponente ist bereits in der Stückliste",
         ) from exc
-    return product_read(_load_product(db, product.id))
+    return _product_read_with_auto_target(db, _load_product(db, product.id))
 
 
 def update_bom_line(db: Session, product_id: int, line_id: int, payload: BomLineUpdate) -> ProductRead:
@@ -1948,7 +1986,7 @@ def update_bom_line(db: Session, product_id: int, line_id: int, payload: BomLine
     line.quantity_required = _q(payload.quantity_required)
     _stamp_update(product)
     db.commit()
-    return product_read(_load_product(db, product.id))
+    return _product_read_with_auto_target(db, _load_product(db, product.id))
 
 
 def delete_bom_line(db: Session, product_id: int, line_id: int) -> ProductRead:
@@ -1965,7 +2003,7 @@ def delete_bom_line(db: Session, product_id: int, line_id: int) -> ProductRead:
     sync_incomplete_tags(db, product, before_missing=before_missing)
     _stamp_update(product)
     db.commit()
-    return product_read(_load_product(db, product.id))
+    return _product_read_with_auto_target(db, _load_product(db, product.id))
 
 
 def manufacture(db: Session, product_id: int, quantity: Decimal, location_id: int | None) -> ManufactureResult:
@@ -2014,7 +2052,7 @@ def manufacture(db: Session, product_id: int, quantity: Decimal, location_id: in
     refreshed = _load_product(db, product.id)
     if _product_stock_total(refreshed) < 0:
         warnings.append(f"Produkt „{product.name}“ hat negativen Gesamtbestand.")
-    return ManufactureResult(product=product_read(refreshed), warnings=warnings)
+    return ManufactureResult(product=_product_read_with_auto_target(db, refreshed), warnings=warnings)
 
 
 def _load_set_variant(db: Session, variant_id: int) -> SetVariant:
