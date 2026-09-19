@@ -6,12 +6,15 @@
     colors = [],
     families = [],
     tags = [],
+    /** Nur Materialien: Toggle Negativbestand anzeigen */
+    showNegativeStock = false,
     filter = $bindable({
       mediumIds: [],
       colorIds: [],
       families: [],
       tagIds: [],
       q: '',
+      negativeOnly: false,
     }),
   } = $props()
 
@@ -67,7 +70,11 @@
   }
 
   function clearAll() {
-    filter = { mediumIds: [], colorIds: [], families: [], tagIds: [], q: '' }
+    filter = { mediumIds: [], colorIds: [], families: [], tagIds: [], q: '', negativeOnly: false }
+  }
+
+  function toggleNegativeOnly() {
+    filter = { ...filter, negativeOnly: !filter.negativeOnly }
   }
 
   function swatch(color) {
@@ -159,6 +166,21 @@
       oninput={(e) => (filter = { ...filter, q: e.currentTarget.value })}
     />
   </label>
+
+  {#if showNegativeStock}
+    <div class="catalog-filter-negative">
+      <span class="catalog-filter-label">Bestand</span>
+      <button
+        type="button"
+        class="chip"
+        class:on={filter.negativeOnly}
+        aria-pressed={filter.negativeOnly}
+        onclick={toggleNegativeOnly}
+      >
+        Negativbestand
+      </button>
+    </div>
+  {/if}
 
   {#if selectedMedia.length}
     <div class="catalog-filter-colors">

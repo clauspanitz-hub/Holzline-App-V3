@@ -13,7 +13,8 @@
   import BackupPanel from './lib/components/BackupPanel.svelte'
   import FilterBar from './lib/components/FilterBar.svelte'
   import ExtraGapPanels from './lib/components/ExtraGapPanels.svelte'
-  import { applyCatalogFilter, emptyCatalogFilter } from './lib/catalogFilter.js'
+  import ToastStack from './lib/components/ToastStack.svelte'
+  import { applyCatalogFilter, applyNegativeStockFilter, emptyCatalogFilter } from './lib/catalogFilter.js'
 
   let tab = $state('overview')
   let authUser = $state(null)
@@ -57,9 +58,10 @@
   let etsyMails = $state([])
   let colorSuggestions = $state([])
   let loading = $state(true)
-  let flash = $state(null)
+  /** @type {{ id: number, type: string, message: string, at: number, goTo?: { tab?: string, run?: () => void | Promise<void> } }[]} */
+  let toasts = $state([])
+  let toastSeq = 0
   let saveButtonOk = $state(false)
-  let flashClearTimer = null
   let saveOkTimer = null
   let saving = $state(false)
   let pendingDeleteOrderId = $state(null)
@@ -494,14 +496,33 @@
     return fields.join(', ')
   }
 
-  function showFlash(type, message) {
-    flash = { type, message }
-    if (flashClearTimer) clearTimeout(flashClearTimer)
-    if (type === 'ok' || type === 'warn') {
-      flashClearTimer = setTimeout(() => {
-        if (flash?.message === message) flash = null
-      }, 2800)
+  /**
+   * Toast in die gestapelte Liste legen (bleibt bis Klick).
+   * @param {string} type
+   * @param {string} message
+   * @param {{ tab?: string, run?: () => void | Promise<void> }} [goTo] optional: bei Klick „Zur Stelle?“
+   */
+  function showFlash(type, message, goTo) {
+    toastSeq += 1
+    const entry = {
+      id: toastSeq,
+      type,
+      message,
+      at: Date.now(),
+      ...(goTo ? { goTo } : {}),
     }
+    toasts = [...toasts, entry]
+  }
+
+  function dismissToast(id) {
+    toasts = toasts.filter((t) => t.id !== id)
+  }
+
+  async function goToToastTarget(toast) {
+    const target = toast?.goTo
+    if (!target) return
+    if (typeof target.run === 'function') await target.run()
+    if (target.tab) await selectTab(target.tab)
   }
 
   function markSaved() {
@@ -881,11 +902,18 @@
       if (result.skipped_existing) parts.push(`${result.skipped_existing} schon offen`)
       if (result.skipped_ignored && !includeIgnored) parts.push(`${result.skipped_ignored} ignoriert übersprungen`)
       if (result.completed_stale) parts.push(`${result.completed_stale} erledigt (Mindestbestand ok)`)
-      showFlash('ok', parts.length ? `Einkauf-Todos: ${parts.join(', ')}.` : 'Keine neuen Einkauf-Todos.')
-      if (result.created) {
-        todoCategoryFilter = 'purchase'
-        selectTab('todos')
-      }
+      showFlash(
+        'ok',
+        parts.length ? `Einkauf-Todos: ${parts.join(', ')}.` : 'Keine neuen Einkauf-Todos.',
+        result.created
+          ? {
+              tab: 'todos',
+              run: () => {
+                todoCategoryFilter = 'purchase'
+              },
+            }
+          : undefined,
+      )
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -981,7 +1009,11 @@
       if (result.claimed) bits.push(`${result.claimed} übernommen`)
       if (result.suggested) bits.push(`${result.suggested} Vorschlag`)
       if (result.skipped) bits.push(`${result.skipped} übersprungen`)
-      showFlash('ok', bits.length ? `Shopify: ${bits.join(', ')}.` : 'Shopify: keine neuen Aufträge.')
+      showFlash(
+        'ok',
+        bits.length ? `Shopify: ${bits.join(', ')}.` : 'Shopify: keine neuen Aufträge.',
+        result.created || result.claimed ? { tab: 'orders' } : undefined,
+      )
       if (result.errors?.length) showFlash('error', result.errors[0])
     } catch (error) {
       showFlash('error', error.message)
@@ -1002,7 +1034,11 @@
       if (result.suggested) bits.push(`${result.suggested} Vorschlag`)
       if (result.duplicates) bits.push(`${result.duplicates} Doppel`)
       if (result.failed) bits.push(`${result.failed} Fehler`)
-      showFlash('ok', bits.length ? `Etsy-Mail: ${bits.join(', ')}.` : 'Etsy-Mail: nichts Neues.')
+      showFlash(
+        'ok',
+        bits.length ? `Etsy-Mail: ${bits.join(', ')}.` : 'Etsy-Mail: nichts Neues.',
+        result.created ? { tab: 'orders' } : undefined,
+      )
       if (result.errors?.length) showFlash('error', result.errors[0])
     } catch (error) {
       showFlash('error', error.message)
@@ -2032,7 +2068,7 @@
   const overviewProductGroups = $derived(groupProductsByFamily(displayedOverviewProducts))
   const displayedMaterials = $derived.by(() => {
     return prepareRows(
-      applyCatalogFilter(materials, catalogFilter, colors, media),
+      applyNegativeStockFilter(applyCatalogFilter(materials, catalogFilter, colors, media), catalogFilter),
       { ...listUi.materials, q: catalogFilter.q },
       (m) => stockRowSearchText(m, materialLocations),
       stockSortGetter(listUi.materials.sortKey),
@@ -2071,7 +2107,7 @@
   )
   const extraCriticalMaterials = $derived(
     prepareRows(
-      applyCatalogFilter(criticalMaterials, catalogFilter, colors, media),
+      applyNegativeStockFilter(applyCatalogFilter(criticalMaterials, catalogFilter, colors, media), catalogFilter),
       { q: catalogFilter.q, sortKey: 'name', sortDir: 'asc' },
       (m) => stockRowSearchText(m, materialLocations),
       stockSortGetter('name'),
@@ -2079,7 +2115,7 @@
   )
   const extraIncompleteMaterials = $derived(
     prepareRows(
-      applyCatalogFilter(incompleteMaterials, catalogFilter, colors, media),
+      applyNegativeStockFilter(applyCatalogFilter(incompleteMaterials, catalogFilter, colors, media), catalogFilter),
       { q: catalogFilter.q, sortKey: 'name', sortDir: 'asc' },
       (m) => stockRowSearchText(m, materialLocations),
       stockSortGetter('name'),
@@ -2103,7 +2139,10 @@
   )
   const extraIgnoredMaterials = $derived(
     prepareRows(
-      applyCatalogFilter(ignoredCriticalMaterials, catalogFilter, colors, media),
+      applyNegativeStockFilter(
+        applyCatalogFilter(ignoredCriticalMaterials, catalogFilter, colors, media),
+        catalogFilter,
+      ),
       { q: catalogFilter.q, sortKey: 'name', sortDir: 'asc' },
       (m) => stockRowSearchText(m, materialLocations),
       stockSortGetter('name'),
@@ -3444,10 +3483,10 @@
       }
       showFlash('ok', result.message)
       if (result.queue_upserted > 0) {
-        tab = 'import'
         showFlash(
           'ok',
           `${result.queue_upserted} Eintrag/Einträge in der Import-Warteschlange — dort Serienanlage starten.`,
+          { tab: 'import' },
         )
       }
       if (result.set_ids?.length === 1) {
@@ -3848,15 +3887,14 @@
           {colors}
           families={catalogFilterFamilies}
           tags={allTags}
+          showNegativeStock={tab === 'materials'}
           bind:filter={catalogFilter}
         />
       {/if}
     </div>
   {/if}
 
-  {#if flash}
-    <div class={`flash ${flash.type}`}>{flash.message}</div>
-  {/if}
+  <ToastStack {toasts} onDismiss={dismissToast} onGoTo={goToToastTarget} />
 
   {#snippet todosMarkup(rows, emptyText)}
     <div class="table-wrap desktop-only">
@@ -4115,7 +4153,7 @@
     </section>
   {:else if tab === 'overview'}
     {#if negativeMaterials.length || negativeProducts.length}
-      <div class="flash warn">
+      <div class="banner flash warn">
         Negativbestand vorhanden — Details in den Listen prüfen.
       </div>
     {/if}
@@ -4755,7 +4793,7 @@
                 {#if mail.from_addr} · {mail.from_addr}{/if}
               </p>
               {#if mail.error_message}
-                <p class="flash error" style="margin:.35rem 0">{mail.error_message}</p>
+                <p class="banner flash error" style="margin:.35rem 0">{mail.error_message}</p>
               {/if}
               {#if mail.body_preview}
                 <p class="empty" style="white-space:pre-wrap">{mail.body_preview}</p>

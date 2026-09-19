@@ -7,6 +7,7 @@ export function emptyCatalogFilter() {
     families: [],
     tagIds: [],
     q: '',
+    negativeOnly: false,
   }
 }
 
@@ -17,8 +18,16 @@ export function catalogFilterActive(filter) {
     (filter.colorIds || []).length > 0 ||
     (filter.families || []).length > 0 ||
     (filter.tagIds || []).length > 0 ||
-    String(filter.q || '').trim() !== ''
+    String(filter.q || '').trim() !== '' ||
+    Boolean(filter.negativeOnly)
   )
+}
+
+/** Negativbestand = Backend-Flag `is_negative` (Gesamt < 0 oder Standort < 0). */
+export function applyNegativeStockFilter(rows, filter) {
+  if (!Array.isArray(rows)) return []
+  if (!filter?.negativeOnly) return rows
+  return rows.filter((item) => item.is_negative)
 }
 
 function colorByIdMap(colors) {
