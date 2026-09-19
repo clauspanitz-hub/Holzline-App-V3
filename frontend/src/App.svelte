@@ -4554,22 +4554,24 @@
                         {incompleteHint(material)}
                       </div>
                     {/if}
-                    {@const sourceLinks = materialSourceLinks(material)}
-                    {#if sourceLinks.length}
-                      <div class="purchase-source-links" onclick={(e) => e.stopPropagation()}>
-                        {#each sourceLinks as src}
-                          <a
-                            class="purchase-source-link"
-                            href={src.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title={src.is_preferred ? 'Bevorzugte Bezugsquelle' : 'Bezugsquelle'}
-                          >
-                            {src.shop_name}
-                          </a>
-                        {/each}
-                      </div>
-                    {/if}
+                    {#each [materialSourceLinks(material)] as sourceLinks}
+                      {#if sourceLinks.length}
+                        <div class="purchase-source-links">
+                          {#each sourceLinks as src}
+                            <a
+                              class="purchase-source-link"
+                              href={src.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={src.is_preferred ? 'Bevorzugte Bezugsquelle' : 'Bezugsquelle'}
+                              onclick={(e) => e.stopPropagation()}
+                            >
+                              {src.shop_name}
+                            </a>
+                          {/each}
+                        </div>
+                      {/if}
+                    {/each}
                   </td>
                   {#each materialLocations as loc}
                     <td class="num" class:neg={stockAt(material, loc.id) < 0}>{formatQty(stockAt(material, loc.id), itemDecimals(material))}</td>
