@@ -27,9 +27,9 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **locations:** Hamburg, Dahlenburg, In Bearbeitung, MA1, MA2, Ausschuss (virtuell)
 - **material_stocks / product_stocks:** Bestand je Standort, Negativ erlaubt + Warnung
 - **materials / products:** optionales `min_stock` (Mindestbestand) — Übersicht zeigt kritische Artikel (Gesamt ≤ 0 oder unter Mindestbestand)
-- **products.transform_target_id:** feste Verknüpfung Quellprodukt → Zielprodukt für **Umwandlung** (ADR `0006`)
+- **products.transform_target_id:** Legacy-Spalte; Umwandlung Uni→Vintage läuft per Name (ADR `0006`)
 - **stock_movements:** Historie für Umbuchungen mit virtuellen Standorten und für Umwandlungen
-- **Bei Mitarbeitern:** Überblick Quellprodukte mit Bestand an MA1/MA2
+- **Bei Mitarbeitern:** Überblick Produkte mit Bestand an MA1/MA2; Umwandeln Uni→Vintage per Name
 - **sets:** Shopify-Set ohne eigenen Bestand; Flag `count_materials_in_buildability`
 - **set_variants:** Option1–3 Name/Value (Shopify-CSV-Assistent: Set / Serie / On-Demand / ignorieren; kein stilles Anlegen aller Varianten als Sets)
 - **shopify_ignored_handles:** dauerhaft ignorierte Shopify-Handles im Assistenten
@@ -99,5 +99,5 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - Fertigen erhöht Produktbestand an einem gewählten Standort, Materialabbuchung an gewähltem/selben Standort (Start: ein Standort pro Buchung).
 - Baubare Sets aus Summe der Standorte ohne Ausschuss (ADR `0003`, `0006`).
 - Einkauf-Todos (nur Materialien): bei Bestandsänderung erledigen wenn Mindestbestand erfüllt (ohne Ausschuss); bei erneuter Unterschreitung neues offenes Todo (ADR `0023`).
-- Umwandlung: Bestand Quellprodukt → Zielprodukt am selben Standort, ohne Materialabbuchung (ADR `0006`).
+- Umwandlung: Uni→Vintage per Name am selben Standort, ohne Materialabbuchung (ADR `0006`).
 - Material ohne Varianten-System; unterschiedliche Ausbeuten nur über Produkt-Stücklisten-Mengen.

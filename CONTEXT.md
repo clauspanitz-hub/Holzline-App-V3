@@ -196,20 +196,20 @@ Auf Knopfdruck Materialien oder Produkte aus gewählten Katalogfarben erzeugen (
 _Avoid_: Automatisches Anlegen ohne Nachfrage; Serien-Material immer nur Medium+Farbe; Vorlage-Tags verwerfen wenn Dialog leer; Produkt-Serie ohne Tag-Kopie von der Vorlage
 
 **Umwandlung**:
-Der Bestandstausch von einem **Quellprodukt** zu einem fest verknüpften **Zielprodukt** am selben Standort (z. B. Uni-Geburtstagsring → Vintage-Geburtstagsring nach Bemalen). Kein Fertigen und kein Umbuchen. Die Umwandlung wird nur angeboten, wenn der Produktname „Uni“ enthält (Groß-/Kleinschreibung egal); die Farbe bleibt die des Quellprodukts.
-_Avoid_: Umbuchen für Produktwechsel; Tag als Status „wird Vintage“; stillschweigende Hintergrund-Umbuchung als Ersatz; Umwandeln ohne „Uni“ im Namen
+Der Bestandstausch von einem **Quellprodukt** zu einem **Zielprodukt** am selben Standort (z. B. Uni-Geburtstagsring → Vintage-Geburtstagsring nach Bemalen). Kein Fertigen und kein Umbuchen. Die Umwandlung wird nur angeboten, wenn der Produktname „Uni“ als Wort enthält; das Ziel ergibt sich automatisch, indem „Uni“ im Namen durch „Vintage“ ersetzt wird (exakter Produktname). Die Farbe bleibt die des Quellprodukts.
+_Avoid_: Umbuchen für Produktwechsel; Tag als Status „wird Vintage“; stillschweigende Hintergrund-Umbuchung als Ersatz; Umwandeln ohne „Uni“ im Namen; manuelles „Wird zu“-Feld
 
 **Quellprodukt / Zielprodukt**:
-Feste Produkt-Verknüpfung „wird zu“ / „entsteht aus“ für die Umwandlung. Ein Quellprodukt zeigt auf genau ein Zielprodukt. Typisch: Name mit „Uni“ → Ziel mit Vintage, gleiche Farbe.
-_Avoid_: Paarung nur über Namensähnlichkeit ohne Verknüpfung; Uni/Vintage als Zustand desselben Produkts
+Kein Pflegefeld mehr. Typisch: Name mit „Uni“ → gleichnamiges Produkt mit „Vintage“ statt „Uni“. Fehlt das Vintage-Produkt, ist Umwandeln nicht möglich (Hinweis anlegen).
+_Avoid_: Paarung nur über Freitext-Ähnlichkeit ohne klare Uni→Vintage-Ersetzung; Uni/Vintage als Zustand desselben Produkts; Pflicht-Verknüpfung in der UI
 
 **Ausschuss** (Standort):
 Virtueller Standort für verworfenen Produktbestand (nicht mehr Uni, nicht Vintage). Bestand liegt dort weiter und ist nachvollziehbar; er ist kein verkaufbarer Lagerort. Zählt in der Produkt-Gesamtmenge mit, aber nicht als verfügbarer/baubarer Bestand.
 _Avoid_: Stilles Löschen ohne Spur; Tag „Ausschuss“ statt Standort; Ausschuss als Zustand am Produkt
 
 **Bei Mitarbeitern** (Überblick):
-Eigene Ansicht für Bestand von Quellprodukten (mit „Wird zu“) an MA1/MA2, inkl. Zugang zur Bewegungshistorie. Unabhängig davon, ob „Uni“ im Namen steht. Kein Ersatz für die normale Produktliste und **kein** Produkt-Bearbeiten von dort (Stammdaten nur unter Produkte). Der Knopf Umwandeln erscheint nur, wenn der Name „Uni“ enthält.
-_Avoid_: Nur Tabellenfilter statt eigener Überblick; Tags als alleinige „bei MA“-Anzeige; Bearbeiten-Dialog auf Bei Mitarbeitern; Stammdaten-Pflege im MA-Überblick
+Eigene Ansicht für Produkte mit Bestand > 0 an MA1/MA2, inkl. Zugang zur Bewegungshistorie. Kein Ersatz für die normale Produktliste und **kein** Produkt-Bearbeiten von dort (Stammdaten nur unter Produkte). Der Knopf Umwandeln erscheint nur bei „Uni“ im Namen und vorhandenem Vintage-Ziel.
+_Avoid_: Nur Tabellenfilter statt eigener Überblick; Tags als alleinige „bei MA“-Anzeige; Bearbeiten-Dialog auf Bei Mitarbeitern; Stammdaten-Pflege im MA-Überblick; Anzeige nur bei manuellem „Wird zu“
 
 **Datensicherung** (Export/Import):
 JSON-Datei für **Inventar** (Kataloge, Materialien, Produkte, Bestände, Sets u. a.) zum Herunterladen und Wiederherstellen — nicht Bestellungen, Todos, Shop-Zuordnungen, Tageslage oder Benutzer (dafür Host-Backup der SQLite). Bewegungs-Historie optional per Checkbox (Standard: aus). Beim Import wählt der Nutzer: **Ersetzen** (bestehende Daten werden geleert/ersetzt) oder **Zusammenführen** (Match über Name bzw. SKU/Handle/Farbe+Medium; fehlende anlegen, Stammdaten aktualisieren; Bestände je Standort beim Match **setzen**, nicht addieren) — jeweils mit Bestätigung. Kein Ersatz für Host-Backups der SQLite-Datei.

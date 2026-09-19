@@ -361,7 +361,7 @@ def create_products_from_colors(
 
 @router.get("/products/{product_id}", response_model=ProductRead)
 def get_product(product_id: int, db: Session = Depends(get_db)) -> ProductRead:
-    return services.product_read(services._load_product(db, product_id))
+    return services._product_read_with_auto_target(db, services._load_product(db, product_id))
 
 
 @router.patch("/products/{product_id}", response_model=ProductRead)

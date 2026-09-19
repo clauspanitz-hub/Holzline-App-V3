@@ -215,7 +215,7 @@ def _export_product(product: Product) -> dict[str, Any]:
         "family": product.family,
         "overview_ignored": bool(getattr(product, "overview_ignored", False)),
         "color": _color_ref(product.color),
-        "transform_target": product.transform_target.name if product.transform_target else None,
+        "transform_target": services.vintage_name_from_uni(product.name),
         "tags": sorted(tag.name for tag in product.tags),
         "stocks": [
             {"location": stock.location.name, "quantity": _num(stock.quantity)}
@@ -741,14 +741,8 @@ def _import_product_links(ctx: _Ctx, entries: list[dict[str, Any]]) -> None:
         if product is None:
             continue
 
-        target_name = _opt_str(entry, "transform_target")
-        if target_name:
-            target = ctx.resolve_product(target_name, context=f"{context} (Umwandlungsziel)")
-            product.transform_target_id = (
-                target.id if target is not None and target.id != product.id else None
-            )
-        else:
-            product.transform_target_id = None
+        # transform_target_id Legacy: Runtime nutzt Uni→Vintage per Name; Feld bleibt ungesetzt
+        product.transform_target_id = None
 
         desired_mat: dict[int, Decimal] = {}
         desired_prod: dict[int, Decimal] = {}
