@@ -251,6 +251,30 @@
     return rows
   }
 
+  /** Bezugsquellen für Listenanzeige (bevorzugt zuerst); Fallback preferred_* vom API. */
+  function materialSourceLinks(material) {
+    const rows = (material?.purchase_sources || [])
+      .filter((s) => s?.url)
+      .map((s) => ({
+        url: s.url,
+        shop_name: s.shop_name || 'Zum Shop',
+        is_preferred: !!s.is_preferred,
+      }))
+    if (rows.length) {
+      return rows.sort((a, b) => Number(b.is_preferred) - Number(a.is_preferred))
+    }
+    if (material?.preferred_source_url) {
+      return [
+        {
+          url: material.preferred_source_url,
+          shop_name: material.preferred_shop_name || 'Zum Shop',
+          is_preferred: true,
+        },
+      ]
+    }
+    return []
+  }
+
   async function onSourceUrlBlur(index) {
     const row = materialForm.purchase_sources[index]
     if (!row?.url?.trim()) return
@@ -3852,8 +3876,13 @@
               <td>
                 <strong>{todoKindLabel(todo.kind)}</strong> · {todo.title}
                 {#if todo.kind === 'purchase' && todo.preferred_source_url}
-                  <div>
-                    <a href={todo.preferred_source_url} target="_blank" rel="noopener noreferrer">
+                  <div class="purchase-source-links">
+                    <a
+                      class="purchase-source-link"
+                      href={todo.preferred_source_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       {todo.preferred_shop_name || 'Zum Shop'}
                     </a>
                   </div>
@@ -3881,11 +3910,16 @@
           <p>{todo.title}</p>
           <p class="empty">{todo.order_label || (todo.order_id ? `#${todo.order_id}` : 'Mindestbestand')} · {formatQty(todo.quantity)}</p>
           {#if todo.kind === 'purchase' && todo.preferred_source_url}
-            <p style="margin:0">
-              <a href={todo.preferred_source_url} target="_blank" rel="noopener noreferrer">
+            <div class="purchase-source-links">
+              <a
+                class="purchase-source-link"
+                href={todo.preferred_source_url}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 {todo.preferred_shop_name || 'Zum Shop'}
               </a>
-            </p>
+            </div>
           {/if}
           {#if todo.status === 'open'}
             <div class="row-actions"><button type="button" class="btn" onclick={() => startTodo(todo)}>Los</button></div>
@@ -4520,6 +4554,24 @@
                         {incompleteHint(material)}
                       </div>
                     {/if}
+                    {#each [materialSourceLinks(material)] as sourceLinks}
+                      {#if sourceLinks.length}
+                        <div class="purchase-source-links">
+                          {#each sourceLinks as src}
+                            <a
+                              class="purchase-source-link"
+                              href={src.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={src.is_preferred ? 'Bevorzugte Bezugsquelle' : 'Bezugsquelle'}
+                              onclick={(e) => e.stopPropagation()}
+                            >
+                              {src.shop_name}
+                            </a>
+                          {/each}
+                        </div>
+                      {/if}
+                    {/each}
                   </td>
                   {#each materialLocations as loc}
                     <td class="num" class:neg={stockAt(material, loc.id) < 0}>{formatQty(stockAt(material, loc.id), itemDecimals(material))}</td>
@@ -5274,7 +5326,7 @@
               <ul style="margin:0;padding-left:1.2rem">
                 {#each group.sources as src}
                   <li>
-                    <a href={src.url} target="_blank" rel="noopener noreferrer">{src.material_name}</a>
+                    <a class="purchase-source-link" href={src.url} target="_blank" rel="noopener noreferrer">{src.material_name}</a>
                     {#if src.is_preferred} <span class="empty">bevorzugt</span>{/if}
                     {#if src.note} <span class="empty">— {src.note}</span>{/if}
                   </li>
@@ -5986,8 +6038,13 @@
     <div class="modal" role="dialog" aria-modal="true">
       <h3>Einkauf: {purchaseModal.name}</h3>
       {#if purchaseModal.preferred_source_url}
-        <p style="margin:0 0 .75rem">
-          <a href={purchaseModal.preferred_source_url} target="_blank" rel="noopener noreferrer">
+        <p class="purchase-source-links" style="margin:0 0 .75rem">
+          <a
+            class="purchase-source-link"
+            href={purchaseModal.preferred_source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
             {purchaseModal.preferred_shop_name || 'Bevorzugte Bezugsquelle öffnen'}
           </a>
         </p>

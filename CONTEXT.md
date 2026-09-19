@@ -17,7 +17,7 @@ Optionale typische Nachbestellmenge am Material (bewusst gepflegt). Steuert die 
 _Avoid_: Einkaufsmenge als Synonym; Fehlmenge als Pflicht-Todo-Menge; Bestellmenge = Mindestbestand
 
 **Bezugsquelle** (Material):
-Ein konkreter Shop-Produkt-Link für dieses Material (eigener Link je Material/Farbe). Felder: **Shop** (Katalog), URL, optionale Notiz; mehrere möglich, eine **bevorzugt**. Neue Zeile erst, wenn die vorherige gefüllt ist. In der Link-Übersicht nach Shop gruppiert. Bevorzugte Quelle erscheint im Einkauf-Todo/-Dialog.
+Ein konkreter Shop-Produkt-Link für dieses Material (eigener Link je Material/Farbe). Felder: **Shop** (Katalog), URL, optionale Notiz; mehrere möglich, eine **bevorzugt**. Neue Zeile erst, wenn die vorherige gefüllt ist. In der Link-Übersicht nach Shop gruppiert. Bevorzugte Quelle erscheint im Einkauf-Todo/-Dialog; alle Bezugsquellen sind in der Materialliste als Akzent-Textlinks sichtbar.
 _Avoid_: Ein Link für alle Farben desselben Filaments; Lieferanten-CRM; Ersatzartikel als Bezugsquelle
 
 **Shop** (Einkaufskatalog):
