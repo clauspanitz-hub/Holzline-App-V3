@@ -31,6 +31,9 @@ from app.schemas import (
     ColorRead,
     ColorUpdate,
     ColorWriteResult,
+    FamilyCreate,
+    FamilyRead,
+    FamilyUpdate,
     LocationRead,
     LoginRequest,
     ManufactureRequest,
@@ -177,6 +180,66 @@ def update_tag(tag_id: int, payload: TagUpdate, db: Session = Depends(get_db)) -
 @router.delete("/tags/{tag_id}", status_code=204)
 def delete_tag(tag_id: int, db: Session = Depends(get_db)) -> None:
     services.delete_tag(db, tag_id)
+
+
+@router.get("/material-families", response_model=list[FamilyRead])
+def material_families(db: Session = Depends(get_db)) -> list[FamilyRead]:
+    from app import families as family_svc
+
+    return [FamilyRead.model_validate(r) for r in family_svc.list_families(db, "material")]
+
+
+@router.post("/material-families", response_model=FamilyRead, status_code=201)
+def create_material_family(payload: FamilyCreate, db: Session = Depends(get_db)) -> FamilyRead:
+    from app import families as family_svc
+
+    return FamilyRead.model_validate(
+        family_svc.create_family(db, "material", name=payload.name, parent_id=payload.parent_id)
+    )
+
+
+@router.patch("/material-families/{family_id}", response_model=FamilyRead)
+def update_material_family(family_id: int, payload: FamilyUpdate, db: Session = Depends(get_db)) -> FamilyRead:
+    from app import families as family_svc
+
+    return FamilyRead.model_validate(family_svc.update_family(db, "material", family_id, name=payload.name))
+
+
+@router.delete("/material-families/{family_id}", status_code=204)
+def delete_material_family(family_id: int, db: Session = Depends(get_db)) -> None:
+    from app import families as family_svc
+
+    family_svc.delete_family(db, "material", family_id)
+
+
+@router.get("/product-families", response_model=list[FamilyRead])
+def product_families(db: Session = Depends(get_db)) -> list[FamilyRead]:
+    from app import families as family_svc
+
+    return [FamilyRead.model_validate(r) for r in family_svc.list_families(db, "product")]
+
+
+@router.post("/product-families", response_model=FamilyRead, status_code=201)
+def create_product_family(payload: FamilyCreate, db: Session = Depends(get_db)) -> FamilyRead:
+    from app import families as family_svc
+
+    return FamilyRead.model_validate(
+        family_svc.create_family(db, "product", name=payload.name, parent_id=payload.parent_id)
+    )
+
+
+@router.patch("/product-families/{family_id}", response_model=FamilyRead)
+def update_product_family(family_id: int, payload: FamilyUpdate, db: Session = Depends(get_db)) -> FamilyRead:
+    from app import families as family_svc
+
+    return FamilyRead.model_validate(family_svc.update_family(db, "product", family_id, name=payload.name))
+
+
+@router.delete("/product-families/{family_id}", status_code=204)
+def delete_product_family(family_id: int, db: Session = Depends(get_db)) -> None:
+    from app import families as family_svc
+
+    family_svc.delete_family(db, "product", family_id)
 
 
 @router.get("/shops", response_model=list[ShopRead])

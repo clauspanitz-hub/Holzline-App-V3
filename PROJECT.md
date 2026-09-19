@@ -18,7 +18,8 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 
 ### Phase 1 (Basis)
 - **materials:** … optional `min_stock` / `reorder_quantity` / `last_purchase_quantity`, optional `alternatives_note` / `products_note`, Bezugsquellen in `material_purchase_sources` (Shop + URL), …
-- **products:** `id`, `name` (unique), `sku` (optional unique), `selling_price` (Verkaufspreis EUR, 0 = unvollständig), optional `min_stock`/`color`/`tags`/`family` (Produktfamilie), `is_template`, Audit wie Materialien — kein Gesamtbestand mehr an der Zeile
+- **products:** `id`, `name` (unique), `sku` (optional unique), `selling_price` (Verkaufspreis EUR, 0 = unvollständig), optional `min_stock`/`color`/`tags`/`family_id` (Produktfamilien-Katalog, ADR `0025`), `is_template`, Audit wie Materialien — kein Gesamtbestand mehr an der Zeile
+- **material_families / product_families:** Kataloge Eltern → eine Unterebene; Artikel referenziert genau einen Knoten (ADR `0025`)
 - **Unvollständig (UI):** Material: Mindestbestand, Einkaufspreis=0; Produkt: Mindestbestand, Stückliste, Verkaufspreis=0 — sichtbar als „!“ und als System-Tags `fehlt …` (ADR `0011`)
 - **product_materials:** Produkt-Stückliste — Material **oder** Komponenten-Produkt → Fertigen (ADR `0012`)
 - **Materialherstellkosten:** live aus Produkt-Stückliste
@@ -72,6 +73,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Unvollständigkeit → System-Tags `fehlt …` + „!“ nur bei gesetztem Tag (ADR `0011`)
 - [x] Produkt-Stückliste Material oder Komponenten-Produkt; Fertigen/Kosten/Serie (ADR `0012`)
 - [x] Shopify-CSV-Assistent + Ignorieren-Liste; Import-Warteschlange → Serienanlage (Medium/Farb-Match); `is_on_demand`
+- [x] Familien-Katalog mit Unterfamilien (Material/Produkt getrennt, eine Ebene, ADR `0025`)
 
 ### Phase 2: Bestellverwaltung & Eingangskanäle — Umgesetzt
 - [x] Benutzer mit Rechten (App-Login Admin/Mitarbeiter, ADR `0010`)

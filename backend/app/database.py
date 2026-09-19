@@ -187,6 +187,9 @@ def init_db() -> None:
         migrate_transform_target(engine)
         migrate_product_family(engine)
         migrate_material_family(engine)
+        from app.families import migrate_family_catalogs
+
+        migrate_family_catalogs(engine, db)
         migrate_overview_ignored(engine)
         migrate_product_selling_price(engine)
         migrate_product_bom_components(engine)

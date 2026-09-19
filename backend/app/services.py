@@ -10,17 +10,25 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.color_hex import hex_for_color_name
 from app.database import AUSSCHUSS_LOCATION_NAME
+from app.families import (
+    assign_article_family,
+    family_fields_for_read,
+    find_or_create_parent,
+    resolve_family_id,
+)
 from app.models import (
     Color,
     ColorMedium,
     CustomerOrder,
     Location,
     Material,
+    MaterialFamily,
     MaterialPurchaseSource,
     MaterialStock,
     OptionMapping,
     OrderLine,
     Product,
+    ProductFamily,
     ProductMaterial,
     ProductSet,
     ProductStock,
@@ -874,6 +882,7 @@ def material_read(material: Material) -> MaterialRead:
         seen.add(prod.id)
         used.append(MaterialUsedInProduct(id=prod.id, name=prod.name))
     used.sort(key=lambda x: x.name.casefold())
+    fam = family_fields_for_read(material)
     return MaterialRead(
         id=material.id,
         name=material.name,
@@ -888,7 +897,10 @@ def material_read(material: Material) -> MaterialRead:
         products_note=getattr(material, "products_note", None),
         is_template=bool(getattr(material, "is_template", False)),
         decimal_places=int(getattr(material, "decimal_places", 0) or 0),
-        family=material.family,
+        family_id=fam["family_id"],
+        family=fam["family"],
+        family_parent_id=fam["family_parent_id"],
+        family_parent_name=fam["family_parent_name"],
         overview_ignored=bool(getattr(material, "overview_ignored", False)),
         color_id=material.color_id,
         color=color_read(material.color),
@@ -912,6 +924,7 @@ def product_read(product: Product, *, transform_target: Product | None = None) -
     total = _product_stock_total(product)
     available = _product_stock_available(product)
     target = transform_target
+    fam = family_fields_for_read(product)
     return ProductRead(
         id=product.id,
         name=product.name,
@@ -920,7 +933,10 @@ def product_read(product: Product, *, transform_target: Product | None = None) -
         min_stock=product.min_stock,
         is_template=bool(product.is_template),
         is_on_demand=bool(getattr(product, "is_on_demand", False)),
-        family=product.family,
+        family_id=fam["family_id"],
+        family=fam["family"],
+        family_parent_id=fam["family_parent_id"],
+        family_parent_name=fam["family_parent_name"],
         overview_ignored=bool(getattr(product, "overview_ignored", False)),
         color_id=product.color_id,
         color=color_read(product.color),
@@ -945,6 +961,15 @@ def _product_read_with_auto_target(db: Session, product: Product) -> ProductRead
     return product_read(product, transform_target=find_uni_transform_target(db, product))
 
 
+def _resolve_payload_family(db: Session, kind: str, *, family_id: int | None, family: str | None):
+    """family_id hat Vorrang; Freitext legt/findet Elternfamilie (Serien/Vorschlag/Backup)."""
+    if family_id is not None:
+        return resolve_family_id(db, kind, family_id)
+    if family:
+        return find_or_create_parent(db, kind, family)
+    return None
+
+
 def _load_material(db: Session, material_id: int) -> Material:
     material = db.scalars(
         select(Material)
@@ -955,6 +980,7 @@ def _load_material(db: Session, material_id: int) -> Material:
             selectinload(Material.tags),
             selectinload(Material.purchase_sources).selectinload(MaterialPurchaseSource.shop),
             selectinload(Material.product_links).selectinload(ProductMaterial.product),
+            selectinload(Material.family_ref).selectinload(MaterialFamily.parent),
         )
     ).first()
     if not material:
@@ -981,6 +1007,7 @@ def list_materials(
             selectinload(Material.tags),
             selectinload(Material.purchase_sources).selectinload(MaterialPurchaseSource.shop),
             selectinload(Material.product_links).selectinload(ProductMaterial.product),
+            selectinload(Material.family_ref).selectinload(MaterialFamily.parent),
         )
     )
     if tag:
@@ -998,6 +1025,9 @@ def create_material(db: Session, payload: MaterialCreate) -> MaterialRead:
     purchase_quantity = _q(payload.purchase_quantity)
     purchase_price = _m(payload.purchase_price)
     color = get_color(db, payload.color_id)
+    family_row = _resolve_payload_family(
+        db, "material", family_id=payload.family_id, family=payload.family
+    )
     material = Material(
         name=payload.name.strip(),
         unit=payload.unit,
@@ -1008,10 +1038,10 @@ def create_material(db: Session, payload: MaterialCreate) -> MaterialRead:
         reorder_quantity=_q(payload.reorder_quantity) if payload.reorder_quantity is not None else None,
         alternatives_note=(payload.alternatives_note or "").strip() or None,
         products_note=(payload.products_note or "").strip() or None,
-        family=(payload.family.strip() if payload.family else None),
         color_id=color.id if color else None,
         decimal_places=int(payload.decimal_places or 0),
     )
+    assign_article_family(material, family_row)
     material.tags = resolve_tags(db, payload.tag_ids)
     db.add(material)
     try:
@@ -1112,6 +1142,7 @@ def create_materials_from_colors(db: Session, payload: MaterialsFromColorsReques
     else:
         series_min_stock = None
     series_decimals = int(template.decimal_places or 0) if template is not None else 0
+    family_row = find_or_create_parent(db, "material", base)
 
     seen: set[int] = set()
     for color_id in payload.color_ids:
@@ -1139,10 +1170,10 @@ def create_materials_from_colors(db: Session, payload: MaterialsFromColorsReques
             purchase_price=purchase_price,
             cost_per_unit=cost,
             min_stock=series_min_stock,
-            family=base,
             color_id=color.id,
             decimal_places=series_decimals,
         )
+        assign_article_family(material, family_row)
         material.tags = list(tags)
         db.add(material)
         db.flush()
@@ -1170,6 +1201,9 @@ def update_material(db: Session, material_id: int, payload: MaterialUpdate) -> M
     data = payload.model_dump(exclude_unset=True)
     tag_ids = data.pop("tag_ids", None)
     sources_payload = data.pop("purchase_sources", None)
+    family_touched = "family_id" in data or "family" in data
+    family_id = data.pop("family_id", None)
+    family_name = data.pop("family", None)
     if "name" in data and data["name"] is not None:
         data["name"] = data["name"].strip()
     if "purchase_quantity" in data and data["purchase_quantity"] is not None:
@@ -1188,13 +1222,19 @@ def update_material(db: Session, material_id: int, payload: MaterialUpdate) -> M
         data["alternatives_note"] = (data["alternatives_note"] or "").strip() or None
     if "products_note" in data:
         data["products_note"] = (data["products_note"] or "").strip() or None
-    if "family" in data and data["family"] is not None:
-        data["family"] = data["family"].strip() or None
     if "color_id" in data:
         color = get_color(db, data["color_id"])
         data["color_id"] = color.id if color else None
     for key, value in data.items():
         setattr(material, key, value)
+    if family_touched:
+        if family_id is None and not family_name:
+            assign_article_family(material, None)
+        else:
+            assign_article_family(
+                material,
+                _resolve_payload_family(db, "material", family_id=family_id, family=family_name),
+            )
     if tag_ids is not None:
         material.tags = resolve_tags(db, tag_ids)
     if sources_payload is not None:
@@ -1336,6 +1376,7 @@ def _load_product(db: Session, product_id: int) -> Product:
             selectinload(Product.color).selectinload(Color.medium),
             selectinload(Product.tags),
             selectinload(Product.transform_target),
+            selectinload(Product.family_ref).selectinload(ProductFamily.parent),
         )
     ).first()
     if not product:
@@ -1361,6 +1402,7 @@ def list_products(
             selectinload(Product.color).selectinload(Color.medium),
             selectinload(Product.tags),
             selectinload(Product.transform_target),
+            selectinload(Product.family_ref).selectinload(ProductFamily.parent),
         )
     )
     if tag:
@@ -1383,6 +1425,9 @@ def list_products(
 def create_product(db: Session, payload: ProductCreate) -> ProductRead:
     location = get_location(db, payload.location_id) if payload.location_id else default_location(db)
     color = get_color(db, payload.color_id)
+    family_row = _resolve_payload_family(
+        db, "product", family_id=payload.family_id, family=payload.family
+    )
     product = Product(
         name=payload.name.strip(),
         sku=payload.sku,
@@ -1390,10 +1435,10 @@ def create_product(db: Session, payload: ProductCreate) -> ProductRead:
         min_stock=_q(payload.min_stock) if payload.min_stock is not None else None,
         is_template=bool(payload.is_template),
         is_on_demand=bool(getattr(payload, "is_on_demand", False)),
-        family=(payload.family.strip() if payload.family else None),
         color_id=color.id if color else None,
         transform_target_id=None,
     )
+    assign_article_family(product, family_row)
     product.tags = resolve_tags(db, payload.tag_ids)
     db.add(product)
     try:
@@ -1522,6 +1567,8 @@ def create_products_from_colors(db: Session, payload: ProductsFromColorsRequest)
     else:
         series_min_stock = _q(template_min_stock) if template_min_stock is not None else None
 
+    family_row = find_or_create_parent(db, "product", base)
+
     seen: set[int] = set()
     for color_id in payload.color_ids:
         if color_id in seen:
@@ -1548,9 +1595,9 @@ def create_products_from_colors(db: Session, payload: ProductsFromColorsRequest)
             color_id=color.id,
             min_stock=series_min_stock,
             selling_price=template_selling_price,
-            family=base,
             is_on_demand=bool(payload.is_on_demand),
         )
+        assign_article_family(product, family_row)
         product.tags = list(tags)
         db.add(product)
         db.flush()
@@ -1641,10 +1688,11 @@ def update_product(db: Session, product_id: int, payload: ProductUpdate) -> Prod
     before_missing = product_incomplete_fields_raw(product)
     data = payload.model_dump(exclude_unset=True)
     tag_ids = data.pop("tag_ids", None)
+    family_touched = "family_id" in data or "family" in data
+    family_id = data.pop("family_id", None)
+    family_name = data.pop("family", None)
     if "name" in data and data["name"] is not None:
         data["name"] = data["name"].strip()
-    if "family" in data and data["family"] is not None:
-        data["family"] = data["family"].strip() or None
     if "min_stock" in data:
         data["min_stock"] = _q(data["min_stock"]) if data["min_stock"] is not None else None
     if "selling_price" in data and data["selling_price"] is not None:
@@ -1656,6 +1704,14 @@ def update_product(db: Session, product_id: int, payload: ProductUpdate) -> Prod
     data.pop("transform_target_id", None)
     for key, value in data.items():
         setattr(product, key, value)
+    if family_touched:
+        if family_id is None and not family_name:
+            assign_article_family(product, None)
+        else:
+            assign_article_family(
+                product,
+                _resolve_payload_family(db, "product", family_id=family_id, family=family_name),
+            )
     if tag_ids is not None:
         product.tags = resolve_tags(db, tag_ids)
     sync_incomplete_tags(db, product, before_missing=before_missing)
@@ -1677,7 +1733,16 @@ def bulk_update_materials(db: Session, payload: "MaterialBulkUpdate") -> list[Ma
     if not isinstance(payload, MaterialBulkUpdate):
         payload = MaterialBulkUpdate.model_validate(payload)
     tags = resolve_tags(db, payload.tag_ids) if payload.tag_ids is not None else None
-    family = payload.family.strip() if payload.family else None
+    family_row = None
+    family_set = False
+    if payload.clear_family:
+        family_set = True
+        family_row = None
+    elif payload.family_id is not None or payload.family:
+        family_set = True
+        family_row = _resolve_payload_family(
+            db, "material", family_id=payload.family_id, family=payload.family
+        )
     result_ids: list[int] = []
     for mid in payload.ids:
         material = _load_material(db, mid)
@@ -1686,10 +1751,8 @@ def bulk_update_materials(db: Session, payload: "MaterialBulkUpdate") -> list[Ma
             material.min_stock = None
         elif payload.min_stock is not None:
             material.min_stock = _q(payload.min_stock)
-        if payload.clear_family:
-            material.family = None
-        elif payload.family is not None:
-            material.family = family
+        if family_set:
+            assign_article_family(material, family_row)
         if payload.is_template is not None:
             material.is_template = bool(payload.is_template)
         if tags is not None:
@@ -1707,7 +1770,16 @@ def bulk_update_products(db: Session, payload: "ProductBulkUpdate") -> list[Prod
     if not isinstance(payload, ProductBulkUpdate):
         payload = ProductBulkUpdate.model_validate(payload)
     tags = resolve_tags(db, payload.tag_ids) if payload.tag_ids is not None else None
-    family = payload.family.strip() if payload.family else None
+    family_row = None
+    family_set = False
+    if payload.clear_family:
+        family_set = True
+        family_row = None
+    elif payload.family_id is not None or payload.family:
+        family_set = True
+        family_row = _resolve_payload_family(
+            db, "product", family_id=payload.family_id, family=payload.family
+        )
     result_ids: list[int] = []
     for pid in payload.ids:
         product = _load_product(db, pid)
@@ -1718,10 +1790,8 @@ def bulk_update_products(db: Session, payload: "ProductBulkUpdate") -> list[Prod
             product.min_stock = _q(payload.min_stock)
         if payload.selling_price is not None:
             product.selling_price = _m(payload.selling_price)
-        if payload.clear_family:
-            product.family = None
-        elif payload.family is not None:
-            product.family = family
+        if family_set:
+            assign_article_family(product, family_row)
         if payload.is_template is not None:
             product.is_template = bool(payload.is_template)
         if tags is not None:

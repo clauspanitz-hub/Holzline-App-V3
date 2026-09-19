@@ -67,6 +67,20 @@ export const api = {
     update: (id, body) => request(`/api/tags/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     remove: (id) => request(`/api/tags/${id}`, { method: 'DELETE' }),
   },
+  materialFamilies: {
+    list: () => request('/api/material-families'),
+    create: (body) => request('/api/material-families', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) =>
+      request(`/api/material-families/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    remove: (id) => request(`/api/material-families/${id}`, { method: 'DELETE' }),
+  },
+  productFamilies: {
+    list: () => request('/api/product-families'),
+    create: (body) => request('/api/product-families', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) =>
+      request(`/api/product-families/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    remove: (id) => request(`/api/product-families/${id}`, { method: 'DELETE' }),
+  },
   shops: {
     list: () => request('/api/shops'),
     create: (body) => request('/api/shops', { method: 'POST', body: JSON.stringify(body) }),

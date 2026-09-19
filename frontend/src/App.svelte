@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { api, formatMoney, formatQty, formatUnitCost, formatDateTime, formatActor, itemDecimals, qtyInputValue, qtyStep } from './lib/api.js'
   import { filterRows, sortRows, nextSortState, sortMark, prepareRows } from './lib/tableUtils.js'
-  import { productFamilyKey, collectProductFamilies, groupProductsByFamily } from './lib/productFamily.js'
+  import { productFamilyKey, collectParentFamilyNames, groupProductsByFamily, familySelectOptions } from './lib/productFamily.js'
   import {
     matchColorsForShopifyValue as matchColorsPool,
     resolveSetComponents as resolveSetComponentsLib,
@@ -26,6 +26,8 @@
   let userForm = $state({ username: '', password: '', role: 'mitarbeiter' })
   let materials = $state([])
   let products = $state([])
+  let materialFamilyCatalog = $state([])
+  let productFamilyCatalog = $state([])
   let sets = $state([])
   let units = $state([])
   let locations = $state([])
@@ -118,6 +120,9 @@
   let catalogNewMedia = $state('')
   let catalogNewColorDrafts = $state({}) // mediumId -> name
   let catalogNewTag = $state('')
+  let catalogNewMaterialFamily = $state('')
+  let catalogNewProductFamily = $state('')
+  let catalogNewSubfamilyDrafts = $state({}) // `${kind}:${parentId}` -> name
   let catalogSavingKey = $state('')
   let selectedCatalogMediumId = $state(null)
 
@@ -214,7 +219,7 @@
       purchase_sources: [emptyPurchaseSource(true)],
       is_template: false,
       decimal_places: 0,
-      family: '',
+      family_id: '',
       location_id: '',
       medium_id: '',
       color_id: '',
@@ -316,7 +321,7 @@
       stock_quantity: '0',
       min_stock: '',
       is_template: false,
-      family: '',
+      family_id: '',
       location_id: '',
       medium_id: '',
       color_id: '',
@@ -439,7 +444,7 @@
       clear_min_stock: false,
       setTags: false,
       tagIds: [],
-      family: '',
+      family_id: '',
       clear_family: false,
       is_template: '', // '' = nicht ändern, 'yes', 'no'
       setStock: false,
@@ -1445,7 +1450,7 @@
     }
     if (bulkEditForm.setTags) body.tag_ids = bulkEditForm.tagIds
     if (bulkEditForm.clear_family) body.clear_family = true
-    else if (bulkEditForm.family.trim()) body.family = bulkEditForm.family.trim()
+    else if (bulkEditForm.family_id) body.family_id = Number(bulkEditForm.family_id)
     if (bulkEditForm.is_template === 'yes') body.is_template = true
     else if (bulkEditForm.is_template === 'no') body.is_template = false
     saving = true
@@ -1456,7 +1461,7 @@
         body.selling_price != null ||
         body.tag_ids ||
         body.clear_family ||
-        body.family != null ||
+        body.family_id != null ||
         body.is_template != null
       if (hasSafeFields) {
         if (kind === 'material') await api.materials.bulkUpdate(body)
@@ -1578,7 +1583,12 @@
     const key = String(family || '').trim()
     if (!key) return []
     const rows = kind === 'material' ? materials : products
-    return rows.filter((row) => productFamilyKey(row) === key && row.id !== excludeId)
+    return rows.filter((row) => {
+      if (row.id === excludeId) return false
+      const leaf = productFamilyKey(row)
+      const parent = String(row.family_parent_name || '').trim() || leaf
+      return leaf === key || parent === key
+    })
   }
 
   /** Tag ist bei allen Familienmitgliedern schon gesetzt → ausgegraut. */
@@ -1614,7 +1624,12 @@
     const tagMeta = allTags.find((t) => t.id === id)
     if (tagMeta?.is_system) return
 
-    const family = String(form.family || '').trim()
+    const familyId = form.family_id ? Number(form.family_id) : null
+    const catalog = kind === 'material' ? materialFamilyCatalog : productFamilyCatalog
+    const famRow = familyId ? catalog.find((f) => Number(f.id) === familyId) : null
+    const family = famRow
+      ? String(famRow.parent_name || famRow.name || '').trim()
+      : ''
     const editingId =
       kind === 'material'
         ? materialModal?.mode === 'edit'
@@ -1720,13 +1735,17 @@
             api.colors.list(),
             api.tags.list(),
             api.shops.list(),
-          ]).then(([u, l, med, c, tags, shopRows]) => {
+            api.materialFamilies.list(),
+            api.productFamilies.list(),
+          ]).then(([u, l, med, c, tags, shopRows, matFams, prodFams]) => {
               units = u
               locations = l
               media = med
               colors = c
               allTags = tags
               shops = shopRows
+              materialFamilyCatalog = matFams
+              productFamilyCatalog = prodFams
               const drafts = { ...catalogNewColorDrafts }
               for (const row of med) {
                 if (drafts[row.id] == null) drafts[row.id] = ''
@@ -2073,7 +2092,9 @@
       stockSortGetter(listUi.materials.sortKey),
     )
   })
-  const materialFamilies = $derived(collectProductFamilies(materials))
+  const materialFamilies = $derived(
+    collectParentFamilyNames(materialFamilyCatalog, materials),
+  )
   const materialGroups = $derived(groupProductsByFamily(displayedMaterials))
   const displayedProducts = $derived(
     prepareRows(
@@ -2083,11 +2104,15 @@
       stockSortGetter(listUi.products.sortKey),
     ),
   )
-  /** Vorhandene Produktfamilien für den Filter (ohne Leerwerte). */
-  const productFamilies = $derived(collectProductFamilies(products))
+  /** Vorhandene Elternfamilien für den Filter (ohne Leerwerte). */
+  const productFamilies = $derived(
+    collectParentFamilyNames(productFamilyCatalog, products),
+  )
   const catalogFilterFamilies = $derived(
     [...new Set([...productFamilies, ...materialFamilies])].sort((a, b) => a.localeCompare(b, 'de')),
   )
+  const materialFamilyOptions = $derived(familySelectOptions(materialFamilyCatalog))
+  const productFamilyOptions = $derived(familySelectOptions(productFamilyCatalog))
   const displayedIncompleteProducts = $derived(
     prepareRows(
       incompleteProducts,
@@ -2338,7 +2363,7 @@
           template.reorder_quantity != null
             ? qtyInputValue(template.reorder_quantity, itemDecimals(template))
             : '',
-        family: template.family || '',
+        family_id: template.family_id ? String(template.family_id) : '',
         decimal_places: itemDecimals(template),
         stock_quantity: '0',
         medium_id: mid,
@@ -2369,7 +2394,7 @@
       purchase_sources: materialSourcesForForm(material),
       is_template: !!material.is_template,
       decimal_places: itemDecimals(material),
-      family: material.family || '',
+      family_id: material.family_id ? String(material.family_id) : '',
       location_id: '',
       medium_id: mid,
       color_id: material.color_id ? String(material.color_id) : '',
@@ -2397,7 +2422,7 @@
         selling_price: template.selling_price != null ? String(template.selling_price) : '0',
         stock_quantity: '0',
         min_stock: template.min_stock != null ? qtyInputValue(template.min_stock, 0) : '',
-        family: template.family || '',
+        family_id: template.family_id ? String(template.family_id) : '',
         medium_id: mid,
         color_id: template.color_id ? String(template.color_id) : '',
         tagIds: (template.tags || []).map((t) => t.id),
@@ -2406,7 +2431,10 @@
     }
     if (name) productForm.name = name
     if (sku) productForm.sku = sku
-    if (family) productForm.family = family
+    if (family) {
+      // Freitext-Vorschlag → beim Speichern Find-or-create Elternfamilie
+      productForm._familyHint = family
+    }
     if (mediumId) productForm.medium_id = String(mediumId)
     if (colorId) productForm.color_id = String(colorId)
     productModal = { mode: 'create', product: null, templateBom: template?.bom ? [...template.bom] : [], orderLink }
@@ -2488,7 +2516,7 @@
       stock_quantity: '0',
       min_stock: product.min_stock != null ? qtyInputValue(product.min_stock, 0) : '',
       is_template: !!product.is_template,
-      family: product.family || '',
+      family_id: product.family_id ? String(product.family_id) : '',
       location_id: '',
       medium_id: mid,
       color_id: product.color_id ? String(product.color_id) : '',
@@ -2595,6 +2623,12 @@
       } else if (kind === 'tag') {
         await api.tags.update(id, { name: trimmed })
         showFlash('ok', 'Tag umbenannt.')
+      } else if (kind === 'materialFamily') {
+        await api.materialFamilies.update(id, { name: trimmed })
+        showFlash('ok', 'Materialfamilie umbenannt.')
+      } else if (kind === 'productFamily') {
+        await api.productFamilies.update(id, { name: trimmed })
+        showFlash('ok', 'Produktfamilie umbenannt.')
       }
       if (catalogEdit?.key === key) catalogEdit = null
       await refresh({ silent: true })
@@ -2774,6 +2808,72 @@
     }
   }
 
+  async function commitNewFamily(kind) {
+    const name = (kind === 'material' ? catalogNewMaterialFamily : catalogNewProductFamily).trim()
+    if (!name || saving) return
+    catalogSavingKey = `new:${kind}Family`
+    saving = true
+    try {
+      if (kind === 'material') {
+        await api.materialFamilies.create({ name })
+        catalogNewMaterialFamily = ''
+      } else {
+        await api.productFamilies.create({ name })
+        catalogNewProductFamily = ''
+      }
+      await refresh({ silent: true })
+      showFlash('ok', `Familie „${name}“ angelegt.`)
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+      catalogSavingKey = ''
+    }
+  }
+
+  function subfamilyDraftKey(kind, parentId) {
+    return `${kind}:${parentId}`
+  }
+
+  async function commitNewSubfamily(kind, parentId) {
+    const key = subfamilyDraftKey(kind, parentId)
+    const name = String(catalogNewSubfamilyDrafts[key] || '').trim()
+    if (!name || saving) return
+    catalogSavingKey = `new:sub:${key}`
+    saving = true
+    try {
+      if (kind === 'material') {
+        await api.materialFamilies.create({ name, parent_id: Number(parentId) })
+      } else {
+        await api.productFamilies.create({ name, parent_id: Number(parentId) })
+      }
+      catalogNewSubfamilyDrafts = { ...catalogNewSubfamilyDrafts, [key]: '' }
+      await refresh({ silent: true })
+      showFlash('ok', `Unterfamilie „${name}“ angelegt.`)
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+      catalogSavingKey = ''
+    }
+  }
+
+  async function deleteCatalogFamily(kind, item) {
+    const label = item.parent_id ? 'Unterfamilie' : 'Familie'
+    if (!confirm(`${label} „${item.name}“ löschen?`)) return
+    saving = true
+    try {
+      if (kind === 'material') await api.materialFamilies.remove(item.id)
+      else await api.productFamilies.remove(item.id)
+      await refresh({ silent: true })
+      showFlash('ok', `${label} „${item.name}“ gelöscht.`)
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
   async function commitNewShop() {
     const name = newShopName.trim()
     if (!name || saving) return
@@ -2939,7 +3039,7 @@
           purchase_price: materialForm.purchase_price,
           min_stock: parseOptionalQty(materialForm.min_stock),
           reorder_quantity: parseOptionalQty(materialForm.reorder_quantity),
-          family: materialForm.family.trim() || null,
+          family_id: materialForm.family_id ? Number(materialForm.family_id) : null,
           decimal_places: itemDecimals(materialForm),
           stock_quantity: materialForm.stock_quantity,
           location_id: Number(materialForm.location_id),
@@ -2966,7 +3066,7 @@
         min_stock: parseOptionalQty(materialForm.min_stock),
         reorder_quantity: parseOptionalQty(materialForm.reorder_quantity),
         is_template: !!materialForm.is_template,
-        family: materialForm.family.trim() || null,
+        family_id: materialForm.family_id ? Number(materialForm.family_id) : null,
         decimal_places: itemDecimals(materialForm),
         ...notesPayload,
         ...colorPayload,
@@ -3073,13 +3173,18 @@
         colorPayload.tag_ids = productModal.mode === 'create' ? productForm.tagIds : nextProductTags
       }
       if (productModal.mode === 'create') {
+        const familyPayload = productForm.family_id
+          ? { family_id: Number(productForm.family_id) }
+          : productForm._familyHint
+            ? { family: String(productForm._familyHint).trim() }
+            : { family_id: null }
         const created = await api.products.create({
           name: productForm.name.trim(),
           sku: productForm.sku.trim() || null,
           selling_price: productForm.selling_price === '' ? '0' : productForm.selling_price,
           min_stock: parseOptionalQty(productForm.min_stock),
           is_template: !!productForm.is_template,
-          family: productForm.family.trim() || null,
+          ...familyPayload,
           stock_quantity: productForm.stock_quantity,
           location_id: Number(productForm.location_id),
           ...colorPayload,
@@ -3107,7 +3212,7 @@
         productForm = {
           ...productForm,
           is_template: !!(item.is_template ?? productForm.is_template),
-          family: item.family || '',
+          family_id: item.family_id ? String(item.family_id) : '',
           medium_id: mediumIdFromColor(item.color_id) || (item.color?.medium_id ? String(item.color.medium_id) : ''),
           color_id: item.color_id ? String(item.color_id) : '',
           tagIds: (item.tags || []).map((t) => t.id),
@@ -3148,7 +3253,7 @@
         selling_price: productForm.selling_price === '' ? '0' : productForm.selling_price,
         min_stock: parseOptionalQty(productForm.min_stock),
         is_template: !!productForm.is_template,
-        family: productForm.family.trim() || null,
+        family_id: productForm.family_id ? Number(productForm.family_id) : null,
         ...colorPayload,
       })
       showFlash('ok', 'Produkt gespeichert.')
@@ -5291,6 +5396,206 @@
       </div>
 
       <div class="catalog-block">
+        <h3>Materialfamilien</h3>
+        <p class="empty" style="margin-top:0">Elternfamilien und eine Ebene Unterfamilien. Am Artikel nur Auswahl.</p>
+        <div class="table-wrap catalog-table-wrap">
+          <table class="catalog-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th class="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each materialFamilyCatalog.filter((f) => f.parent_id == null) as parent (parent.id)}
+                <tr>
+                  <td>
+                    <input
+                      class="catalog-cell"
+                      type="text"
+                      value={catalogCellValue('materialFamily', parent.id, 'name', parent.name)}
+                      disabled={saving && catalogSavingKey === catalogCellKey('materialFamily', parent.id, 'name')}
+                      onfocus={() => beginCatalogEdit('materialFamily', parent.id, 'name', parent.name)}
+                      oninput={(e) => setCatalogEditValue('materialFamily', parent.id, 'name', e.currentTarget.value)}
+                      onblur={commitCatalogEdit}
+                      onkeydown={onCatalogEditKeydown}
+                      aria-label={`Materialfamilie ${parent.name}`}
+                    />
+                  </td>
+                  <td class="col-actions">
+                    <button type="button" class="btn-icon danger" title="Löschen" aria-label="Familie löschen" disabled={saving} onclick={() => deleteCatalogFamily('material', parent)}>✕</button>
+                  </td>
+                </tr>
+                {#each materialFamilyCatalog.filter((f) => Number(f.parent_id) === Number(parent.id)) as child (child.id)}
+                  <tr class="catalog-subfamily-row">
+                    <td>
+                      <input
+                        class="catalog-cell catalog-subfamily"
+                        type="text"
+                        value={catalogCellValue('materialFamily', child.id, 'name', child.name)}
+                        disabled={saving && catalogSavingKey === catalogCellKey('materialFamily', child.id, 'name')}
+                        onfocus={() => beginCatalogEdit('materialFamily', child.id, 'name', child.name)}
+                        oninput={(e) => setCatalogEditValue('materialFamily', child.id, 'name', e.currentTarget.value)}
+                        onblur={commitCatalogEdit}
+                        onkeydown={onCatalogEditKeydown}
+                        aria-label={`Unterfamilie ${child.name}`}
+                      />
+                    </td>
+                    <td class="col-actions">
+                      <button type="button" class="btn-icon danger" title="Löschen" aria-label="Unterfamilie löschen" disabled={saving} onclick={() => deleteCatalogFamily('material', child)}>✕</button>
+                    </td>
+                  </tr>
+                {/each}
+                <tr class="catalog-new-row catalog-subfamily-row">
+                  <td>
+                    <input
+                      class="catalog-cell catalog-subfamily"
+                      type="text"
+                      value={catalogNewSubfamilyDrafts[subfamilyDraftKey('material', parent.id)] || ''}
+                      placeholder="Neue Unterfamilie…"
+                      disabled={saving && catalogSavingKey === `new:sub:${subfamilyDraftKey('material', parent.id)}`}
+                      oninput={(e) => (catalogNewSubfamilyDrafts = { ...catalogNewSubfamilyDrafts, [subfamilyDraftKey('material', parent.id)]: e.currentTarget.value })}
+                      onblur={() => commitNewSubfamily('material', parent.id)}
+                      onkeydown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          commitNewSubfamily('material', parent.id)
+                        }
+                      }}
+                      aria-label={`Neue Unterfamilie für ${parent.name}`}
+                    />
+                  </td>
+                  <td class="col-actions"></td>
+                </tr>
+              {:else}
+                <tr><td colspan="2" class="empty">Noch keine Materialfamilien.</td></tr>
+              {/each}
+              <tr class="catalog-new-row">
+                <td>
+                  <input
+                    class="catalog-cell"
+                    type="text"
+                    bind:value={catalogNewMaterialFamily}
+                    placeholder="Neue Elternfamilie…"
+                    disabled={saving && catalogSavingKey === 'new:materialFamily'}
+                    onblur={() => commitNewFamily('material')}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        commitNewFamily('material')
+                      }
+                    }}
+                    aria-label="Neue Materialfamilie"
+                  />
+                </td>
+                <td class="col-actions"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="catalog-block">
+        <h3>Produktfamilien</h3>
+        <p class="empty" style="margin-top:0">Elternfamilien und eine Ebene Unterfamilien. Am Artikel nur Auswahl.</p>
+        <div class="table-wrap catalog-table-wrap">
+          <table class="catalog-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th class="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each productFamilyCatalog.filter((f) => f.parent_id == null) as parent (parent.id)}
+                <tr>
+                  <td>
+                    <input
+                      class="catalog-cell"
+                      type="text"
+                      value={catalogCellValue('productFamily', parent.id, 'name', parent.name)}
+                      disabled={saving && catalogSavingKey === catalogCellKey('productFamily', parent.id, 'name')}
+                      onfocus={() => beginCatalogEdit('productFamily', parent.id, 'name', parent.name)}
+                      oninput={(e) => setCatalogEditValue('productFamily', parent.id, 'name', e.currentTarget.value)}
+                      onblur={commitCatalogEdit}
+                      onkeydown={onCatalogEditKeydown}
+                      aria-label={`Produktfamilie ${parent.name}`}
+                    />
+                  </td>
+                  <td class="col-actions">
+                    <button type="button" class="btn-icon danger" title="Löschen" aria-label="Familie löschen" disabled={saving} onclick={() => deleteCatalogFamily('product', parent)}>✕</button>
+                  </td>
+                </tr>
+                {#each productFamilyCatalog.filter((f) => Number(f.parent_id) === Number(parent.id)) as child (child.id)}
+                  <tr class="catalog-subfamily-row">
+                    <td>
+                      <input
+                        class="catalog-cell catalog-subfamily"
+                        type="text"
+                        value={catalogCellValue('productFamily', child.id, 'name', child.name)}
+                        disabled={saving && catalogSavingKey === catalogCellKey('productFamily', child.id, 'name')}
+                        onfocus={() => beginCatalogEdit('productFamily', child.id, 'name', child.name)}
+                        oninput={(e) => setCatalogEditValue('productFamily', child.id, 'name', e.currentTarget.value)}
+                        onblur={commitCatalogEdit}
+                        onkeydown={onCatalogEditKeydown}
+                        aria-label={`Unterfamilie ${child.name}`}
+                      />
+                    </td>
+                    <td class="col-actions">
+                      <button type="button" class="btn-icon danger" title="Löschen" aria-label="Unterfamilie löschen" disabled={saving} onclick={() => deleteCatalogFamily('product', child)}>✕</button>
+                    </td>
+                  </tr>
+                {/each}
+                <tr class="catalog-new-row catalog-subfamily-row">
+                  <td>
+                    <input
+                      class="catalog-cell catalog-subfamily"
+                      type="text"
+                      value={catalogNewSubfamilyDrafts[subfamilyDraftKey('product', parent.id)] || ''}
+                      placeholder="Neue Unterfamilie…"
+                      disabled={saving && catalogSavingKey === `new:sub:${subfamilyDraftKey('product', parent.id)}`}
+                      oninput={(e) => (catalogNewSubfamilyDrafts = { ...catalogNewSubfamilyDrafts, [subfamilyDraftKey('product', parent.id)]: e.currentTarget.value })}
+                      onblur={() => commitNewSubfamily('product', parent.id)}
+                      onkeydown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          commitNewSubfamily('product', parent.id)
+                        }
+                      }}
+                      aria-label={`Neue Unterfamilie für ${parent.name}`}
+                    />
+                  </td>
+                  <td class="col-actions"></td>
+                </tr>
+              {:else}
+                <tr><td colspan="2" class="empty">Noch keine Produktfamilien.</td></tr>
+              {/each}
+              <tr class="catalog-new-row">
+                <td>
+                  <input
+                    class="catalog-cell"
+                    type="text"
+                    bind:value={catalogNewProductFamily}
+                    placeholder="Neue Elternfamilie…"
+                    disabled={saving && catalogSavingKey === 'new:productFamily'}
+                    onblur={() => commitNewFamily('product')}
+                    onkeydown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        commitNewFamily('product')
+                      }
+                    }}
+                    aria-label="Neue Produktfamilie"
+                  />
+                </td>
+                <td class="col-actions"></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="catalog-block">
         <h3>Shops (Einkauf)</h3>
         <p class="empty" style="margin-top:0">Shops gruppieren Bezugsquellen. Domains werden beim Speichern einer Material-URL vorgeschlagen.</p>
         <div class="table-wrap catalog-table-wrap">
@@ -5673,11 +5978,13 @@
           </p>
         {/if}
         <label>Materialfamilie
-          <input list="material-family-suggestions" bind:value={materialForm.family} placeholder="optional" />
+          <select bind:value={materialForm.family_id}>
+            <option value="">Ohne Familie</option>
+            {#each materialFamilyOptions as opt}
+              <option value={opt.id}>{opt.indent ? '↳ ' : ''}{opt.label}</option>
+            {/each}
+          </select>
         </label>
-        <datalist id="material-family-suggestions">
-          {#each materialFamilies as f}<option value={f}></option>{/each}
-        </datalist>
         {#if materialModal.mode === 'edit'}
           <label class="tag-check">
             <input type="checkbox" bind:checked={materialForm.is_template} />
@@ -5707,7 +6014,14 @@
           <fieldset class="tag-picker">
             <legend>Tags</legend>
             {#each allTags as t}
-              {@const familyTaken = tagFullyOnFamily('material', materialForm.family, t.id)}
+              {@const familyTaken = tagFullyOnFamily(
+                'material',
+                materialFamilyOptions.find((o) => String(o.id) === String(materialForm.family_id))?.label ||
+                  materialFamilyCatalog.find((f) => String(f.id) === String(materialForm.family_id))?.parent_name ||
+                  materialFamilyCatalog.find((f) => String(f.id) === String(materialForm.family_id))?.name ||
+                  '',
+                t.id,
+              )}
               <label class="tag-check" class:tag-muted={familyTaken && !materialForm.tagIds.includes(t.id)}>
                 <input
                   type="checkbox"
@@ -5795,11 +6109,13 @@
           <input type="number" step="0.01" min="0" bind:value={productForm.selling_price} />
         </label>
         <label>Produktfamilie
-          <input list="product-family-suggestions" bind:value={productForm.family} placeholder="optional, z. B. Ring" />
+          <select bind:value={productForm.family_id}>
+            <option value="">Ohne Familie</option>
+            {#each productFamilyOptions as opt}
+              <option value={opt.id}>{opt.indent ? '↳ ' : ''}{opt.label}</option>
+            {/each}
+          </select>
         </label>
-        <datalist id="product-family-suggestions">
-          {#each productFamilies as f}<option value={f}></option>{/each}
-        </datalist>
         <label>Mindestbestand (optional)
           <input type="number" step={qtyStep(0)} min="0" bind:value={productForm.min_stock} placeholder="leer = keiner" />
         </label>
@@ -5835,7 +6151,14 @@
           <fieldset class="tag-picker">
             <legend>Tags</legend>
             {#each allTags as t}
-              {@const familyTaken = tagFullyOnFamily('product', productForm.family, t.id)}
+              {@const familyTaken = tagFullyOnFamily(
+                'product',
+                productFamilyOptions.find((o) => String(o.id) === String(productForm.family_id))?.label ||
+                  productFamilyCatalog.find((f) => String(f.id) === String(productForm.family_id))?.parent_name ||
+                  productFamilyCatalog.find((f) => String(f.id) === String(productForm.family_id))?.name ||
+                  '',
+                t.id,
+              )}
               <label class="tag-check" class:tag-muted={familyTaken && !productForm.tagIds.includes(t.id)}>
                 <input
                   type="checkbox"
@@ -6883,12 +7206,13 @@
           <section class="bulk-block">
             <h4 class="bulk-block-title">{bulkEditModal.kind === 'material' ? 'Materialfamilie' : 'Produktfamilie'}</h4>
             <div class="bulk-block-body">
-              <label class="bulk-field">Name setzen
-                <input
-                  bind:value={bulkEditForm.family}
-                  placeholder="leer = nicht ändern"
-                  disabled={bulkEditForm.clear_family}
-                />
+              <label class="bulk-field">Familie setzen
+                <select bind:value={bulkEditForm.family_id} disabled={bulkEditForm.clear_family}>
+                  <option value="">leer = nicht ändern</option>
+                  {#each (bulkEditModal.kind === 'material' ? materialFamilyOptions : productFamilyOptions) as opt}
+                    <option value={opt.id}>{opt.indent ? '↳ ' : ''}{opt.label}</option>
+                  {/each}
+                </select>
               </label>
               <label class="bulk-inline-check">
                 <input type="checkbox" bind:checked={bulkEditForm.clear_family} />

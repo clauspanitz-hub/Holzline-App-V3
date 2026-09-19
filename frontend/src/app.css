@@ -285,6 +285,16 @@ th {
   font-weight: 600;
 }
 
+.stock-table tr.group-subheader td {
+  background: color-mix(in srgb, var(--bg-soft) 65%, transparent);
+  font-weight: 500;
+}
+
+.group-toggle.sub {
+  font-weight: 500;
+  padding-left: 0.75rem;
+}
+
 .group-header-row {
   display: flex;
   align-items: center;
@@ -1343,6 +1353,11 @@ select {
 .catalog-new-row .catalog-cell {
   border-color: var(--line);
   background: var(--bg-soft);
+}
+
+.catalog-subfamily {
+  margin-left: 1rem;
+  width: calc(100% - 1rem);
 }
 
 .catalog-new-row .catalog-cell::placeholder {

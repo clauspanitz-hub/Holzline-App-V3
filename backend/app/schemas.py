@@ -44,6 +44,24 @@ class TagUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
 
 
+class FamilyCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    parent_id: int | None = None
+
+
+class FamilyUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+
+class FamilyRead(BaseModel):
+    id: int
+    name: str
+    parent_id: int | None = None
+    parent_name: str | None = None
+    is_parent: bool = True
+    child_count: int = 0
+
+
 class TagRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -125,6 +143,7 @@ class MaterialBase(BaseModel):
     reorder_quantity: Quantity | None = None
     alternatives_note: str | None = Field(default=None, max_length=1000)
     products_note: str | None = Field(default=None, max_length=1000)
+    family_id: int | None = None
     family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     decimal_places: int = Field(default=0, ge=0, le=3)
@@ -179,6 +198,7 @@ class MaterialUpdate(BaseModel):
     products_note: str | None = Field(default=None, max_length=1000)
     is_template: bool | None = None
     decimal_places: int | None = Field(default=None, ge=0, le=3)
+    family_id: int | None = None
     family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     tag_ids: list[int] | None = None
@@ -210,7 +230,10 @@ class MaterialRead(BaseModel):
     products_note: str | None = None
     is_template: bool = False
     decimal_places: int = 0
+    family_id: int | None = None
     family: str | None = None
+    family_parent_id: int | None = None
+    family_parent_name: str | None = None
     overview_ignored: bool = False
     color_id: int | None = None
     color: ColorRead | None = None
@@ -307,6 +330,7 @@ class ProductBase(BaseModel):
     selling_price: Money = Decimal("0")
     min_stock: Quantity | None = None
     is_template: bool = False
+    family_id: int | None = None
     family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     transform_target_id: int | None = None
@@ -342,6 +366,7 @@ class ProductUpdate(BaseModel):
     min_stock: Quantity | None = None
     is_template: bool | None = None
     is_on_demand: bool | None = None
+    family_id: int | None = None
     family: str | None = Field(default=None, max_length=200)
     color_id: int | None = None
     transform_target_id: int | None = None
@@ -375,7 +400,10 @@ class ProductRead(BaseModel):
     min_stock: Quantity | None = None
     is_template: bool = False
     is_on_demand: bool = False
+    family_id: int | None = None
     family: str | None = None
+    family_parent_id: int | None = None
+    family_parent_name: str | None = None
     overview_ignored: bool = False
     color_id: int | None = None
     color: ColorRead | None = None
@@ -764,6 +792,7 @@ class MaterialBulkUpdate(BaseModel):
     min_stock: Quantity | None = None
     clear_min_stock: bool = False
     tag_ids: list[int] | None = None
+    family_id: int | None = None
     family: str | None = Field(default=None, max_length=200)
     clear_family: bool = False
     is_template: bool | None = None
@@ -775,6 +804,7 @@ class ProductBulkUpdate(BaseModel):
     clear_min_stock: bool = False
     selling_price: Money | None = None
     tag_ids: list[int] | None = None
+    family_id: int | None = None
     family: str | None = Field(default=None, max_length=200)
     clear_family: bool = False
     is_template: bool | None = None

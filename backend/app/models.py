@@ -111,6 +111,54 @@ class Shop(Base):
     sources: Mapped[list["MaterialPurchaseSource"]] = relationship(back_populates="shop")
 
 
+class MaterialFamily(Base):
+    """Materialfamilien-Katalog: Elternfamilie oder eine Unterfamilie (ADR 0025)."""
+
+    __tablename__ = "material_families"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("material_families.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+
+    parent: Mapped["MaterialFamily | None"] = relationship(
+        remote_side="MaterialFamily.id",
+        back_populates="children",
+        foreign_keys=[parent_id],
+    )
+    children: Mapped[list["MaterialFamily"]] = relationship(
+        back_populates="parent",
+        foreign_keys=[parent_id],
+    )
+    materials: Mapped[list["Material"]] = relationship(back_populates="family_ref")
+
+
+class ProductFamily(Base):
+    """Produktfamilien-Katalog: Elternfamilie oder eine Unterfamilie (ADR 0025)."""
+
+    __tablename__ = "product_families"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("product_families.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+
+    parent: Mapped["ProductFamily | None"] = relationship(
+        remote_side="ProductFamily.id",
+        back_populates="children",
+        foreign_keys=[parent_id],
+    )
+    children: Mapped[list["ProductFamily"]] = relationship(
+        back_populates="parent",
+        foreign_keys=[parent_id],
+    )
+    products: Mapped[list["Product"]] = relationship(back_populates="family_ref")
+
+
 class Material(Base):
     __tablename__ = "materials"
 
@@ -128,6 +176,10 @@ class Material(Base):
     is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     decimal_places: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     family: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    family_id: Mapped[int | None] = mapped_column(
+        ForeignKey("material_families.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     overview_ignored: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     color_id: Mapped[int | None] = mapped_column(ForeignKey("colors.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -136,6 +188,7 @@ class Material(Base):
     updated_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     color: Mapped[Color | None] = relationship(back_populates="materials")
+    family_ref: Mapped[MaterialFamily | None] = relationship(back_populates="materials")
     tags: Mapped[list[Tag]] = relationship(secondary=material_tags)
     product_links: Mapped[list["ProductMaterial"]] = relationship(back_populates="material")
     stocks: Mapped[list["MaterialStock"]] = relationship(back_populates="material", cascade="all, delete-orphan")
@@ -171,6 +224,10 @@ class Product(Base):
     is_template: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_on_demand: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     family: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    family_id: Mapped[int | None] = mapped_column(
+        ForeignKey("product_families.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     overview_ignored: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     color_id: Mapped[int | None] = mapped_column(ForeignKey("colors.id", ondelete="SET NULL"), nullable=True)
     transform_target_id: Mapped[int | None] = mapped_column(
@@ -183,6 +240,7 @@ class Product(Base):
     updated_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     color: Mapped[Color | None] = relationship(back_populates="products")
+    family_ref: Mapped[ProductFamily | None] = relationship(back_populates="products")
     tags: Mapped[list[Tag]] = relationship(secondary=product_tags)
     transform_target: Mapped["Product | None"] = relationship(
         remote_side="Product.id",

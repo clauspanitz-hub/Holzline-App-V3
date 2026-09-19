@@ -1,4 +1,4 @@
-import { productFamilyKey } from './productFamily.js'
+import { itemMatchesFamilyFilter, productFamilyKey } from './productFamily.js'
 
 export function emptyCatalogFilter() {
   return {
@@ -73,7 +73,7 @@ export function itemMatchesCatalogFilter(item, filter, colors = [], media = []) 
     return false
   }
 
-  if (familySet.size && !familySet.has(productFamilyKey(item))) return false
+  if (familySet.size && !itemMatchesFamilyFilter(item, familySet)) return false
 
   if (tagIds.size) {
     const ids = (item.tags || []).map((t) => Number(t.id))
