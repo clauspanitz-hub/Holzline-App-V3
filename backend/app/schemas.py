@@ -883,7 +883,7 @@ class PurchaseTodosGenerateResult(BaseModel):
     created: int = 0
     skipped_existing: int = 0
     skipped_ignored: int = 0
-    deleted_stale: int = 0
+    completed_stale: int = 0
 
 
 class OrderLineRead(BaseModel):

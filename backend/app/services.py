@@ -1235,15 +1235,19 @@ def bulk_delete_materials(db: Session, payload: "BulkDeleteRequest") -> "BulkDel
     db.commit()
     return BulkDeleteResult(deleted_ids=deleted_ids, skipped=skipped)
 
+def _sync_purchase_todos_after_stock(db: Session, material_ids: set[int] | None = None) -> None:
+    from app.purchase_todos import sync_purchase_todos
+
+    sync_purchase_todos(db, material_ids=material_ids, create_missing=True)
+
+
 def adjust_material_stock(db: Session, material_id: int, payload: StockAdjustRequest) -> MaterialRead:
     _load_material(db, material_id)
     get_location(db, payload.location_id)
     row = _get_or_create_material_stock(db, material_id, payload.location_id)
     row.quantity = _q(payload.quantity)
     db.flush()
-    from app.purchase_todos import cleanup_stale_purchase_todos
-
-    cleanup_stale_purchase_todos(db)
+    _sync_purchase_todos_after_stock(db, {material_id})
     db.commit()
     return material_read(_load_material(db, material_id))
 
@@ -1254,9 +1258,7 @@ def delta_material_stock(db: Session, material_id: int, payload: StockDeltaReque
     row = _get_or_create_material_stock(db, material_id, payload.location_id)
     row.quantity = _q(Decimal(row.quantity) + Decimal(payload.delta))
     db.flush()
-    from app.purchase_todos import cleanup_stale_purchase_todos
-
-    cleanup_stale_purchase_todos(db)
+    _sync_purchase_todos_after_stock(db, {material_id})
     db.commit()
     return material_read(_load_material(db, material_id))
 
@@ -1281,9 +1283,7 @@ def transfer_material(db: Session, material_id: int, payload: TransferRequest) -
         note=payload.note,
     )
     db.flush()
-    from app.purchase_todos import cleanup_stale_purchase_todos
-
-    cleanup_stale_purchase_todos(db)
+    _sync_purchase_todos_after_stock(db, {material_id})
     db.commit()
     return material_read(_load_material(db, material_id))
 
@@ -1973,6 +1973,7 @@ def manufacture(db: Session, product_id: int, quantity: Decimal, location_id: in
     location = get_location(db, location_id) if location_id else default_location(db)
     qty = _q(quantity)
     warnings: list[str] = []
+    affected_materials: set[int] = set()
 
     product_stock = _get_or_create_product_stock(db, product.id, location.id)
     product_stock.quantity = _q(Decimal(product_stock.quantity) + qty)
@@ -1990,6 +1991,7 @@ def manufacture(db: Session, product_id: int, quantity: Decimal, location_id: in
                     f"(Bestand {new_stock} {unit} nach Abbuchung von {needed})."
                 )
             mat_stock.quantity = new_stock
+            affected_materials.add(line.material_id)
         elif line.component_product_id is not None:
             comp_stock = _get_or_create_product_stock(db, line.component_product_id, location.id)
             new_stock = _q(Decimal(comp_stock.quantity) - needed)
@@ -2005,6 +2007,9 @@ def manufacture(db: Session, product_id: int, quantity: Decimal, location_id: in
                 )
             comp_stock.quantity = new_stock
 
+    db.flush()
+    if affected_materials:
+        _sync_purchase_todos_after_stock(db, affected_materials)
     db.commit()
     refreshed = _load_product(db, product.id)
     if _product_stock_total(refreshed) < 0:
@@ -2044,6 +2049,7 @@ def assemble_variant(
     qty = _q(quantity)
     warnings: list[str] = []
     bom_preview: list[AssembleBomPreview] = []
+    affected_materials: set[int] = set()
 
     for line in variant.bom_lines:
         needed = _q(qty * Decimal(line.quantity_required))
@@ -2060,6 +2066,7 @@ def assemble_variant(
                     f"(Bestand {new_stock}{(' ' + unit) if unit else ''} nach Abbuchung von {needed})."
                 )
             mat_stock.quantity = new_stock
+            affected_materials.add(line.material_id)
             bom_preview.append(
                 AssembleBomPreview(
                     kind="material",
@@ -2089,9 +2096,9 @@ def assemble_variant(
                 )
             )
 
-    from app.purchase_todos import cleanup_stale_purchase_todos
-
-    cleanup_stale_purchase_todos(db)
+    db.flush()
+    if affected_materials:
+        _sync_purchase_todos_after_stock(db, affected_materials)
     db.commit()
     set_name = variant.product_set.name if variant.product_set else "Set"
     return AssembleResult(
@@ -3461,10 +3468,11 @@ def list_todos(
     category: str | None = None,
     status: str | None = None,
 ) -> list["TodoRead"]:
-    from app.purchase_todos import cleanup_stale_purchase_todos
+    from app.purchase_todos import sync_purchase_todos
 
-    deleted = cleanup_stale_purchase_todos(db)
-    if deleted:
+    # Beim Listenöffnen nur veraltete erledigen; Anlegen bleibt Bestandsänderung + Knopf.
+    result = sync_purchase_todos(db, create_missing=False)
+    if result["completed_stale"]:
         db.commit()
     stmt = (
         select(WorkTodo)
