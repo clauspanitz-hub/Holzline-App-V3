@@ -81,11 +81,11 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Prüfung: Produkt erzeugen / Auf Liste; Status an offene Todos; Hinweis (ADR `0015`)
 - [x] Übersicht: Tageslage (Kennzahlen + Gemini-Text/Spruch/Nächste Schritte, Tages-Cache; ADR `0016`)
 - [x] Etsy-Mail + Gemini (IMAP-Warteschlange, seltener Auto-Fetch, Parse-Knopf; ADR `0018`) → **zur Prüfung**; Etsy-API falls/wenn Freigabe; kein CSV-Bestellexport
-- [x] Einkauf-Todos aus Mindestbestand (Knopf, nur Materialien; ADR `0019`)
+- [x] Einkauf-Todos aus Mindestbestand (Knopf + Auto erledigen/neu bei Bestand; ADR `0019`, `0023`)
 - [x] Zusammenstellen bei Set-Bestellung (Set-Variante an Position, Todo, Abbuchung; ADR `0020`)
 
 ### Phase 3: Optimierung & Einkauf — Umgesetzt
-- [x] Einkaufsliste aus fehlenden Materialien (Todo-Art Einkauf; umgesetzt als Einkauf-Todos aus Mindestbestand, ADR `0019`)
+- [x] Einkaufsliste aus fehlenden Materialien (Todo-Art Einkauf; ADR `0019`/`0023`)
 - [x] Einkaufsquellen + Alternativen am Material (ADR `0021`)
 - [x] Mindestbestand je Material/Produkt → Warnungen in Übersicht (vorgezogen in 1.5)
 
@@ -97,5 +97,6 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - Sets haben keinen Lagerbestand; Zusammenstellen bei Bestellung = Phase 2 (Bestellungen).
 - Fertigen erhöht Produktbestand an einem gewählten Standort, Materialabbuchung an gewähltem/selben Standort (Start: ein Standort pro Buchung).
 - Baubare Sets aus Summe der Standorte ohne Ausschuss (ADR `0003`, `0006`).
+- Einkauf-Todos (nur Materialien): bei Bestandsänderung erledigen wenn Mindestbestand erfüllt (ohne Ausschuss); bei erneuter Unterschreitung neues offenes Todo (ADR `0023`).
 - Umwandlung: Bestand Quellprodukt → Zielprodukt am selben Standort, ohne Materialabbuchung (ADR `0006`).
 - Material ohne Varianten-System; unterschiedliche Ausbeuten nur über Produkt-Stücklisten-Mengen.

@@ -856,7 +856,7 @@
       if (result.created) parts.push(`${result.created} neu`)
       if (result.skipped_existing) parts.push(`${result.skipped_existing} schon offen`)
       if (result.skipped_ignored && !includeIgnored) parts.push(`${result.skipped_ignored} ignoriert übersprungen`)
-      if (result.deleted_stale) parts.push(`${result.deleted_stale} veraltet entfernt`)
+      if (result.completed_stale) parts.push(`${result.completed_stale} erledigt (Mindestbestand ok)`)
       showFlash('ok', parts.length ? `Einkauf-Todos: ${parts.join(', ')}.` : 'Keine neuen Einkauf-Todos.')
       if (result.created) {
         todoCategoryFilter = 'purchase'

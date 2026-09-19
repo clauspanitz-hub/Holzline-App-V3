@@ -1,13 +1,15 @@
-"""Einkauf-Todos aus kritischem Materialbestand (ADR 0019)."""
+"""Einkauf-Todos aus kritischem Materialbestand (ADR 0019, 0023)."""
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.models import Material, WorkTodo
+from app.database import AUSSCHUSS_LOCATION_NAME
+from app.models import Material, MaterialStock, WorkTodo
 
 
 def _q(value: Decimal | float | int | str | None) -> Decimal:
@@ -16,16 +18,32 @@ def _q(value: Decimal | float | int | str | None) -> Decimal:
     return Decimal(str(value)).quantize(Decimal("0.001"))
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def material_stock_total(material: Material) -> Decimal:
+    """Summe aller Standorte inkl. Ausschuss (Anzeige/Legacy)."""
     return sum((_q(s.quantity) for s in material.stocks), Decimal("0"))
 
 
+def material_stock_available(material: Material) -> Decimal:
+    """Summe der Bestände ohne Ausschuss — maßgeblich für Einkauf-Todos."""
+    total = Decimal("0")
+    for stock in material.stocks:
+        location = getattr(stock, "location", None)
+        if location is not None and getattr(location, "name", None) == AUSSCHUSS_LOCATION_NAME:
+            continue
+        total += _q(stock.quantity)
+    return total
+
+
 def is_material_critical(material: Material) -> bool:
-    total = material_stock_total(material)
-    if total <= 0:
+    available = material_stock_available(material)
+    if available <= 0:
         return True
     min_stock = getattr(material, "min_stock", None)
-    if min_stock is not None and total < _q(min_stock):
+    if min_stock is not None and available < _q(min_stock):
         return True
     return False
 
@@ -52,51 +70,89 @@ def _open_purchase_todos(db: Session, material_id: int | None = None) -> list[Wo
     return list(db.scalars(stmt).all())
 
 
-def cleanup_stale_purchase_todos(db: Session) -> int:
-    """Löscht offene Einkauf-Todos, wenn das Material fehlt oder nicht mehr kritisch ist."""
-    todos = (
-        db.scalars(
-            select(WorkTodo)
-            .where(
-                WorkTodo.kind == "purchase",
-                WorkTodo.category == "purchase",
-                WorkTodo.status == "open",
-            )
-            .options(selectinload(WorkTodo.material).selectinload(Material.stocks))
-        )
-        .unique()
-        .all()
+def _materials_with_stocks(db: Session, material_ids: set[int] | None = None) -> list[Material]:
+    stmt = select(Material).options(
+        selectinload(Material.stocks).selectinload(MaterialStock.location)
     )
-    deleted = 0
-    for todo in todos:
-        material = todo.material
-        if material is None or not is_material_critical(material):
-            db.delete(todo)
-            deleted += 1
-    if deleted:
-        db.flush()
-    return deleted
+    if material_ids is not None:
+        if not material_ids:
+            return []
+        stmt = stmt.where(Material.id.in_(material_ids))
+    return list(db.scalars(stmt).unique().all())
 
 
-def generate_purchase_todos(db: Session, *, include_ignored: bool = False) -> dict[str, int]:
-    """Legt offene Einkauf-Todos für kritische Materialien an (höchstens eines pro Material)."""
-    deleted_stale = cleanup_stale_purchase_todos(db)
-    materials = db.scalars(select(Material).options(selectinload(Material.stocks))).unique().all()
-    existing = {
-        t.material_id
-        for t in _open_purchase_todos(db)
-        if t.material_id is not None
-    }
+def _complete_todo(todo: WorkTodo) -> None:
+    todo.status = "done"
+    todo.completed_at = _utcnow()
+
+
+def sync_purchase_todos(
+    db: Session,
+    *,
+    material_ids: set[int] | None = None,
+    include_ignored: bool = False,
+    create_missing: bool = True,
+) -> dict[str, int]:
+    """Erledigt offene Einkauf-Todos bei erfülltem Mindestbestand; legt bei Unterschreitung neue an.
+
+    - Erledigt (nicht löschen), wenn Material fehlt oder nicht mehr kritisch.
+    - Neues offenes Todo, wenn kritisch und keines offen (max. eines offen pro Material).
+    - Altes erledigtes Todo bleibt stehen.
+    - ``material_ids`` begrenzt auf betroffene Materialien (Bestandsänderung); ``None`` = alle.
+    """
+    completed_stale = 0
     created = 0
     skipped_existing = 0
     skipped_ignored = 0
+
+    open_stmt = (
+        select(WorkTodo)
+        .where(
+            WorkTodo.kind == "purchase",
+            WorkTodo.category == "purchase",
+            WorkTodo.status == "open",
+        )
+        .options(selectinload(WorkTodo.material).selectinload(Material.stocks).selectinload(MaterialStock.location))
+    )
+    if material_ids is not None:
+        open_stmt = open_stmt.where(
+            (WorkTodo.material_id.in_(material_ids)) | (WorkTodo.material_id.is_(None))
+        )
+
+    open_todos = list(db.scalars(open_stmt).unique().all())
+    for todo in open_todos:
+        material = todo.material
+        if material is None or not is_material_critical(material):
+            _complete_todo(todo)
+            completed_stale += 1
+
+    if completed_stale:
+        db.flush()
+
+    if not create_missing:
+        return {
+            "created": 0,
+            "skipped_existing": 0,
+            "skipped_ignored": 0,
+            "completed_stale": completed_stale,
+        }
+
+    materials = _materials_with_stocks(db, material_ids)
+    existing_open: set[int] = set()
+    for todo in _open_purchase_todos(db):
+        if todo.material_id is None:
+            continue
+        if material_ids is not None and todo.material_id not in material_ids:
+            continue
+        existing_open.add(todo.material_id)
+
     for material in materials:
         if not is_material_critical(material):
             continue
         if bool(getattr(material, "overview_ignored", False)) and not include_ignored:
             skipped_ignored += 1
             continue
-        if material.id in existing:
+        if material.id in existing_open:
             skipped_existing += 1
             continue
         qty = suggested_purchase_quantity(material)
@@ -113,12 +169,27 @@ def generate_purchase_todos(db: Session, *, include_ignored: bool = False) -> di
                 material_id=material.id,
             )
         )
-        existing.add(material.id)
+        existing_open.add(material.id)
         created += 1
-    db.commit()
+
+    if created or completed_stale:
+        db.flush()
+
     return {
         "created": created,
         "skipped_existing": skipped_existing,
         "skipped_ignored": skipped_ignored,
-        "deleted_stale": deleted_stale,
+        "completed_stale": completed_stale,
     }
+
+
+def cleanup_stale_purchase_todos(db: Session) -> int:
+    """Legacy-Alias: erledigt veraltete offene Einkauf-Todos (früher: löschen)."""
+    return sync_purchase_todos(db, create_missing=False)["completed_stale"]
+
+
+def generate_purchase_todos(db: Session, *, include_ignored: bool = False) -> dict[str, int]:
+    """Bulk-Hilfe: Sync für alle Materialien (Knopf „Einkauf-Todos erzeugen“)."""
+    result = sync_purchase_todos(db, include_ignored=include_ignored, create_missing=True)
+    db.commit()
+    return result
