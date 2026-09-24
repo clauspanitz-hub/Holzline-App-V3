@@ -805,9 +805,10 @@ table .row-actions .btn {
   padding: 0.55rem 0.65rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--field-bg);
-  color: var(--field-ink);
+  background: #ffffff !important;
+  color: #1a1f1c !important;
   text-align: left;
+  color-scheme: light only;
 }
 
 .family-select-trigger span:not(.family-select-caret) {
