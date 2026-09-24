@@ -1,5 +1,5 @@
 :root {
-  /* Holzlinge Shop-Ableitung: Sage / Waldgrün / Soft-Blau */
+  /* Holzlinge Shop-Ableitung: Sage / Waldgrün / Soft-Blau — heller Kontrast */
   --sage: #bbd5cb;
   --forest: #3f5147;
   --sky: #71a1b9;
@@ -8,15 +8,20 @@
   --bg: #f4f7f5;
   --bg-elevated: #ffffff;
   --bg-soft: #e4efe9;
-  --ink: #222222;
-  --muted: #5c6b63;
-  --line: #c9d8d0;
+  --ink: #1a1f1c;
+  /* Sekundärtext: AA auf Weiß (~7:1), nicht das blasse Dunkelmodus-Muted */
+  --muted: #3d4f46;
+  --line: #b7c9bf;
   --accent: var(--forest);
   --accent-ink: #ffffff;
   --accent-soft: var(--sky);
-  --danger: #b85c45;
-  --danger-bg: rgba(184, 92, 69, 0.12);
-  --ok: #3f7a58;
+  --danger: #8f3a28;
+  --danger-bg: #f8e8e3;
+  --ok: #245c3a;
+  --ok-bg: #e5f2ea;
+  --warn-bg: #e7f1f6;
+  --field-bg: #ffffff;
+  --field-ink: var(--ink);
   --radius: 14px;
   --radius-pill: 999px;
   --shadow: 0 10px 28px rgba(63, 81, 71, 0.08);
@@ -285,8 +290,8 @@ button {
 
 .chip {
   border: 1px solid var(--line);
-  background: var(--bg-elevated);
-  color: var(--ink);
+  background: var(--field-bg);
+  color: var(--field-ink);
   padding: 0.4rem 0.85rem;
   border-radius: var(--radius-pill);
   font-weight: 600;
@@ -643,7 +648,8 @@ table .row-actions .btn {
   padding: 0.75rem 0.9rem;
   border-radius: var(--radius);
   border: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--bg-elevated);
+  color: var(--ink);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   white-space: pre-wrap;
 }
@@ -700,20 +706,20 @@ table .row-actions .btn {
 }
 
 .flash.error {
-  border-color: color-mix(in srgb, var(--danger) 55%, var(--line));
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
   background: var(--danger-bg);
   color: var(--danger);
 }
 
 .flash.warn {
   border-color: color-mix(in srgb, var(--sky) 45%, var(--line));
-  background: color-mix(in srgb, var(--sky) 14%, transparent);
+  background: var(--warn-bg);
   color: var(--forest);
 }
 
 .flash.ok {
-  border-color: color-mix(in srgb, var(--ok) 45%, var(--line));
-  background: color-mix(in srgb, var(--ok) 10%, transparent);
+  border-color: color-mix(in srgb, var(--ok) 40%, var(--line));
+  background: var(--ok-bg);
   color: var(--ok);
 }
 
@@ -799,8 +805,8 @@ table .row-actions .btn {
   padding: 0.55rem 0.65rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--bg-elevated);
-  color: var(--ink);
+  background: var(--field-bg);
+  color: var(--field-ink);
   text-align: left;
 }
 
@@ -835,8 +841,8 @@ table .row-actions .btn {
   padding: 0.4rem 0.55rem;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: var(--bg-soft);
-  color: var(--ink);
+  background: var(--field-bg);
+  color: var(--field-ink);
 }
 
 .family-select-group,
@@ -905,8 +911,8 @@ table .row-actions .btn {
 }
 
 .bulk-block-danger {
-  border-color: color-mix(in srgb, var(--danger, #c45c5c) 45%, var(--line));
-  background: color-mix(in srgb, var(--danger, #c45c5c) 12%, var(--bg-elevated));
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  background: var(--danger-bg);
 }
 
 .bulk-block-title {
@@ -987,11 +993,28 @@ select,
 textarea {
   width: 100%;
   border: 1px solid var(--line);
-  background: #ffffff;
-  color: var(--ink);
+  background: var(--field-bg);
+  color: var(--field-ink);
   border-radius: 8px;
   padding: 0.55rem 0.65rem;
   color-scheme: light;
+  caret-color: var(--field-ink);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  accent-color: var(--forest);
+}
+
+input[type="color"] {
+  padding: 0.15rem;
+  min-height: 2.2rem;
+}
+
+option {
+  background: var(--field-bg);
+  color: var(--field-ink);
 }
 
 input::placeholder,
@@ -1014,8 +1037,8 @@ input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
 select:-webkit-autofill,
 textarea:-webkit-autofill {
-  -webkit-text-fill-color: var(--ink);
-  box-shadow: 0 0 0 1000px #ffffff inset;
+  -webkit-text-fill-color: var(--field-ink);
+  box-shadow: 0 0 0 1000px var(--field-bg) inset;
   transition: background-color 99999s ease-out;
 }
 
@@ -1113,7 +1136,7 @@ textarea:-webkit-autofill {
 
 .wizard-step {
   border: 1px solid var(--line);
-  background: transparent;
+  background: var(--field-bg);
   color: var(--muted);
   padding: 0.45rem 0.7rem;
   border-radius: 999px;
@@ -1211,8 +1234,8 @@ textarea:-webkit-autofill {
 
 .chip {
   border: 1px solid var(--line);
-  background: var(--bg-soft);
-  color: var(--ink);
+  background: var(--field-bg);
+  color: var(--field-ink);
   border-radius: 999px;
   padding: 0.3rem 0.7rem;
   font-size: 0.85rem;
@@ -1270,8 +1293,8 @@ textarea:-webkit-autofill {
   width: 100%;
   text-align: left;
   border: 1px solid var(--line);
-  background: var(--bg-soft);
-  color: var(--ink);
+  background: var(--field-bg);
+  color: var(--field-ink);
   padding: 0.32rem 0.5rem;
   border-radius: 6px;
   font: inherit;
@@ -1310,8 +1333,8 @@ textarea:-webkit-autofill {
 
 .catalog-filter-search input {
   width: 100%;
-  background: var(--bg-soft);
-  color: var(--ink);
+  background: var(--field-bg);
+  color: var(--field-ink);
   border: 1px solid var(--line);
 }
 
@@ -1710,7 +1733,7 @@ textarea:-webkit-autofill {
 .tageslage-quote {
   margin: 0;
   padding: 0.65rem 0.9rem;
-  border-left: 3px solid var(--accent, #c45c26);
+  border-left: 3px solid var(--accent);
   color: var(--muted);
   font-style: italic;
   max-width: 40rem;
