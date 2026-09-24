@@ -152,7 +152,8 @@ Dauerhaft im Repo:
 
 | Tag / Branch | Bedeutung |
 |--------------|-----------|
-| **`ui-v1`** / Branch `ui-redesign` | Redesign Slice 1 (Shell, Theme, Todos) |
+| **`ui-v1.1`** / Branch `ui-redesign` / `main` | Redesign + Kontrast app-weit (aktuell) |
+| **`ui-v1`** | Slice 1 vor Kontrast-Pass (Tag fest; GitHub ließ Update nicht zu) |
 | **`ui-classic`** | UI **vor** dem Redesign |
 
 **UI v1 deployen (CT 131):**
@@ -160,7 +161,7 @@ Dauerhaft im Repo:
 ```bash
 cd /opt/holzlinge-inventar
 git fetch --tags origin
-git checkout ui-v1          # oder: git checkout ui-redesign
+git checkout ui-v1.1          # oder: git checkout ui-redesign / main
 docker compose build --no-cache
 docker compose up -d --force-recreate
 ```
