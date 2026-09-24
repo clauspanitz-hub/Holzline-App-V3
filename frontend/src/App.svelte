@@ -1008,6 +1008,11 @@
       const result = await api.orders.syncShopify()
       loadedBuckets.orders = false
       await refresh()
+      const hardFail = result.errors?.length && !result.created && !result.claimed
+      if (hardFail) {
+        showFlash('error', result.errors[0])
+        return
+      }
       const bits = []
       if (result.created) bits.push(`${result.created} neu`)
       if (result.claimed) bits.push(`${result.claimed} übernommen`)
@@ -1020,7 +1025,7 @@
       )
       if (result.errors?.length) showFlash('error', result.errors[0])
     } catch (error) {
-      showFlash('error', error.message)
+      showFlash('error', error.message || 'Shopify-Abruf fehlgeschlagen')
     } finally {
       saving = false
     }

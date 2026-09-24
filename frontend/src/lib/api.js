@@ -1,3 +1,21 @@
+/** @param {unknown} data @param {Response} response @param {string} fallback */
+function messageFromFailedResponse(data, response, fallback = 'Anfrage fehlgeschlagen') {
+  if (Array.isArray(data?.detail)) {
+    const joined = data.detail.map((item) => item.msg || JSON.stringify(item)).join(', ')
+    if (joined) return joined
+  }
+  if (typeof data?.detail === 'string' && data.detail.trim()) {
+    return data.detail.trim()
+  }
+  if (typeof data === 'string' && data.trim()) {
+    const stripped = data.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    if (stripped) return stripped.slice(0, 220)
+  }
+  if (response.statusText) return response.statusText
+  if (response.status) return `${fallback} (HTTP ${response.status})`
+  return fallback
+}
+
 async function request(path, options = {}) {
   const headers = { ...(options.headers || {}) }
   if (options.body && !(options.body instanceof FormData)) {
@@ -18,11 +36,7 @@ async function request(path, options = {}) {
   }
 
   if (!response.ok) {
-    const err = new Error(
-      Array.isArray(data?.detail)
-        ? data.detail.map((item) => item.msg || JSON.stringify(item)).join(', ')
-        : data?.detail || response.statusText || 'Anfrage fehlgeschlagen',
-    )
+    const err = new Error(messageFromFailedResponse(data, response))
     err.status = response.status
     throw err
   }
@@ -172,11 +186,7 @@ export const api = {
         }
       }
       if (!response.ok) {
-        const detail = data?.detail
-        const message = Array.isArray(detail)
-          ? detail.map((item) => item.msg || JSON.stringify(item)).join(', ')
-          : detail || response.statusText || 'Export fehlgeschlagen'
-        throw new Error(message)
+        throw new Error(messageFromFailedResponse(data, response, 'Export fehlgeschlagen'))
       }
       return data
     },

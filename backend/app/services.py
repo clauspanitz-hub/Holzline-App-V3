@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 from math import floor
+import logging
 import re
 
 from fastapi import HTTPException, status
@@ -82,6 +83,9 @@ from app.schemas import (
     TransferRequest,
     TransformRequest,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 def _q(value: Decimal) -> Decimal:
@@ -3482,15 +3486,27 @@ def import_shopify_orders(db: Session) -> "ShopifyOrderSyncResult":
             status_code=400,
             detail="Shopify nicht konfiguriert (SHOPIFY_STORE, SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET)",
         )
-    result = sync_shopify_orders(db)
-    from app.gemini_suggest import suggest_unmatched_shop_lines
+    try:
+        result = sync_shopify_orders(db)
+        from app.gemini_suggest import suggest_unmatched_shop_lines
 
-    suggested, gemini_error = suggest_unmatched_shop_lines(db, origin="shopify")
-    result["suggested"] = suggested
-    if gemini_error:
-        result.setdefault("errors", []).append(gemini_error)
-    db.commit()
-    return ShopifyOrderSyncResult.model_validate(result)
+        suggested, gemini_error = suggest_unmatched_shop_lines(db, origin="shopify")
+        result["suggested"] = suggested
+        if gemini_error:
+            result.setdefault("errors", []).append(gemini_error)
+        db.commit()
+        return ShopifyOrderSyncResult.model_validate(result)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Unerwartete Sync-Fehler (z. B. früher TypeError) als Klartext ins Toast,
+        # nicht als generisches FastAPI „Internal Server Error“ ohne nutzbares detail.
+        db.rollback()
+        log.exception("Shopify-Sync fehlgeschlagen")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Shopify-Sync fehlgeschlagen: {exc}",
+        ) from exc
 
 
 def list_etsy_mails(db: Session) -> list["IncomingMailRead"]:
