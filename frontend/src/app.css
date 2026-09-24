@@ -831,7 +831,9 @@ table .row-actions .btn {
   padding: 0.35rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--bg-elevated);
+  background: var(--field-bg);
+  color: var(--field-ink);
+  color-scheme: light;
   box-shadow: var(--shadow);
 }
 
@@ -843,6 +845,7 @@ table .row-actions .btn {
   border-radius: 6px;
   background: var(--field-bg);
   color: var(--field-ink);
+  color-scheme: light;
 }
 
 .family-select-group,
@@ -855,7 +858,7 @@ table .row-actions .btn {
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: inherit;
+  color: var(--field-ink);
   text-align: left;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -994,11 +997,38 @@ textarea {
   width: 100%;
   border: 1px solid var(--line);
   background: var(--field-bg);
+  background-color: #ffffff;
   color: var(--field-ink);
   border-radius: 8px;
   padding: 0.55rem 0.65rem;
-  color-scheme: light;
+  color-scheme: light only;
   caret-color: var(--field-ink);
+}
+
+/* Gegen OS-/Browser-Dark-Mode und alte Bundle-Reste in Modals */
+.modal input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+.modal select,
+.modal textarea,
+.modal .family-select-trigger,
+.modal .family-select-search {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  color: #1a1f1c !important;
+  color-scheme: light only;
+  -webkit-text-fill-color: #1a1f1c;
+}
+
+.modal .family-select-panel,
+.modal .family-select-option,
+.modal .family-select-group {
+  background-color: #ffffff;
+  color: #1a1f1c !important;
+}
+
+.modal .family-select-option.selected,
+.modal .family-select-option:hover,
+.modal .family-select-group:hover {
+  background-color: #e4efe9 !important;
 }
 
 input[type="checkbox"],
