@@ -14,9 +14,11 @@
   import FilterBar from './lib/components/FilterBar.svelte'
   import ExtraGapPanels from './lib/components/ExtraGapPanels.svelte'
   import ToastStack from './lib/components/ToastStack.svelte'
+  import AppNav from './lib/components/AppNav.svelte'
   import { applyCatalogFilter, applyNegativeStockFilter, emptyCatalogFilter } from './lib/catalogFilter.js'
 
-  let tab = $state('overview')
+  let tab = $state('todos')
+  let navOpen = $state(false)
   let authUser = $state(null)
   let authChecked = $state(false)
   let loginForm = $state({ username: '', password: '' })
@@ -1699,8 +1701,25 @@
 
   async function selectTab(next) {
     tab = next
+    navOpen = false
     await ensureTabData({ silent: true })
     if (next === 'overview') await loadTageslage()
+  }
+
+  function tabTitle() {
+    const labels = {
+      overview: 'Übersicht',
+      materials: 'Materialien',
+      products: 'Produkte',
+      orders: 'Bestellungen',
+      todos: 'Todos',
+      staff: 'Bei Mitarbeitern',
+      catalogs: 'Kataloge',
+      import: 'Import',
+      sets: 'Sets',
+      users: 'Benutzer',
+    }
+    return labels[tab] || 'Holzlinge'
   }
 
   async function ensureTabData({ silent = false } = {}) {
@@ -3940,50 +3959,40 @@
   )
 </script>
 
-<div class="app-shell">
-  {#if !authChecked || (loading && !authUser)}
-    <header class="brand">
-      <h1>Holzlinge</h1>
-    </header>
-  {:else if !authUser}
-    <header class="brand">
-      <h1>Holzlinge</h1>
-      <p>Inventar, Standorte, Stücklisten und baubare Sets.</p>
-    </header>
-  {:else}
-    <div class="app-chrome">
+<div class="app-shell" class:logged-in={!!authUser}>
+  {#if authUser}
+    <AppNav
+      {tab}
+      role={authUser.role}
+      username={authUser.username}
+      open={navOpen}
+      openTodos={openTodoCount()}
+      staffCount={staffQueueProducts.length}
+      importOpen={importQueueOpenCount()}
+      onSelect={selectTab}
+      onPassword={() => (passwordModal = true)}
+      onLogout={doLogout}
+      onClose={() => (navOpen = false)}
+    />
+  {/if}
+
+  <div class="app-main">
+    {#if !authChecked || (loading && !authUser)}
       <header class="brand">
         <h1>Holzlinge</h1>
-        <div class="auth-bar">
-          <span class="empty">{authUser.username}</span>
-          <button type="button" class="btn secondary compact" onclick={() => (passwordModal = true)}>Passwort</button>
-          <button type="button" class="btn secondary compact" onclick={doLogout}>Abmelden</button>
-        </div>
       </header>
-      <nav class="tabs" aria-label="Hauptnavigation">
-        {#if authUser.role === 'admin'}
-          <button class="tab" class:active={tab === 'overview'} onclick={() => selectTab('overview')}>Übersicht</button>
-          <button class="tab" class:active={tab === 'materials'} onclick={() => selectTab('materials')}>Materialien</button>
-          <button class="tab" class:active={tab === 'products'} onclick={() => selectTab('products')}>Produkte</button>
-          <button class="tab" class:active={tab === 'orders'} onclick={() => selectTab('orders')}>Bestellungen</button>
-          <button class="tab" class:active={tab === 'todos'} onclick={() => selectTab('todos')}>
-            Todos{#if openTodoCount()} ({openTodoCount()}){/if}
-          </button>
-          <button class="tab" class:active={tab === 'staff'} onclick={() => selectTab('staff')}>
-            Bei Mitarbeitern{#if staffQueueProducts.length} ({staffQueueProducts.length}){/if}
-          </button>
-          <button class="tab" class:active={tab === 'catalogs'} onclick={() => selectTab('catalogs')}>Kataloge</button>
-          <button class="tab" class:active={tab === 'import'} onclick={() => selectTab('import')}>
-            Import{#if importQueueOpenCount()} ({importQueueOpenCount()}){/if}
-          </button>
-          <button class="tab" class:active={tab === 'sets'} onclick={() => selectTab('sets')}>Sets</button>
-          <button class="tab" class:active={tab === 'users'} onclick={() => selectTab('users')}>Benutzer</button>
-        {:else}
-          <button class="tab" class:active={tab === 'staff'} onclick={() => selectTab('staff')}>
-            Bei Mitarbeitern{#if staffQueueProducts.length} ({staffQueueProducts.length}){/if}
-          </button>
-        {/if}
-      </nav>
+    {:else if !authUser}
+      <header class="brand">
+        <h1>Holzlinge</h1>
+        <p>Inventar, Standorte, Stücklisten und baubare Sets.</p>
+      </header>
+    {:else}
+      <div class="app-topbar">
+        <button type="button" class="nav-menu-btn" onclick={() => (navOpen = !navOpen)} aria-expanded={navOpen}>
+          Menü
+        </button>
+        <h2>{tabTitle()}</h2>
+      </div>
       {#if authUser.role === 'admin' && (tab === 'materials' || tab === 'products')}
         <FilterBar
           {media}
@@ -3994,8 +4003,7 @@
           bind:filter={catalogFilter}
         />
       {/if}
-    </div>
-  {/if}
+    {/if}
 
   <ToastStack {toasts} onDismiss={dismissToast} onGoTo={goToToastTarget} />
 
@@ -4046,24 +4054,26 @@
     </div>
     <div class="card-list mobile-only">
       {#each rows as todo}
-        <article class="card" class:empty={todo.status === 'done'}>
-          <h3>{todoKindLabel(todo.kind)}</h3>
-          <p>{todo.title}</p>
-          <p class="empty">{todo.order_label || (todo.order_id ? `#${todo.order_id}` : 'Mindestbestand')} · {formatQty(todo.quantity)}</p>
-          {#if todo.kind === 'purchase' && todo.preferred_source_url}
-            <div class="purchase-source-links">
-              <a
-                class="purchase-source-link"
-                href={todo.preferred_source_url}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {todo.preferred_shop_name || 'Zum Shop'}
-              </a>
-            </div>
-          {/if}
+        <article class="card action-card" class:empty={todo.status === 'done'}>
+          <div class="action-card-body">
+            <h3>{todoKindLabel(todo.kind)}</h3>
+            <p>{todo.title}</p>
+            <p class="empty">{todo.order_label || (todo.order_id ? `#${todo.order_id}` : 'Mindestbestand')} · {formatQty(todo.quantity)}</p>
+            {#if todo.kind === 'purchase' && todo.preferred_source_url}
+              <div class="purchase-source-links">
+                <a
+                  class="purchase-source-link"
+                  href={todo.preferred_source_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {todo.preferred_shop_name || 'Zum Shop'}
+                </a>
+              </div>
+            {/if}
+          </div>
           {#if todo.status === 'open'}
-            <div class="row-actions"><button type="button" class="btn" onclick={() => startTodo(todo)}>Los</button></div>
+            <button type="button" class="btn action-card-cta" onclick={() => startTodo(todo)}>Los</button>
           {/if}
         </article>
       {:else}
@@ -5061,7 +5071,7 @@
       {/if}
     </section>
   {:else if tab === 'todos'}
-    <section class="panel">
+    <section class="panel todos-panel">
       <div class="panel-header">
         <h2>Todos</h2>
         <button type="button" class="btn secondary" disabled={saving} onclick={() => generatePurchaseTodos()}>
@@ -5069,23 +5079,17 @@
         </button>
       </div>
       <p class="empty" style="margin-top:0">
-        Werkstatt zuerst. Einkauf-Todos für kritische Materialien per Knopf — höchstens eines offen pro Material.
+        Werkstatt zuerst. Tippen → Aktion. Einkauf-Todos für kritische Materialien per Knopf.
       </p>
-      <div class="filter-bar form-grid">
-        <label>Art
-          <select bind:value={todoCategoryFilter}>
-            <option value="workshop">Werkstatt</option>
-            <option value="purchase">Einkauf</option>
-            <option value="all">Alle</option>
-          </select>
-        </label>
-        <label>Status
-          <select bind:value={todoStatusFilter}>
-            <option value="open">Offen</option>
-            <option value="done">Erledigt</option>
-            <option value="all">Alle</option>
-          </select>
-        </label>
+      <div class="chip-row" role="group" aria-label="Todo-Art">
+        <button type="button" class="chip" class:active={todoCategoryFilter === 'workshop'} onclick={() => (todoCategoryFilter = 'workshop')}>Werkstatt</button>
+        <button type="button" class="chip" class:active={todoCategoryFilter === 'purchase'} onclick={() => (todoCategoryFilter = 'purchase')}>Einkauf</button>
+        <button type="button" class="chip" class:active={todoCategoryFilter === 'all'} onclick={() => (todoCategoryFilter = 'all')}>Alle Arten</button>
+      </div>
+      <div class="chip-row" role="group" aria-label="Todo-Status">
+        <button type="button" class="chip" class:active={todoStatusFilter === 'open'} onclick={() => (todoStatusFilter = 'open')}>Offen</button>
+        <button type="button" class="chip" class:active={todoStatusFilter === 'done'} onclick={() => (todoStatusFilter = 'done')}>Erledigt</button>
+        <button type="button" class="chip" class:active={todoStatusFilter === 'all'} onclick={() => (todoStatusFilter = 'all')}>Jeder Status</button>
       </div>
       {@render todosMarkup(displayedTodos(), todoCategoryFilter === 'purchase' ? 'Keine offenen Einkauf-Todos.' : 'Keine Todos.')}
     </section>
@@ -5859,6 +5863,7 @@
     </section>
   {/if}
   {/if}
+  </div>
 </div>
 
 {#if passwordModal}
