@@ -33,6 +33,7 @@ html,
 body {
   margin: 0;
   min-height: 100%;
+  color-scheme: light;
   background:
     radial-gradient(ellipse at top right, rgba(187, 213, 203, 0.55), transparent 42%),
     linear-gradient(165deg, var(--creme) 0%, var(--bg) 48%, #e8f0eb 100%);
@@ -798,7 +799,7 @@ table .row-actions .btn {
   padding: 0.55rem 0.65rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #1a221a;
+  background: var(--bg-elevated);
   color: var(--ink);
   text-align: left;
 }
@@ -982,13 +983,40 @@ label {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   border: 1px solid var(--line);
-  background: #1a221a;
+  background: #ffffff;
   color: var(--ink);
   border-radius: 8px;
   padding: 0.55rem 0.65rem;
+  color-scheme: light;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid color-mix(in srgb, var(--sky) 55%, transparent);
+  outline-offset: 1px;
+  border-color: var(--sky);
+}
+
+/* Browser-Autofill nicht wieder dunkel einfärben */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+select:-webkit-autofill,
+textarea:-webkit-autofill {
+  -webkit-text-fill-color: var(--ink);
+  box-shadow: 0 0 0 1000px #ffffff inset;
+  transition: background-color 99999s ease-out;
 }
 
 .modal-actions {
