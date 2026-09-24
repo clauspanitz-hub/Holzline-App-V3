@@ -156,20 +156,18 @@ Dauerhaft im Repo:
 | **`ui-v1`** | Slice 1 vor Kontrast-Pass (Tag fest; GitHub ließ Update nicht zu) |
 | **`ui-classic`** | UI **vor** dem Redesign |
 
-**UI v1.1+ deployen (CT 131) — nicht Tag `ui-v1` (der ist veraltet):**
+**Aktuell deployen — Tag `ui-v1.3` (nicht `ui-v1`):**
 
 ```bash
 cd /opt/holzlinge-inventar
 git fetch --tags origin
-git checkout ui-v1.1          # oder: main / ui-redesign
-git log -1 --oneline          # muss fb34f6f oder neuer sein
+git checkout ui-v1.3
+git log -1 --oneline
 docker compose build --no-cache
 docker compose up -d --force-recreate
-# Prüfen: altes CSS darf #1a221a nicht mehr enthalten
-curl -s http://127.0.0.1:8000/ | grep -oE 'index-[^"]+\.css'
-# z. B. index-n9z5ZjNf.css — dann:
-# curl -s http://127.0.0.1:8000/assets/index-….css | grep -c 1a221a
-# → 0
+CSS=$(curl -s http://127.0.0.1:8000/ | grep -oE '/assets/index-[^"]+\.css' | head -1)
+echo "CSS=$CSS"
+curl -s "http://127.0.0.1:8000$CSS" | grep -c 1a221a   # muss 0 sein
 ```
 
 Browser danach **hart neu laden** (Cache leeren).

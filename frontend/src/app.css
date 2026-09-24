@@ -38,7 +38,7 @@ html,
 body {
   margin: 0;
   min-height: 100%;
-  color-scheme: light;
+  color-scheme: light only;
   background:
     radial-gradient(ellipse at top right, rgba(187, 213, 203, 0.55), transparent 42%),
     linear-gradient(165deg, var(--creme) 0%, var(--bg) 48%, #e8f0eb 100%);
@@ -805,9 +805,10 @@ table .row-actions .btn {
   padding: 0.55rem 0.65rem;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--field-bg);
-  color: var(--field-ink);
+  background: #ffffff !important;
+  color: #1a1f1c !important;
   text-align: left;
+  color-scheme: light only;
 }
 
 .family-select-trigger span:not(.family-select-caret) {
@@ -996,60 +997,78 @@ select,
 textarea {
   width: 100%;
   border: 1px solid var(--line);
-  background: var(--field-bg);
-  background-color: #ffffff;
-  color: var(--field-ink);
-  border-radius: 8px;
-  padding: 0.55rem 0.65rem;
-  color-scheme: light only;
-  caret-color: var(--field-ink);
-}
-
-/* Gegen OS-/Browser-Dark-Mode und alte Bundle-Reste in Modals */
-.modal input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
-.modal select,
-.modal textarea,
-.modal .family-select-trigger,
-.modal .family-select-search {
   background: #ffffff !important;
   background-color: #ffffff !important;
   color: #1a1f1c !important;
+  -webkit-text-fill-color: #1a1f1c;
+  border-radius: 8px;
+  padding: 0.55rem 0.65rem;
   color-scheme: light only;
+  caret-color: #1a1f1c;
+}
+
+/* Alle textartigen Steuerelemente — nicht nur Modal */
+.family-select-trigger,
+.family-select-search,
+.family-select-panel,
+.catalog-filter-trigger,
+.catalog-filter-search input,
+.chip:not(.active):not(.on):not([aria-pressed="true"]),
+.wizard-step:not(.active) {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  color: #1a1f1c !important;
+  -webkit-text-fill-color: #1a1f1c;
+  color-scheme: light only;
+}
+
+.family-select-option,
+.family-select-group {
+  background-color: transparent !important;
+  color: #1a1f1c !important;
   -webkit-text-fill-color: #1a1f1c;
 }
 
-.modal .family-select-panel,
-.modal .family-select-option,
-.modal .family-select-group {
-  background-color: #ffffff;
+.family-select-option.selected,
+.family-select-option:hover,
+.family-select-group:hover {
+  background-color: #e4efe9 !important;
   color: #1a1f1c !important;
 }
 
-.modal .family-select-option.selected,
-.modal .family-select-option:hover,
-.modal .family-select-group:hover {
-  background-color: #e4efe9 !important;
+.family-select-empty,
+.family-select-option.empty-option,
+.family-select-group {
+  color: #3d4f46 !important;
+  -webkit-text-fill-color: #3d4f46;
 }
 
 input[type="checkbox"],
 input[type="radio"] {
   width: auto;
   accent-color: var(--forest);
+  background: initial !important;
+  background-color: initial !important;
+  color: initial !important;
+  -webkit-text-fill-color: initial;
 }
 
 input[type="color"] {
   padding: 0.15rem;
   min-height: 2.2rem;
+  color: initial !important;
+  -webkit-text-fill-color: initial;
 }
 
 option {
-  background: var(--field-bg);
-  color: var(--field-ink);
+  background: #ffffff !important;
+  color: #1a1f1c !important;
 }
 
 input::placeholder,
 textarea::placeholder {
-  color: var(--muted);
+  color: #3d4f46 !important;
+  -webkit-text-fill-color: #3d4f46;
   opacity: 1;
 }
 
@@ -1067,8 +1086,8 @@ input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
 select:-webkit-autofill,
 textarea:-webkit-autofill {
-  -webkit-text-fill-color: var(--field-ink);
-  box-shadow: 0 0 0 1000px var(--field-bg) inset;
+  -webkit-text-fill-color: #1a1f1c !important;
+  box-shadow: 0 0 0 1000px #ffffff inset !important;
   transition: background-color 99999s ease-out;
 }
 
