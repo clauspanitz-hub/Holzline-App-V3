@@ -146,6 +146,44 @@ git pull
 docker compose up -d --build
 ```
 
+### C5b. UI-Versionen (Tags)
+
+Dauerhaft im Repo:
+
+| Tag / Branch | Bedeutung |
+|--------------|-----------|
+| **`ui-v1`** / Branch `ui-redesign` | Redesign Slice 1 (Shell, Theme, Todos) |
+| **`ui-classic`** | UI **vor** dem Redesign |
+
+**UI v1 deployen (CT 131):**
+
+```bash
+cd /opt/holzlinge-inventar
+git fetch --tags origin
+git checkout ui-v1          # oder: git checkout ui-redesign
+docker compose build --no-cache
+docker compose up -d --force-recreate
+```
+
+**Zurück zur klassischen UI:**
+
+```bash
+cd /opt/holzlinge-inventar
+git fetch --tags origin
+git checkout ui-classic
+docker compose build --no-cache
+docker compose up -d --force-recreate
+```
+
+Wieder auf den normalen Update-Pfad (`main`):
+
+```bash
+git checkout main
+git pull origin main
+docker compose build --no-cache
+docker compose up -d --force-recreate
+```
+
 ### C6. Auth (Pflicht-Login)
 
 Beim ersten Start mit **leeren** Benutzern wird ein Admin aus ENV geseedet (nur wenn noch kein User existiert):
