@@ -610,6 +610,122 @@ th {
   flex-shrink: 0;
 }
 
+.catalog-action-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.catalog-family-head {
+  margin-bottom: 0.55rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--radius);
+  background: var(--bg-soft);
+}
+
+.catalog-subfamily {
+  margin: 0.55rem 0 0.85rem 0.35rem;
+  padding-left: 0.35rem;
+  border-left: 2px solid color-mix(in srgb, var(--sage) 55%, var(--line));
+}
+
+.catalog-cards {
+  display: grid !important;
+  gap: 0.65rem;
+}
+
+.catalog-card {
+  align-items: flex-start;
+}
+
+.catalog-card-select {
+  display: flex;
+  align-items: flex-start;
+  padding-top: 0.35rem;
+  margin: 0;
+}
+
+.catalog-card-select input {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--forest);
+}
+
+.catalog-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-weight: 600;
+  color: var(--forest);
+}
+
+.catalog-select-all input {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: var(--forest);
+}
+
+.stock-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.45rem 0 0.25rem;
+}
+
+.stock-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--field-bg);
+  color: var(--field-ink);
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stock-chip.total {
+  background: color-mix(in srgb, var(--sage) 35%, var(--field-bg));
+  border-color: color-mix(in srgb, var(--forest) 25%, var(--line));
+  color: var(--forest);
+}
+
+.stock-chip.neg,
+.catalog-card.neg .stock-chip.total {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: var(--danger-bg);
+}
+
+.catalog-card-meta {
+  margin-top: 0.35rem !important;
+  font-size: 0.82rem;
+}
+
+.catalog-card-actions {
+  margin-top: 0.55rem;
+}
+
+.catalog-panel .chip-row {
+  margin-top: 0.35rem;
+}
+
+@media (max-width: 640px) {
+  .catalog-card {
+    flex-wrap: wrap;
+  }
+
+  .catalog-card .action-card-cta {
+    width: 100%;
+    order: 3;
+  }
+
+  .catalog-card-actions {
+    width: 100%;
+  }
+}
+
 .item-card {
   background: var(--bg-soft);
 }

@@ -152,16 +152,18 @@ Dauerhaft im Repo:
 
 | Tag / Branch | Bedeutung |
 |--------------|-----------|
-| **`ui-v1.1`** / Branch `ui-redesign` / `main` | Redesign + Kontrast app-weit (aktuell) |
+| **`ui-v1.4`** / `main` | Materialien/Produkte als Aktionskarten + Dialoge (aktuell) |
+| **`ui-v1.3`** | Kontrast hart für alle Formularfelder |
+| **`ui-v1.1`** / Branch `ui-redesign` | Redesign + Kontrast app-weit |
 | **`ui-v1`** | Slice 1 vor Kontrast-Pass (Tag fest; GitHub ließ Update nicht zu) |
 | **`ui-classic`** | UI **vor** dem Redesign |
 
-**Aktuell deployen — Tag `ui-v1.3` (nicht `ui-v1`):**
+**Aktuell deployen — Tag `ui-v1.4` (auf `main`):**
 
 ```bash
 cd /opt/holzlinge-inventar
 git fetch --tags origin
-git checkout ui-v1.3
+git checkout ui-v1.4
 git log -1 --oneline
 docker compose build --no-cache
 docker compose up -d --force-recreate
