@@ -562,7 +562,10 @@ def _wipe_app_data(db: Session) -> None:
     db.execute(update(Product).values(transform_target_id=None))
     db.execute(delete(Product))
     db.execute(delete(Material))
+    # Unterfamilien zuerst — parent_id ist ON DELETE RESTRICT.
+    db.execute(delete(ProductFamily).where(ProductFamily.parent_id.is_not(None)))
     db.execute(delete(ProductFamily))
+    db.execute(delete(MaterialFamily).where(MaterialFamily.parent_id.is_not(None)))
     db.execute(delete(MaterialFamily))
     db.execute(delete(Color))
     db.execute(delete(ColorMedium))
