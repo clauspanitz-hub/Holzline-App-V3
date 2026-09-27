@@ -10,6 +10,7 @@
   } from './lib/setOptionMatch.js'
   import FamilySelect from './lib/components/FamilySelect.svelte'
   import ProductGroupSection from './lib/components/ProductGroupSection.svelte'
+  import CatalogActionList from './lib/components/CatalogActionList.svelte'
   import BackupPanel from './lib/components/BackupPanel.svelte'
   import FilterBar from './lib/components/FilterBar.svelte'
   import ExtraGapPanels from './lib/components/ExtraGapPanels.svelte'
@@ -1249,6 +1250,13 @@
     const allSelected = ids.length > 0 && ids.every((id) => selectedMaterialIds.includes(id))
     if (allSelected) selectedMaterialIds = selectedMaterialIds.filter((id) => !ids.includes(id))
     else selectedMaterialIds = [...new Set([...selectedMaterialIds, ...ids])]
+  }
+
+  function toggleAllDisplayedProducts() {
+    const ids = displayedProducts.map((p) => p.id)
+    const allSelected = ids.length > 0 && ids.every((id) => selectedProductIds.includes(id))
+    if (allSelected) selectedProductIds = selectedProductIds.filter((id) => !ids.includes(id))
+    else selectedProductIds = [...new Set([...selectedProductIds, ...ids])]
   }
 
   /** Alle Artikel einer Familien-Gruppe an-/abwählen (Produkt- oder Materialliste). */
@@ -4616,7 +4624,7 @@
       onPurchase={openPurchase}
       onGeneratePurchaseTodos={generatePurchaseTodos}
     />
-    <section class="panel">
+    <section class="panel catalog-panel">
       <div class="panel-header">
         <h2>Materialien</h2>
         <div class="row-actions">
@@ -4624,129 +4632,128 @@
           <button class="btn" onclick={() => openCreateMaterial()}>Neu</button>
         </div>
       </div>
-      {#if selectedMaterialIds.length}
-        <div class="bulk-bar">
+      <p class="empty" style="margin-top:0">
+        Tippen öffnet den Dialog. Bestand und Aktionen auf der Karte — keine Tabellenfelder.
+      </p>
+      <div class="chip-row" role="group" aria-label="Sortierung Materialien">
+        <button type="button" class="chip" class:active={listUi.materials.sortKey === 'name'} onclick={() => toggleListSort('materials', 'name')}>
+          Name{sortMark(listUi.materials.sortKey, 'name', listUi.materials.sortDir)}
+        </button>
+        <button type="button" class="chip" class:active={listUi.materials.sortKey === 'total'} onclick={() => toggleListSort('materials', 'total')}>
+          Bestand{sortMark(listUi.materials.sortKey, 'total', listUi.materials.sortDir)}
+        </button>
+        <button type="button" class="chip" class:active={listUi.materials.sortKey === 'updated_at'} onclick={() => toggleListSort('materials', 'updated_at')}>
+          Geändert{sortMark(listUi.materials.sortKey, 'updated_at', listUi.materials.sortDir)}
+        </button>
+        {#each materialLocations as loc}
+          <button
+            type="button"
+            class="chip"
+            class:active={listUi.materials.sortKey === `stock:${loc.id}`}
+            onclick={() => toggleListSort('materials', `stock:${loc.id}`)}
+          >
+            {loc.name}{sortMark(listUi.materials.sortKey, `stock:${loc.id}`, listUi.materials.sortDir)}
+          </button>
+        {/each}
+      </div>
+      <div class="bulk-bar">
+        <label class="catalog-select-all">
+          <input
+            type="checkbox"
+            aria-label="Alle sichtbaren Materialien wählen"
+            checked={displayedMaterials.length > 0 &&
+              displayedMaterials.every((m) => selectedMaterialIds.includes(m.id))}
+            onchange={toggleAllDisplayedMaterials}
+          />
+          Alle sichtbaren
+        </label>
+        {#if selectedMaterialIds.length}
           <span>{selectedMaterialIds.length} ausgewählt</span>
           <div class="row-actions">
             <button class="btn" onclick={() => openBulkEdit('material')}>Mehrfach bearbeiten…</button>
             <button class="btn secondary" onclick={() => (selectedMaterialIds = [])}>Auswahl aufheben</button>
           </div>
-        </div>
-      {/if}
-      <div class="table-wrap stock-table-wrap">
-        <table class="stock-table">
-          <thead>
-            <tr>
-              <th class="col-select">
-                <input
-                  type="checkbox"
-                  aria-label="Alle sichtbaren Materialien wählen"
-                  checked={displayedMaterials.length > 0 &&
-                    displayedMaterials.every((m) => selectedMaterialIds.includes(m.id))}
-                  onchange={toggleAllDisplayedMaterials}
-                />
-              </th>
-              <th>
-                <button type="button" class="th-sort" onclick={() => toggleListSort('materials', 'name')}>
-                  Name{sortMark(listUi.materials.sortKey, 'name', listUi.materials.sortDir)}
-                </button>
-              </th>
-              {#each materialLocations as loc}
-                <th class="num">
-                  <button type="button" class="th-sort" onclick={() => toggleListSort('materials', `stock:${loc.id}`)}>
-                    {loc.name}{sortMark(listUi.materials.sortKey, `stock:${loc.id}`, listUi.materials.sortDir)}
-                  </button>
-                </th>
-              {/each}
-              <th class="num">
-                <button type="button" class="th-sort" onclick={() => toggleListSort('materials', 'total')}>
-                  Gesamt{sortMark(listUi.materials.sortKey, 'total', listUi.materials.sortDir)}
-                </button>
-              </th>
-              <th>
-                <button type="button" class="th-sort" onclick={() => toggleListSort('materials', 'updated_at')}>
-                  Geändert{sortMark(listUi.materials.sortKey, 'updated_at', listUi.materials.sortDir)}
-                </button>
-              </th>
-              <th>Aktionen</th>
-            </tr>
-          </thead>
-          <tbody>
-            <ProductGroupSection
-              groups={materialGroups}
-              {collapsedFamilies}
-              colSpan={materialLocations.length + 5}
-              emptyMessage="Keine Materialien."
-              showFamilySelect={true}
-              isFamilySelected={(group) => isFamilySelected(group, 'material')}
-              onToggleCollapse={toggleFamilyCollapse}
-              onToggleFamilySelection={(group) => toggleFamilySelection(group, 'material')}
-            >
-              {#snippet row({ item: material })}
-                <tr class="row-click" onclick={() => openEditMaterial(material, { ids: visibleGroupItemIds(materialGroups) })}>
-                  <td class="col-select" onclick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      aria-label={`Material ${material.name} wählen`}
-                      checked={selectedMaterialIds.includes(material.id)}
-                      onchange={() => toggleSelectedMaterial(material.id)}
-                    />
-                  </td>
-                  <td>
-                    {material.name}
-                    {#if productFamilyKey(material)}<div class="empty">{productFamilyKey(material)}</div>{/if}
-                    {#if colorTagMeta(material)}<div class="empty">{colorTagMeta(material)}</div>{/if}
-                    {#if formatMinStock(material)}
-                      <div class="min-stock-hint">Min. {formatMinStock(material)} {material.unit}</div>
-                    {/if}
-                    {#if incompleteHint(material)}
-                      <div class="incomplete-hint" title="Unvollständige Daten">
-                        <span class="incomplete-icon" aria-hidden="true">!</span>
-                        {incompleteHint(material)}
-                      </div>
-                    {/if}
-                    {#each [materialSourceLinks(material)] as sourceLinks}
-                      {#if sourceLinks.length}
-                        <div class="purchase-source-links">
-                          {#each sourceLinks as src}
-                            <a
-                              class="purchase-source-link"
-                              href={src.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              title={src.is_preferred ? 'Bevorzugte Bezugsquelle' : 'Bezugsquelle'}
-                              onclick={(e) => e.stopPropagation()}
-                            >
-                              {src.shop_name}
-                            </a>
-                          {/each}
-                        </div>
-                      {/if}
-                    {/each}
-                  </td>
-                  {#each materialLocations as loc}
-                    <td class="num" class:neg={stockAt(material, loc.id) < 0}>{formatQty(stockAt(material, loc.id), itemDecimals(material))}</td>
-                  {/each}
-                  <td class="num" class:neg={Number(material.stock_total) <= 0 || material.is_negative}>
-                    {formatQty(material.stock_total, itemDecimals(material))} {material.unit}
-                  </td>
-                  <td class="meta-cell">
-                    <div>{formatDateTime(material.updated_at)}</div>
-                    <div class="empty">{formatActor(material.updated_by)}</div>
-                  </td>
-                  <td onclick={(e) => e.stopPropagation()}>
-                    <div class="row-actions">
-                      <button class="btn secondary" onclick={() => openEditMaterial(material, { ids: visibleGroupItemIds(materialGroups) })}>Bearbeiten</button>
-                      <button class="btn secondary" onclick={() => openTransfer('material', material)}>Umbuchen</button>
-                      <button type="button" class="btn danger" onclick={(e) => { e.stopPropagation(); removeMaterial(material) }}>Löschen</button>
-                    </div>
-                  </td>
-                </tr>
-              {/snippet}
-            </ProductGroupSection>
-          </tbody>
-        </table>
+        {/if}
       </div>
+      <CatalogActionList
+        groups={materialGroups}
+        {collapsedFamilies}
+        emptyMessage="Keine Materialien."
+        showFamilySelect={true}
+        isFamilySelected={(group) => isFamilySelected(group, 'material')}
+        onToggleCollapse={toggleFamilyCollapse}
+        onToggleFamilySelection={(group) => toggleFamilySelection(group, 'material')}
+      >
+        {#snippet card({ item: material })}
+          <article class="card action-card catalog-card" class:neg={Number(material.stock_total) <= 0 || material.is_negative}>
+            <label class="catalog-card-select">
+              <input
+                type="checkbox"
+                aria-label={`Material ${material.name} wählen`}
+                checked={selectedMaterialIds.includes(material.id)}
+                onchange={() => toggleSelectedMaterial(material.id)}
+              />
+            </label>
+            <div class="action-card-body">
+              <h3>{material.name}</h3>
+              {#if productFamilyKey(material)}
+                <p class="empty" style="padding:0">{productFamilyKey(material)}</p>
+              {/if}
+              {#if colorTagMeta(material)}
+                <p class="empty" style="padding:0">{colorTagMeta(material)}</p>
+              {/if}
+              <div class="stock-chip-row" aria-label="Bestand">
+                <span class="stock-chip total" class:neg={Number(material.stock_total) <= 0 || material.is_negative}>
+                  Gesamt {formatQty(material.stock_total, itemDecimals(material))} {material.unit}
+                </span>
+                {#each materialLocations as loc}
+                  <span class="stock-chip" class:neg={stockAt(material, loc.id) < 0}>
+                    {loc.name} {formatQty(stockAt(material, loc.id), itemDecimals(material))}
+                  </span>
+                {/each}
+              </div>
+              {#if formatMinStock(material)}
+                <p class="min-stock-hint">Min. {formatMinStock(material)} {material.unit}</p>
+              {/if}
+              {#if incompleteHint(material)}
+                <div class="incomplete-hint" title="Unvollständige Daten">
+                  <span class="incomplete-icon" aria-hidden="true">!</span>
+                  {incompleteHint(material)}
+                </div>
+              {/if}
+              {#each [materialSourceLinks(material)] as sourceLinks}
+                {#if sourceLinks.length}
+                  <div class="purchase-source-links">
+                    {#each sourceLinks as src}
+                      <a
+                        class="purchase-source-link"
+                        href={src.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={src.is_preferred ? 'Bevorzugte Bezugsquelle' : 'Bezugsquelle'}
+                      >
+                        {src.shop_name}
+                      </a>
+                    {/each}
+                  </div>
+                {/if}
+              {/each}
+              <p class="empty catalog-card-meta" style="padding:0">
+                {formatDateTime(material.updated_at)} · {formatActor(material.updated_by)}
+              </p>
+              <div class="row-actions catalog-card-actions">
+                <button type="button" class="btn secondary" onclick={() => openTransfer('material', material)}>Umbuchen</button>
+                <button type="button" class="btn danger" onclick={() => removeMaterial(material)}>Löschen</button>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="btn action-card-cta"
+              onclick={() => openEditMaterial(material, { ids: visibleGroupItemIds(materialGroups) })}
+            >Bearbeiten</button>
+          </article>
+        {/snippet}
+      </CatalogActionList>
     </section>
   {:else if tab === 'products'}
     <ExtraGapPanels
@@ -4767,7 +4774,7 @@
       onAdjustStock={(item, body) => adjustGapStock('product', item, body)}
       onManufacture={openManufacture}
     />
-    <section class="panel">
+    <section class="panel catalog-panel">
       <div class="panel-header">
         <h2>Produkte</h2>
         <div class="row-actions">
@@ -4776,111 +4783,119 @@
           <button class="btn" onclick={() => openCreateProduct()}>Neu</button>
         </div>
       </div>
-      {#if selectedProductIds.length}
-        <div class="bulk-bar">
+      <p class="empty" style="margin-top:0">
+        Tippen öffnet den Dialog. Fertigen und Umbuchen bleiben als Knöpfe auf der Karte.
+      </p>
+      <div class="chip-row" role="group" aria-label="Sortierung Produkte">
+        <button type="button" class="chip" class:active={listUi.products.sortKey === 'name'} onclick={() => toggleListSort('products', 'name')}>
+          Name{sortMark(listUi.products.sortKey, 'name', listUi.products.sortDir)}
+        </button>
+        <button type="button" class="chip" class:active={listUi.products.sortKey === 'total'} onclick={() => toggleListSort('products', 'total')}>
+          Bestand{sortMark(listUi.products.sortKey, 'total', listUi.products.sortDir)}
+        </button>
+        <button type="button" class="chip" class:active={listUi.products.sortKey === 'updated_at'} onclick={() => toggleListSort('products', 'updated_at')}>
+          Geändert{sortMark(listUi.products.sortKey, 'updated_at', listUi.products.sortDir)}
+        </button>
+        {#each orderedLocations as loc}
+          <button
+            type="button"
+            class="chip"
+            class:active={listUi.products.sortKey === `stock:${loc.id}`}
+            onclick={() => toggleListSort('products', `stock:${loc.id}`)}
+          >
+            {loc.name}{sortMark(listUi.products.sortKey, `stock:${loc.id}`, listUi.products.sortDir)}
+          </button>
+        {/each}
+      </div>
+      <div class="bulk-bar">
+        <label class="catalog-select-all">
+          <input
+            type="checkbox"
+            aria-label="Alle sichtbaren Produkte wählen"
+            checked={displayedProducts.length > 0 &&
+              displayedProducts.every((p) => selectedProductIds.includes(p.id))}
+            onchange={toggleAllDisplayedProducts}
+          />
+          Alle sichtbaren
+        </label>
+        {#if selectedProductIds.length}
           <span>{selectedProductIds.length} ausgewählt</span>
           <div class="row-actions">
             <button class="btn" onclick={() => openBulkEdit('product')}>Mehrfach bearbeiten…</button>
             <button class="btn secondary" onclick={() => (selectedProductIds = [])}>Auswahl aufheben</button>
           </div>
-        </div>
-      {/if}
-      <div class="table-wrap stock-table-wrap">
-        <table class="stock-table">
-          <thead>
-            <tr>
-              <th class="col-select"></th>
-              <th>
-                <button type="button" class="th-sort" onclick={() => toggleListSort('products', 'name')}>
-                  Name{sortMark(listUi.products.sortKey, 'name', listUi.products.sortDir)}
-                </button>
-              </th>
-              {#each orderedLocations as loc}
-                <th class="num">
-                  <button type="button" class="th-sort" onclick={() => toggleListSort('products', `stock:${loc.id}`)}>
-                    {loc.name}{sortMark(listUi.products.sortKey, `stock:${loc.id}`, listUi.products.sortDir)}
-                  </button>
-                </th>
-              {/each}
-              <th class="num">
-                <button type="button" class="th-sort" onclick={() => toggleListSort('products', 'total')}>
-                  Gesamt{sortMark(listUi.products.sortKey, 'total', listUi.products.sortDir)}
-                </button>
-              </th>
-              <th>
-                <button type="button" class="th-sort" onclick={() => toggleListSort('products', 'updated_at')}>
-                  Geändert{sortMark(listUi.products.sortKey, 'updated_at', listUi.products.sortDir)}
-                </button>
-              </th>
-              <th>Aktionen</th>
-            </tr>
-          </thead>
-          <tbody>
-            <ProductGroupSection
-              groups={productGroups}
-              {collapsedFamilies}
-              colSpan={orderedLocations.length + 5}
-              emptyMessage="Keine Produkte."
-              showFamilySelect={true}
-              isFamilySelected={isFamilySelected}
-              onToggleCollapse={toggleFamilyCollapse}
-              onToggleFamilySelection={toggleFamilySelection}
-            >
-              {#snippet row({ product })}
-                <tr class="row-click" onclick={() => openEditProduct(product, { ids: visibleGroupItemIds(productGroups) })}>
-                  <td class="col-select" onclick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      aria-label={`Produkt ${product.name} wählen`}
-                      checked={selectedProductIds.includes(product.id)}
-                      onchange={() => toggleSelectedProduct(product.id)}
-                    />
-                  </td>
-                  <td>
-                    {product.name}
-                    {#if productFamilyKey(product)}<div class="empty">{productFamilyKey(product)}</div>{/if}
-                    {#if colorTagMeta(product)}<div class="empty">{colorTagMeta(product)}</div>{/if}
-                    {#if formatMinStock(product)}
-                      <div class="min-stock-hint">Min. {formatMinStock(product)}</div>
-                    {/if}
-                    {#if incompleteHint(product)}
-                      <div class="incomplete-hint" title="Unvollständige Daten">
-                        <span class="incomplete-icon" aria-hidden="true">!</span>
-                        {incompleteHint(product)}
-                      </div>
-                    {/if}
-                    {#if product.transform_target_name}
-                      <div class="empty">→ {product.transform_target_name}</div>
-                    {/if}
-                  </td>
-                  {#each orderedLocations as loc}
-                    <td class="num" class:neg={stockAt(product, loc.id) < 0}>{formatQty(stockAt(product, loc.id), 0)}</td>
-                  {/each}
-                  <td class="num" class:neg={Number(product.stock_total) <= 0 || product.is_negative}>
-                    {formatQty(product.stock_total, 0)}
-                  </td>
-                  <td class="meta-cell">
-                    <div>{formatDateTime(product.updated_at)}</div>
-                    <div class="empty">{formatActor(product.updated_by)}</div>
-                  </td>
-                  <td onclick={(e) => e.stopPropagation()}>
-                    <div class="row-actions">
-                      <button class="btn secondary" onclick={() => openEditProduct(product, { ids: visibleGroupItemIds(productGroups) })}>Bearbeiten</button>
-                      <button class="btn" onclick={() => openManufacture(product)}>Fertigen</button>
-                      <button class="btn secondary" onclick={() => openTransfer('product', product)}>Umbuchen</button>
-                      {#if canTransformProduct(product)}
-                        <button class="btn secondary" onclick={() => openTransform(product)}>Umwandeln</button>
-                      {/if}
-                      <button class="btn secondary" onclick={() => openMovements(product)}>Historie</button>
-                      <button type="button" class="btn danger" onclick={(e) => { e.stopPropagation(); removeProduct(product) }}>Löschen</button>
-                    </div>
-                  </td>
-                </tr>
-              {/snippet}
-            </ProductGroupSection>
-          </tbody>
-        </table>
+        {/if}
       </div>
+      <CatalogActionList
+        groups={productGroups}
+        {collapsedFamilies}
+        emptyMessage="Keine Produkte."
+        showFamilySelect={true}
+        isFamilySelected={isFamilySelected}
+        onToggleCollapse={toggleFamilyCollapse}
+        onToggleFamilySelection={toggleFamilySelection}
+      >
+        {#snippet card({ product })}
+          <article class="card action-card catalog-card" class:neg={Number(product.stock_total) <= 0 || product.is_negative}>
+            <label class="catalog-card-select">
+              <input
+                type="checkbox"
+                aria-label={`Produkt ${product.name} wählen`}
+                checked={selectedProductIds.includes(product.id)}
+                onchange={() => toggleSelectedProduct(product.id)}
+              />
+            </label>
+            <div class="action-card-body">
+              <h3>{product.name}</h3>
+              {#if productFamilyKey(product)}
+                <p class="empty" style="padding:0">{productFamilyKey(product)}</p>
+              {/if}
+              {#if colorTagMeta(product)}
+                <p class="empty" style="padding:0">{colorTagMeta(product)}</p>
+              {/if}
+              {#if product.transform_target_name}
+                <p class="empty" style="padding:0">→ {product.transform_target_name}</p>
+              {/if}
+              <div class="stock-chip-row" aria-label="Bestand">
+                <span class="stock-chip total" class:neg={Number(product.stock_total) <= 0 || product.is_negative}>
+                  Gesamt {formatQty(product.stock_total, 0)}
+                </span>
+                {#each orderedLocations as loc}
+                  <span class="stock-chip" class:neg={stockAt(product, loc.id) < 0}>
+                    {loc.name} {formatQty(stockAt(product, loc.id), 0)}
+                  </span>
+                {/each}
+              </div>
+              {#if formatMinStock(product)}
+                <p class="min-stock-hint">Min. {formatMinStock(product)}</p>
+              {/if}
+              {#if incompleteHint(product)}
+                <div class="incomplete-hint" title="Unvollständige Daten">
+                  <span class="incomplete-icon" aria-hidden="true">!</span>
+                  {incompleteHint(product)}
+                </div>
+              {/if}
+              <p class="empty catalog-card-meta" style="padding:0">
+                {formatDateTime(product.updated_at)} · {formatActor(product.updated_by)}
+              </p>
+              <div class="row-actions catalog-card-actions">
+                <button type="button" class="btn" onclick={() => openManufacture(product)}>Fertigen</button>
+                <button type="button" class="btn secondary" onclick={() => openTransfer('product', product)}>Umbuchen</button>
+                {#if canTransformProduct(product)}
+                  <button type="button" class="btn secondary" onclick={() => openTransform(product)}>Umwandeln</button>
+                {/if}
+                <button type="button" class="btn secondary" onclick={() => openMovements(product)}>Historie</button>
+                <button type="button" class="btn danger" onclick={() => removeProduct(product)}>Löschen</button>
+              </div>
+            </div>
+            <button
+              type="button"
+              class="btn action-card-cta"
+              onclick={() => openEditProduct(product, { ids: visibleGroupItemIds(productGroups) })}
+            >Bearbeiten</button>
+          </article>
+        {/snippet}
+      </CatalogActionList>
     </section>
   {:else if tab === 'orders'}
     <section class="panel">
