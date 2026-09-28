@@ -371,11 +371,13 @@ def sync_shopify_orders(db: Session) -> dict:
         for o in existing
         if o.origin == "shopify" and o.external_number
     }
-    by_any_num = {}
-    for order in existing:
-        key = normalize_order_number(order.external_number)
-        if key and key not in by_any_num:
-            by_any_num[key] = order
+    # Nur manuelle Aufträge dürfen eine Shopify-Nummer „beanspruchen“.
+    # Gleiche Nummer bei Etsy ist kein Duplikat (ADR 0013: Herkunft + Nummer).
+    by_manual_num = {
+        normalize_order_number(o.external_number): o
+        for o in existing
+        if o.origin == "manual" and o.external_number
+    }
 
     for node in nodes:
         name = (node.get("name") or "").strip()
@@ -392,17 +394,14 @@ def sync_shopify_orders(db: Session) -> dict:
                 _refresh_existing_shop_order(existing_order, node)
             skipped += 1
             continue
-        found = by_any_num.get(key)
-        if found is not None and found.origin == "manual":
+        found = by_manual_num.get(key)
+        if found is not None:
             found.origin = "shopify"
             found.external_number = name[:80]
             _refresh_existing_shop_order(found, node)
             found.updated_at = datetime.now()
             claimed += 1
             by_shop_num[key] = found
-            continue
-        if found is not None:
-            skipped += 1
             continue
 
         raw_lines = _usable_line_items(node)
@@ -463,7 +462,6 @@ def sync_shopify_orders(db: Session) -> dict:
             _refresh_order_status(db, loaded)
         created += 1
         by_shop_num[key] = order
-        by_any_num[key] = order
 
     db.commit()
     return {"created": created, "skipped": skipped, "claimed": claimed, "errors": errors}

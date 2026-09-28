@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -10,7 +11,7 @@ from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import Base
-from app.models import CustomerOrder, Location, Product, ProductStock, WorkTodo
+from app.models import CustomerOrder, Location, OrderLine, Product, ProductStock, WorkTodo
 from app.shopify_orders import sync_shopify_orders
 
 
@@ -115,6 +116,61 @@ class ShopifyMatchedOrderSyncTest(unittest.TestCase):
         numbers = {o.external_number: o.status for o in self.db.scalars(select(CustomerOrder)).all()}
         self.assertEqual(numbers["#1001"], "review")
         self.assertEqual(numbers["#1002"], "ready")
+
+    def test_etsy_order_with_same_number_does_not_block_shopify_import(self) -> None:
+        etsy = CustomerOrder(
+            ordered_on=datetime(2026, 9, 1, 12, 0, 0),
+            customer_name="Etsy-Kunde",
+            external_number="#1842",
+            origin="etsy",
+            status="review",
+        )
+        self.db.add(etsy)
+        self.db.flush()
+        self.db.add(
+            OrderLine(
+                order_id=etsy.id,
+                quantity=Decimal("1"),
+                label="Etsy-Artikel",
+            )
+        )
+        self.db.commit()
+
+        node = _paid_unfulfilled_order(name="#1842", sku="HL-001", title="Holzling Eiche")
+        with patch("app.shopify_orders.fetch_open_paid_orders", return_value=[node]):
+            result = sync_shopify_orders(self.db)
+
+        self.assertEqual(result["created"], 1)
+        self.assertEqual(result["claimed"], 0)
+        self.assertEqual(result["errors"], [])
+        orders = list(self.db.scalars(select(CustomerOrder)).all())
+        self.assertEqual(len(orders), 2)
+        by_origin = {o.origin: o for o in orders}
+        self.assertEqual(set(by_origin), {"etsy", "shopify"})
+        self.assertEqual(by_origin["etsy"].customer_name, "Etsy-Kunde")
+        self.assertEqual(by_origin["shopify"].status, "ready")
+        self.assertEqual(by_origin["shopify"].lines[0].product_id, self.product_id)
+
+    def test_manual_order_with_same_number_is_still_claimed(self) -> None:
+        manual = CustomerOrder(
+            ordered_on=datetime(2026, 9, 1, 12, 0, 0),
+            customer_name="Manuell",
+            external_number="1842",
+            origin="manual",
+            status="open",
+        )
+        self.db.add(manual)
+        self.db.commit()
+
+        node = _paid_unfulfilled_order(name="#1842", sku="HL-001", title="Holzling Eiche")
+        with patch("app.shopify_orders.fetch_open_paid_orders", return_value=[node]):
+            result = sync_shopify_orders(self.db)
+
+        self.assertEqual(result["created"], 0)
+        self.assertEqual(result["claimed"], 1)
+        order = self.db.scalars(select(CustomerOrder)).one()
+        self.assertEqual(order.origin, "shopify")
+        self.assertEqual(order.external_number, "#1842")
 
 
 if __name__ == "__main__":
