@@ -932,6 +932,11 @@ table .row-actions .btn {
   overflow-wrap: anywhere;
 }
 
+/* FamilySelect nutzt class "empty" für Platzhalter — nicht die Absatz-Padding von .empty */
+.family-select-trigger span.empty {
+  padding: 0;
+}
+
 .family-select-caret {
   color: var(--muted);
   font-size: 0.7rem;
@@ -1676,6 +1681,8 @@ textarea:-webkit-autofill {
 }
 
 .order-line .family-select-trigger span:not(.family-select-caret) {
+  flex: 1 1 0;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
