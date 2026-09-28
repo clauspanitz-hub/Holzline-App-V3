@@ -105,6 +105,7 @@
   let todoCategoryFilter = $state('workshop')
   let todoStatusFilter = $state('open')
   let orderForm = $state(emptyOrderForm())
+  let orderEditModal = $state(null) // { orderId, note, lines: [{id, product_id, material_id, set_variant_id, label, quantity}], emptyWarn }
   let manufactureTodoId = $state(null)
   let purchaseTodoId = $state(null)
   let assembleTodoId = $state(null)
@@ -966,6 +967,114 @@
       orderForm = emptyOrderForm()
       await refresh()
       showFlash('ok', 'Bestellung angelegt.')
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  function canEditOrder(order) {
+    return authUser?.role === 'admin' && order && ['open', 'review', 'ready'].includes(order.status)
+  }
+
+  function emptyEditLine() {
+    return { id: null, product_id: '', material_id: '', set_variant_id: '', label: '', quantity: '1' }
+  }
+
+  function openOrderEdit(order) {
+    if (!canEditOrder(order)) return
+    orderEditModal = {
+      orderId: order.id,
+      note: order.note || '',
+      lines: (order.lines || []).map((ln) => ({
+        id: ln.id,
+        product_id: ln.product_id ? String(ln.product_id) : '',
+        material_id: ln.material_id ? String(ln.material_id) : '',
+        set_variant_id: ln.set_variant_id ? String(ln.set_variant_id) : '',
+        label: ln.label || '',
+        quantity: String(ln.quantity ?? '1'),
+      })),
+    }
+  }
+
+  function closeOrderEdit() {
+    orderEditModal = null
+  }
+
+  function onEditLineProduct(i, v) {
+    const lines = [...orderEditModal.lines]
+    lines[i] = {
+      ...lines[i],
+      product_id: v,
+      material_id: v ? '' : lines[i].material_id,
+      set_variant_id: v ? '' : lines[i].set_variant_id,
+      label: v ? '' : lines[i].label,
+    }
+    orderEditModal = { ...orderEditModal, lines }
+  }
+
+  function onEditLineMaterial(i, v) {
+    const lines = [...orderEditModal.lines]
+    lines[i] = {
+      ...lines[i],
+      material_id: v,
+      product_id: v ? '' : lines[i].product_id,
+      set_variant_id: v ? '' : lines[i].set_variant_id,
+      label: v ? '' : lines[i].label,
+    }
+    orderEditModal = { ...orderEditModal, lines }
+  }
+
+  function onEditLineSetVariant(i, v) {
+    const lines = [...orderEditModal.lines]
+    lines[i] = {
+      ...lines[i],
+      set_variant_id: v,
+      product_id: v ? '' : lines[i].product_id,
+      material_id: v ? '' : lines[i].material_id,
+      label: v ? '' : lines[i].label,
+    }
+    orderEditModal = { ...orderEditModal, lines }
+  }
+
+  async function saveOrderEdit() {
+    if (!orderEditModal) return
+    const lines = orderEditModal.lines
+      .map((ln) => {
+        const product_id = ln.product_id ? Number(ln.product_id) : null
+        const material_id = ln.material_id ? Number(ln.material_id) : null
+        const set_variant_id = ln.set_variant_id ? Number(ln.set_variant_id) : null
+        const label = (ln.label || '').trim() || null
+        if (!product_id && !material_id && !set_variant_id && !label) return null
+        return {
+          id: ln.id || null,
+          quantity: ln.quantity,
+          product_id,
+          material_id,
+          set_variant_id,
+          label,
+        }
+      })
+      .filter(Boolean)
+    if (!lines.length && orderEditModal.lines.length) {
+      showFlash('error', 'Jede Position braucht Produkt, Material, Set oder Freitext.')
+      return
+    }
+    if (!lines.length) {
+      const ok = confirm('Alle Positionen entfernen? Die Bestellung bleibt ohne Positionen bestehen.')
+      if (!ok) return
+    }
+    saving = true
+    try {
+      const result = await api.orders.edit(orderEditModal.orderId, {
+        note: orderEditModal.note,
+        lines,
+      })
+      orderEditModal = null
+      await refresh()
+      const warn = (result.notices || []).join(' ')
+      showFlash(warn ? 'warn' : 'ok', warn || 'Bestellung gespeichert.')
     } catch (error) {
       showFlash('error', error.message)
     } finally {
@@ -4127,6 +4236,9 @@
                 {/if}
               </td>
               <td class="col-actions">
+                {#if canEditOrder(order)}
+                  <button type="button" class="btn secondary" disabled={saving} onclick={() => openOrderEdit(order)}>Bearbeiten</button>
+                {/if}
                 {#if order.status === 'ready'}
                   <button type="button" class="btn" onclick={() => markOrderShipped(order)}>Versendet</button>
                 {/if}
@@ -4161,6 +4273,9 @@
             <p class="empty">Notiz: {order.note}</p>
           {/if}
           <div class="row-actions">
+            {#if canEditOrder(order)}
+              <button type="button" class="btn secondary" disabled={saving} onclick={() => openOrderEdit(order)}>Bearbeiten</button>
+            {/if}
             {#if order.status === 'ready'}
               <button type="button" class="btn" onclick={() => markOrderShipped(order)}>Versendet</button>
             {/if}
@@ -5010,6 +5125,9 @@
                 </div>
               {/each}
               <div class="row-actions">
+                {#if canEditOrder(order)}
+                  <button type="button" class="btn secondary" onclick={() => openOrderEdit(order)} disabled={saving}>Bearbeiten</button>
+                {/if}
                 <button type="button" class="btn" onclick={() => approveOrder(order)} disabled={saving}>Abnicken</button>
                 {#if pendingDeleteOrderId === order.id}
                   <button type="button" class="btn danger" onclick={() => deleteOrder(order)} disabled={saving}>Wirklich löschen?</button>
@@ -5898,6 +6016,93 @@
         <div class="modal-actions">
           <button type="button" class="btn secondary" onclick={() => (passwordModal = false)}>Abbrechen</button>
           <button class="btn" disabled={saving}>Speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}
+
+{#if orderEditModal}
+  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && closeOrderEdit()}>
+    <div class="modal modal-bulk" role="dialog" aria-modal="true" aria-labelledby="order-edit-title">
+      <h3 id="order-edit-title">Bestellung bearbeiten</h3>
+      <p class="empty" style="margin-top:0">Nur lokal in der App — kein Schreiben nach Shopify/Etsy. Todos werden neu synchronisiert.</p>
+      <form
+        class="form-grid"
+        onsubmit={(e) => {
+          e.preventDefault()
+          saveOrderEdit()
+        }}
+      >
+        <label style="grid-column:1/-1">Notiz (optional)
+          <textarea rows="2" bind:value={orderEditModal.note} placeholder="Personalisierung, Hinweise…"></textarea>
+        </label>
+        {#each orderEditModal.lines as line, i (line.id ?? `new-${i}`)}
+          <div class="order-line" style="grid-column:1/-1">
+            <label>Produkt
+              <FamilySelect
+                value={line.product_id}
+                items={products}
+                emptyLabel="— kein Produkt —"
+                onchange={(v) => onEditLineProduct(i, v)}
+              />
+            </label>
+            <label>Material
+              <FamilySelect
+                value={line.material_id}
+                items={materials}
+                emptyLabel="— kein Material —"
+                onchange={(v) => onEditLineMaterial(i, v)}
+              />
+            </label>
+            <label>Set-Variante
+              <select
+                value={line.set_variant_id}
+                onchange={(e) => onEditLineSetVariant(i, e.currentTarget.value)}
+              >
+                <option value="">— kein Set —</option>
+                {#each allSetVariantOptions() as opt}
+                  <option value={opt.id}>{opt.label}</option>
+                {/each}
+              </select>
+            </label>
+            <label>Menge
+              <input type="number" step={qtyStep(0)} min="1" bind:value={line.quantity} required />
+            </label>
+            {#if !line.product_id && !line.material_id && !line.set_variant_id}
+              <label class="order-line-free" style="grid-column:1/-1">Freitext
+                <input bind:value={line.label} placeholder="z. B. Schild Mia 2026" />
+              </label>
+            {/if}
+            <div class="row-actions" style="grid-column:1/-1">
+              <button
+                type="button"
+                class="btn secondary"
+                disabled={saving}
+                onclick={() => {
+                  orderEditModal = {
+                    ...orderEditModal,
+                    lines: orderEditModal.lines.filter((_, j) => j !== i),
+                  }
+                }}
+              >Position entfernen</button>
+            </div>
+          </div>
+        {/each}
+        {#if !orderEditModal.lines.length}
+          <p class="empty" style="grid-column:1/-1">Keine Positionen — Bestellung bleibt ohne Zeilen bestehen.</p>
+        {/if}
+        <div class="modal-actions" style="grid-column:1/-1">
+          <button
+            type="button"
+            class="btn secondary"
+            disabled={saving}
+            onclick={() => {
+              orderEditModal = { ...orderEditModal, lines: [...orderEditModal.lines, emptyEditLine()] }
+            }}
+          >Position hinzufügen</button>
+          <button type="button" class="btn secondary" onclick={closeOrderEdit} disabled={saving}>Abbrechen</button>
+          <button class="btn" type="submit" disabled={saving}>Speichern</button>
         </div>
       </form>
     </div>

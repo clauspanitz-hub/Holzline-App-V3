@@ -948,6 +948,35 @@ class OrderUpdate(BaseModel):
     status: Literal["shipped"] | None = None
 
 
+class OrderLineEdit(BaseModel):
+    """Eine Position beim lokalen Bestell-Edit (ADR 0026). id=None → neu."""
+
+    id: int | None = None
+    quantity: Quantity = Field(gt=0)
+    product_id: int | None = None
+    material_id: int | None = None
+    set_variant_id: int | None = None
+    label: str | None = Field(default=None, max_length=300)
+
+    @model_validator(mode="after")
+    def need_product_or_label(self) -> "OrderLineEdit":
+        ids = [self.product_id, self.material_id, self.set_variant_id]
+        if sum(1 for x in ids if x is not None) > 1:
+            raise ValueError("Nur eines von Produkt, Material oder Set-Variante")
+        if self.product_id is None and self.material_id is None and self.set_variant_id is None and not (
+            self.label or ""
+        ).strip():
+            raise ValueError("Position braucht Produkt, Material, Set-Variante oder Freitext")
+        return self
+
+
+class OrderEdit(BaseModel):
+    """Lokale Bestellbearbeitung: Notiz + volle Positionsliste (leer erlaubt)."""
+
+    note: str | None = Field(default=None, max_length=2000)
+    lines: list[OrderLineEdit] = Field(default_factory=list)
+
+
 class OrderRead(BaseModel):
     id: int
     ordered_on: datetime

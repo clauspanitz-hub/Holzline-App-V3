@@ -41,7 +41,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 
 ### Phase 2 (Bestellungen & Auth) — umgesetzt
 - **users / auth_sessions:** App-Login; Rollen Admin / Mitarbeiter (ADR `0010`)
-- **orders:** Herkunft Shopify/Etsy/Manuell; Status **zur Prüfung** (`review`) / **offen** / **versandbereit** / **versendet**; externe Nummer; Kunde; Bestellzeit; optionale **Notiz** (Personalisierung)
+- **orders:** Herkunft Shopify/Etsy/Manuell; Status **zur Prüfung** (`review`) / **offen** / **versandbereit** / **versendet**; externe Nummer; Kunde; Bestellzeit; optionale **Notiz** (Personalisierung); Admin kann Positionen+Notiz lokal bearbeiten (ADR `0026`, kein Shop-Write)
 - **order_lines:** Menge, Label; optional `product_id`, `material_id`, `set_variant_id` (XOR), `shop_sku`, `shop_title`, `suggested_product_id` (Gemini-Vorschlag)
 - **todos:** Arten Artikel anlegen / Fertigen / Zusammenstellen / Einkauf; Einkauf ohne Bestellung möglich; halten Bestellung auf **offen** wenn verknüpft
 - **shop_line_maps:** gemerkte Shop-Zuordnung (Herkunft + Titel/SKU → Produkt); Gemini nur Vorschlag (ADR `0014`)
@@ -85,6 +85,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Etsy-Mail + Gemini (IMAP-Warteschlange, seltener Auto-Fetch, Parse-Knopf; ADR `0018`) → **zur Prüfung**; Etsy-API falls/wenn Freigabe; kein CSV-Bestellexport
 - [x] Einkauf-Todos aus Mindestbestand (Knopf + Auto erledigen/neu bei Bestand; ADR `0019`, `0023`)
 - [x] Zusammenstellen bei Set-Bestellung (Set-Variante an Position, Todo, Abbuchung; ADR `0020`)
+- [x] Bestellung lokal bearbeiten (Admin; offen/Prüfung/versandbereit; Todos neu syncen; kein Shop-Write; ADR `0026`)
 
 ### Phase 3: Optimierung & Einkauf — Umgesetzt
 - [x] Einkaufsliste aus fehlenden Materialien (Todo-Art Einkauf; ADR `0019`/`0023`)
@@ -95,7 +96,8 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 ## 5. Geschäftsregeln (gültig)
 - Keine Reservierungs-/Verschnittlogik.
 - **Auth (Phase 2):** Pflicht-Login; Rollen Admin und Mitarbeiter (ADR `0010`).
-- **Shopify-Eingang:** Abruf nur auf Knopfdruck; kein Hintergrund-Poll (ADR `0013`).
+- **Shopify-Eingang:** Abruf nur auf Knopfdruck; kein Hintergrund-Poll (ADR `0013`). Kein Zurückschreiben von Bestell-Edits nach Shopify/Etsy (ADR `0026`).
+- **Bestell-Edit:** nur Admin; Status offen / zur Prüfung / versandbereit; Positionen + Notiz; Todos neu syncen (ADR `0026`).
 - **Gemini:** optional; Free-Tier; Default Flash-Lite; nur Vorschläge, kein Gedächtnis (ADR `0014`, `0017`).
 - Sets haben keinen Lagerbestand; Zusammenstellen bei Bestellung = Phase 2 (Bestellungen).
 - Fertigen erhöht Produktbestand an einem gewählten Standort, Materialabbuchung an gewähltem/selben Standort (Start: ein Standort pro Buchung).
