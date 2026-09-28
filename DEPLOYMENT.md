@@ -152,13 +152,25 @@ Dauerhaft im Repo:
 
 | Tag / Branch | Bedeutung |
 |--------------|-----------|
-| **`ui-v1.4`** / `main` | Materialien/Produkte als Aktionskarten + Dialoge (aktuell) |
+| **`ui-v1.5`** / `main` (nach Merge) | Bestell-Edit Dialog (ADR `0026`) |
+| **`ui-v1.4`** / `main` | Materialien/Produkte als Aktionskarten + Dialoge |
 | **`ui-v1.3`** | Kontrast hart für alle Formularfelder |
 | **`ui-v1.1`** / Branch `ui-redesign` | Redesign + Kontrast app-weit |
 | **`ui-v1`** | Slice 1 vor Kontrast-Pass (Tag fest; GitHub ließ Update nicht zu) |
 | **`ui-classic`** | UI **vor** dem Redesign |
 
-**Aktuell deployen — Tag `ui-v1.4` (auf `main`):**
+**Aktuell deployen — nach Merge Tag `ui-v1.5` (oder `main`):**
+
+```bash
+cd /opt/holzlinge-inventar
+git fetch --tags origin
+git checkout ui-v1.5   # oder: git checkout main && git pull
+git log -1 --oneline
+docker compose build --no-cache
+docker compose up -d --force-recreate
+```
+
+**Vorgänger — Tag `ui-v1.4`:**
 
 ```bash
 cd /opt/holzlinge-inventar

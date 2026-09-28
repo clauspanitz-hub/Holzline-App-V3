@@ -69,6 +69,7 @@ from app.schemas import (
     ImportQueueItemRead,
     ImportQueueStatusUpdate,
     OrderCreate,
+    OrderEdit,
     OrderLineLink,
     OrderRead,
     OrderUpdate,
@@ -766,6 +767,17 @@ def get_order(order_id: int, db: Session = Depends(get_db)) -> OrderRead:
 @router.patch("/orders/{order_id}", response_model=OrderRead)
 def update_order(order_id: int, payload: OrderUpdate, db: Session = Depends(get_db)) -> OrderRead:
     return services.update_order(db, order_id, payload)
+
+
+@router.put("/orders/{order_id}/edit", response_model=OrderRead)
+def edit_order(
+    order_id: int,
+    payload: OrderEdit,
+    _: AdminUser,
+    db: Session = Depends(get_db),
+) -> OrderRead:
+    """Admin: Positionen + Notiz lokal bearbeiten (kein Shopify-Write)."""
+    return services.edit_order(db, order_id, payload)
 
 
 @router.delete("/orders/{order_id}", status_code=204)

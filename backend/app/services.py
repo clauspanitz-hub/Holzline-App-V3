@@ -3360,6 +3360,105 @@ def update_order(db: Session, order_id: int, payload: "OrderUpdate") -> "OrderRe
     return _order_read(_order_load(db, order_id))
 
 
+EDITABLE_ORDER_STATUSES = frozenset({"open", "review", "ready"})
+
+
+def edit_order(db: Session, order_id: int, payload: "OrderEdit") -> "OrderRead":
+    """Admin: Positionen + Notiz lokal ersetzen; Todos neu syncen. Kein Shopify-Write."""
+    from app.schemas import OrderEdit
+
+    if not isinstance(payload, OrderEdit):
+        payload = OrderEdit.model_validate(payload)
+    order = _order_load(db, order_id)
+    if order.status not in EDITABLE_ORDER_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail="Versendete Bestellung kann nicht bearbeitet werden",
+        )
+
+    notices: list[str] = []
+    if payload.note is not None:
+        note = (payload.note or "").strip()
+        order.note = note[:2000] or None
+
+    existing_by_id = {ln.id: ln for ln in list(order.lines)}
+    keep_ids: set[int] = set()
+
+    for item in payload.lines:
+        product = _load_product(db, item.product_id) if item.product_id else None
+        material = _load_material(db, item.material_id) if item.material_id else None
+        variant = _load_set_variant(db, item.set_variant_id) if item.set_variant_id else None
+        label = (item.label or "").strip()
+        if not label:
+            if product:
+                label = product.name
+            elif material:
+                label = material.name
+            elif variant:
+                label = _set_line_label(variant)
+
+        line: OrderLine | None = None
+        if item.id is not None:
+            line = existing_by_id.get(item.id)
+            if line is None or line.order_id != order.id:
+                raise HTTPException(status_code=400, detail=f"Position {item.id} gehört nicht zu dieser Bestellung")
+            keep_ids.add(line.id)
+            line.quantity = _q(item.quantity)
+            line.product_id = product.id if product else None
+            line.material_id = material.id if material else None
+            line.set_variant_id = variant.id if variant else None
+            line.label = label
+            if product or material or variant:
+                line.suggested_product_id = None
+                _complete_create_article_todos(line)
+        else:
+            line = OrderLine(
+                quantity=_q(item.quantity),
+                label=label,
+                product_id=product.id if product else None,
+                material_id=material.id if material else None,
+                set_variant_id=variant.id if variant else None,
+            )
+            order.lines.append(line)
+            db.flush()
+            keep_ids.add(line.id)
+
+    for ln in list(order.lines):
+        if ln.id not in keep_ids:
+            order.lines.remove(ln)
+
+    db.flush()
+    order = _order_load(db, order_id)
+
+    if order.status != "review":
+        for line in order.lines:
+            _sync_line_todos(db, line)
+        db.flush()
+        order = _order_load(db, order_id)
+        _refresh_order_status(db, order)
+    else:
+        # Zur Prüfung: nur unzugeordnete create_article-Todos anpassen wenn schon vorgemerkt;
+        # keine Fertigen-/Zusammenstellen-Todos vor Abnicken.
+        for line in order.lines:
+            if line.product_id or line.material_id or line.set_variant_id:
+                _complete_create_article_todos(line)
+                for todo in list(line.todos):
+                    if todo.status == "open" and todo.kind in ("manufacture", "assemble"):
+                        db.delete(todo)
+            else:
+                for todo in list(line.todos):
+                    if todo.status == "open" and todo.kind == "create_article":
+                        todo.quantity = _q(line.quantity)
+                        todo.title = f"Artikel anlegen: {(line.shop_title or line.label or 'Artikel').strip()}"
+
+    if not order.lines:
+        notices.append("Bestellung hat keine Positionen mehr.")
+
+    order.updated_at = _utcnow()
+    db.commit()
+    return _order_read(_order_load(db, order_id), notices=notices)
+
+
 def delete_order(db: Session, order_id: int) -> None:
     order = db.get(CustomerOrder, order_id)
     if not order:
