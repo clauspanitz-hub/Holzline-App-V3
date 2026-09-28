@@ -932,6 +932,11 @@ table .row-actions .btn {
   overflow-wrap: anywhere;
 }
 
+/* FamilySelect nutzt class "empty" für Platzhalter — nicht die Absatz-Padding von .empty */
+.family-select-trigger span.empty {
+  padding: 0;
+}
+
 .family-select-caret {
   color: var(--muted);
   font-size: 0.7rem;
@@ -1654,11 +1659,38 @@ textarea:-webkit-autofill {
   margin-top: 0.9rem;
 }
 
+/* Bestellzeilen (Anlegen + Bearbeiten): Selects dürfen nicht auf ~1 Zeichen kollabieren.
+   Früher: 1fr + 5.5rem + auto — die auto-Spalte (Set-<select>) wuchs auf Optionsbreite und
+   quetschte die 1fr-Spalte; Edit hat zusätzlich Material → Felder unbenutzbar. */
 .order-line {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 5.5rem auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.5rem;
   align-items: end;
+}
+
+.order-line > * {
+  min-width: 0;
+}
+
+.order-line select,
+.order-line .family-select,
+.order-line .family-select-trigger {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.order-line .family-select-trigger span:not(.family-select-caret) {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.order-line > label:has(> input[type="number"]) {
+  max-width: 6.5rem;
 }
 
 .order-line-free {
@@ -1676,7 +1708,12 @@ textarea:-webkit-autofill {
 
 @media (max-width: 640px) {
   .order-line {
-    grid-template-columns: minmax(0, 1fr) 4.5rem auto;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .order-line > label:has(> input[type="number"]) {
+    max-width: none;
+    width: 8rem;
   }
 }
 
