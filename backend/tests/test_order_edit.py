@@ -14,7 +14,16 @@ from sqlalchemy.pool import StaticPool
 
 from app.auth import require_user
 from app.database import Base, seed_locations
-from app.models import CustomerOrder, Product, ProductStock, User, UserRole, WorkTodo
+from app.models import (
+    CustomerOrder,
+    Product,
+    ProductSet,
+    ProductStock,
+    SetVariant,
+    User,
+    UserRole,
+    WorkTodo,
+)
 from app.routers import router
 from app.schemas import OrderEdit, OrderLineEdit
 from app.services import create_order, edit_order
@@ -139,6 +148,119 @@ def test_edit_add_freetext_and_product_line():
         )
     ).all()
     assert len(create_todos) == 1
+    db.close()
+
+
+def _set_variant(db: Session, name: str = "Geburtstagsring") -> SetVariant:
+    ps = ProductSet(name=name, handle=f"{name.casefold().replace(' ', '-')}-set")
+    db.add(ps)
+    db.flush()
+    variant = SetVariant(
+        set_id=ps.id,
+        option1_name="Farbe",
+        option1_value="Rot",
+    )
+    db.add(variant)
+    db.flush()
+    return variant
+
+
+def _open_order_with_set(db: Session, variant: SetVariant, qty: str = "1") -> CustomerOrder:
+    from app.schemas import OrderCreate, OrderLineCreate
+
+    read = create_order(
+        db,
+        OrderCreate(
+            ordered_on=datetime(2026, 9, 28, 12, 0, 0),
+            customer_name="Set-Kunde",
+            lines=[OrderLineCreate(quantity=Decimal(qty), set_variant_id=variant.id)],
+        ),
+    )
+    return db.get(CustomerOrder, read.id)
+
+
+def test_edit_note_does_not_reopen_completed_assemble():
+    """Reine Notiz darf Zusammenstellen nicht erneut anlegen (sonst doppelte BOM-Abbuchung)."""
+    db = _session()
+    variant = _set_variant(db)
+    order = _open_order_with_set(db, variant, "1")
+    line = order.lines[0]
+    todos = db.scalars(select(WorkTodo).where(WorkTodo.order_id == order.id, WorkTodo.status == "open")).all()
+    assert len(todos) == 1
+    assert todos[0].kind == "assemble"
+    todos[0].status = "done"
+    todos[0].completed_at = datetime(2026, 9, 28, 13, 0, 0)
+    db.commit()
+    order.status = "ready"
+    db.commit()
+    done_id = todos[0].id
+
+    result = edit_order(
+        db,
+        order.id,
+        OrderEdit(
+            note="Personalisierung: Mia",
+            lines=[OrderLineEdit(id=line.id, quantity=Decimal("1"), set_variant_id=variant.id)],
+        ),
+    )
+    assert result.note == "Personalisierung: Mia"
+    assert result.status == "ready"
+    open_todos = db.scalars(select(WorkTodo).where(WorkTodo.order_id == order.id, WorkTodo.status == "open")).all()
+    assert open_todos == []
+    done = db.get(WorkTodo, done_id)
+    assert done is not None
+    assert done.status == "done"
+    db.close()
+
+
+def test_edit_note_keeps_open_manufacture_todo_id():
+    db = _session()
+    product = _product(db, "Ring Uni", stock=Decimal("0"))
+    order = _open_order_with_product(db, product, "2")
+    line = order.lines[0]
+    todo = db.scalars(select(WorkTodo).where(WorkTodo.order_id == order.id, WorkTodo.status == "open")).one()
+    todo_id = todo.id
+
+    result = edit_order(
+        db,
+        order.id,
+        OrderEdit(
+            note="nur Notiz",
+            lines=[OrderLineEdit(id=line.id, quantity=Decimal("2"), product_id=product.id)],
+        ),
+    )
+    assert result.note == "nur Notiz"
+    assert result.status == "open"
+    still = db.scalars(select(WorkTodo).where(WorkTodo.order_id == order.id, WorkTodo.status == "open")).all()
+    assert len(still) == 1
+    assert still[0].id == todo_id
+    assert still[0].quantity == Decimal("2")
+    db.close()
+
+
+def test_edit_assemble_qty_increase_after_done_creates_delta_only():
+    db = _session()
+    variant = _set_variant(db, "Delta-Set")
+    order = _open_order_with_set(db, variant, "1")
+    line = order.lines[0]
+    todo = db.scalars(select(WorkTodo).where(WorkTodo.order_id == order.id, WorkTodo.status == "open")).one()
+    todo.status = "done"
+    db.commit()
+    order.status = "ready"
+    db.commit()
+
+    result = edit_order(
+        db,
+        order.id,
+        OrderEdit(
+            lines=[OrderLineEdit(id=line.id, quantity=Decimal("3"), set_variant_id=variant.id)],
+        ),
+    )
+    assert result.status == "open"
+    open_todos = db.scalars(select(WorkTodo).where(WorkTodo.order_id == order.id, WorkTodo.status == "open")).all()
+    assert len(open_todos) == 1
+    assert open_todos[0].kind == "assemble"
+    assert open_todos[0].quantity == Decimal("2")
     db.close()
 
 
