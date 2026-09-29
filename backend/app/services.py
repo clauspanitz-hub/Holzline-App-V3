@@ -3201,7 +3201,20 @@ def _needs_manufacture(db: Session, product: Product, qty: Decimal) -> bool:
     return _product_stock_available(loaded) < _q(qty)
 
 
-def _sync_line_todos(db: Session, line: OrderLine) -> None:
+def _line_assignment_key(line: OrderLine) -> tuple:
+    """Menge + Zuordnung — Notiz/Label zählen nicht als Positionsänderung."""
+    return (_q(line.quantity), line.product_id, line.material_id, line.set_variant_id)
+
+
+def _done_assemble_quantity(line: OrderLine) -> Decimal:
+    total = Decimal("0")
+    for todo in list(line.todos):
+        if todo.status == "done" and todo.kind == "assemble":
+            total += _q(todo.quantity)
+    return total
+
+
+def _sync_line_todos(db: Session, line: OrderLine, *, credit_done_assemble: bool = False) -> None:
     for todo in list(line.todos):
         if todo.status == "open":
             db.delete(todo)
@@ -3210,6 +3223,10 @@ def _sync_line_todos(db: Session, line: OrderLine) -> None:
     qty = _q(line.quantity)
     if line.set_variant_id is not None:
         variant = line.set_variant or _load_set_variant(db, line.set_variant_id)
+        if credit_done_assemble:
+            qty = qty - _done_assemble_quantity(line)
+        if qty <= 0:
+            return
         db.add(
             WorkTodo(
                 order_id=line.order_id,
@@ -3382,6 +3399,8 @@ def edit_order(db: Session, order_id: int, payload: "OrderEdit") -> "OrderRead":
         order.note = note[:2000] or None
 
     existing_by_id = {ln.id: ln for ln in list(order.lines)}
+    before_keys = {ln.id: _line_assignment_key(ln) for ln in existing_by_id.values()}
+    before_variants = {ln.id: ln.set_variant_id for ln in existing_by_id.values()}
     keep_ids: set[int] = set()
 
     for item in payload.lines:
@@ -3430,16 +3449,32 @@ def edit_order(db: Session, order_id: int, payload: "OrderEdit") -> "OrderRead":
     db.flush()
     order = _order_load(db, order_id)
 
+    def _line_changed(line: OrderLine) -> bool:
+        prev = before_keys.get(line.id)
+        return prev is None or _line_assignment_key(line) != prev
+
+    changed_lines = [ln for ln in order.lines if _line_changed(ln)]
+    remaining_ids = {ln.id for ln in order.lines}
+    lines_removed = any(eid not in remaining_ids for eid in before_keys)
+
     if order.status != "review":
-        for line in order.lines:
-            _sync_line_todos(db, line)
-        db.flush()
-        order = _order_load(db, order_id)
-        _refresh_order_status(db, order)
+        # Nur geänderte/neue Positionen: reine Notiz darf erledigte Todos nicht neu anlegen
+        # (sonst Zusammenstellen/Fertigen doppelt, Stückliste ein zweites Mal abgebucht).
+        for line in changed_lines:
+            same_variant = (
+                line.id in before_variants
+                and before_variants[line.id] is not None
+                and before_variants[line.id] == line.set_variant_id
+            )
+            _sync_line_todos(db, line, credit_done_assemble=same_variant)
+        if changed_lines or lines_removed:
+            db.flush()
+            order = _order_load(db, order_id)
+            _refresh_order_status(db, order)
     else:
         # Zur Prüfung: nur unzugeordnete create_article-Todos anpassen wenn schon vorgemerkt;
         # keine Fertigen-/Zusammenstellen-Todos vor Abnicken.
-        for line in order.lines:
+        for line in changed_lines:
             if line.product_id or line.material_id or line.set_variant_id:
                 _complete_create_article_todos(line)
                 for todo in list(line.todos):
