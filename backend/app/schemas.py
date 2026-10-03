@@ -1039,3 +1039,44 @@ class TageslageRead(BaseModel):
     quote: str = ""
     next_steps: list[TageslageNextStep] = []
     error: str | None = None
+
+
+class PurchaseAssistantItem(BaseModel):
+    product_id: int
+    pieces_per_unit: Quantity = Field(gt=0)
+
+
+class PurchaseAssistantApply(BaseModel):
+    material_id: int | None = None
+    new_material_name: str | None = Field(default=None, max_length=200)
+    purchase_price: Money = Field(ge=0)
+    purchase_quantity: Quantity | None = Field(default=None, gt=0)
+    items: list[PurchaseAssistantItem] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def require_material_ref(self) -> "PurchaseAssistantApply":
+        has_id = self.material_id is not None
+        name = (self.new_material_name or "").strip()
+        if has_id and name:
+            raise ValueError("Nur material_id oder new_material_name setzen, nicht beides")
+        if not has_id and not name:
+            raise ValueError("material_id oder new_material_name erforderlich")
+        if name:
+            self.new_material_name = name
+        return self
+
+
+class PurchaseAssistantYieldRead(BaseModel):
+    material_id: int
+    product_id: int
+    product_name: str
+    pieces_per_unit: Quantity
+    unit_piece_price: Money
+    quantity_required: Quantity | None = None
+    from_yield: bool = True
+
+
+class PurchaseAssistantApplyResult(BaseModel):
+    material: MaterialRead
+    yields: list[PurchaseAssistantYieldRead] = []
+    created_material: bool = False

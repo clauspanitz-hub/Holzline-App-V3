@@ -22,6 +22,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **material_families / product_families:** Kataloge Eltern → eine Unterebene; Artikel referenziert genau einen Knoten (ADR `0025`)
 - **Unvollständig (UI):** Material: Mindestbestand, Einkaufspreis=0; Produkt: Mindestbestand, Stückliste, Verkaufspreis=0 — sichtbar als „!“ und als System-Tags `fehlt …` (ADR `0011`)
 - **product_materials:** Produkt-Stückliste — Material **oder** Komponenten-Produkt → Fertigen (ADR `0012`)
+- **material_product_yields:** Ausbeute (Stück pro Einkaufseinheit) je Material–Produkt für den Einkaufsassistenten (ADR `0028`)
 - **Materialherstellkosten:** live aus Produkt-Stückliste
 
 ### Phase 1.5 (Standorte & Sets) — Umgesetzt
@@ -93,6 +94,12 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Mindestbestand je Material/Produkt → Warnungen in Übersicht (vorgezogen in 1.5)
 - [x] Toast-Stack (bis Klick, optional „Zur Stelle?“); Material-Filter Negativbestand (ADR `0024`)
 
+### Phase 4: Einkaufsassistent — Umgesetzt
+- [x] Seite **Einkaufsassistent** unter Lager: Einkaufspreis + Ausbeute je Produkt → Stückpreis (ADR `0028`)
+- [x] Alle Materialien wählbar; Scratch-Modus nur rechnen; Übernehmen legt Material ggf. an
+- [x] Speichert `purchase_price` (+ `purchase_quantity` 1), BOM `quantity_required = 1/N`, Tabelle `material_product_yields`
+- [x] Kein Shopify-Write
+
 ## 5. Geschäftsregeln (gültig)
 - Keine Reservierungs-/Verschnittlogik.
 - **Auth (Phase 2):** Pflicht-Login; Rollen Admin und Mitarbeiter (ADR `0010`).
@@ -105,3 +112,4 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - Einkauf-Todos (nur Materialien): bei Bestandsänderung erledigen wenn Mindestbestand erfüllt (ohne Ausschuss); bei erneuter Unterschreitung neues offenes Todo (ADR `0023`).
 - Umwandlung: Uni→Vintage per Name am selben Standort, ohne Materialabbuchung (ADR `0006`).
 - Material ohne Varianten-System; unterschiedliche Ausbeuten nur über Produkt-Stücklisten-Mengen.
+- Einkaufsassistent: Stückpreis = Einkaufspreis ÷ Ausbeute; Übernehmen setzt BOM `1/N` und `material_product_yields` (ADR `0028`); kein Shopify-Write.

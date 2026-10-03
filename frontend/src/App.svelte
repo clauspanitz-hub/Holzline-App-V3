@@ -91,6 +91,15 @@
   let manufactureModal = $state(null)
   let assembleModal = $state(null) // { todo, set_name, variant_label, bom, warnings }
   let purchaseModal = $state(null)
+  /** Einkaufsassistent: Material wählen / neu / nur rechnen */
+  let paMode = $state('existing') // existing | scratch
+  let paMaterialId = $state('')
+  let paNewName = $state('')
+  let paPurchasePrice = $state('')
+  let paAddProductId = $state('')
+  /** @type {{ product_id: number, product_name: string, pieces_per_unit: string }[]} */
+  let paItems = $state([])
+  let paBusy = $state(false)
   let transferModal = $state(null)
   let transformModal = $state(null)
   let movementsModal = $state(null) // { title, rows }
@@ -1983,6 +1992,7 @@
       overview: 'Übersicht',
       materials: 'Materialien',
       products: 'Produkte',
+      'purchase-assistant': 'Einkaufsassistent',
       orders: 'Bestellungen',
       todos: 'Todos',
       staff: 'Bei Mitarbeitern',
@@ -1992,6 +2002,149 @@
       users: 'Benutzer',
     }
     return labels[tab] || 'Holzlinge'
+  }
+
+  function paPiecePrice(pieces) {
+    const price = Number(paPurchasePrice)
+    const n = Number(pieces)
+    if (!Number.isFinite(price) || price < 0 || !Number.isFinite(n) || n <= 0) return null
+    return price / n
+  }
+
+  function resetPurchaseAssistant() {
+    paMode = 'existing'
+    paMaterialId = ''
+    paNewName = ''
+    paPurchasePrice = ''
+    paAddProductId = ''
+    paItems = []
+  }
+
+  async function onPaMaterialChange(id) {
+    paMaterialId = id == null || id === '' ? '' : String(id)
+    paItems = []
+    if (!paMaterialId) return
+    const mat = materials.find((m) => String(m.id) === String(paMaterialId))
+    if (mat && (mat.purchase_price != null || mat.purchase_price === 0)) {
+      paPurchasePrice = String(mat.purchase_price ?? '')
+    }
+    try {
+      const rows = await api.purchaseAssistant.yields(Number(paMaterialId))
+      paItems = (rows || []).map((row) => ({
+        product_id: row.product_id,
+        product_name: row.product_name,
+        pieces_per_unit: String(row.pieces_per_unit ?? ''),
+      }))
+    } catch (err) {
+      // Fallback: Produkte aus used_in_products ohne Ausbeute
+      const used = mat?.used_in_products || []
+      paItems = used.map((p) => ({
+        product_id: p.id,
+        product_name: p.name,
+        pieces_per_unit: '',
+      }))
+      showFlash('error', err.message || 'Ausbeuten konnten nicht geladen werden')
+    }
+  }
+
+  function paAddProduct() {
+    if (!paAddProductId) return
+    const pid = Number(paAddProductId)
+    if (paItems.some((item) => item.product_id === pid)) {
+      showFlash('error', 'Produkt ist bereits in der Liste')
+      paAddProductId = ''
+      return
+    }
+    const product = products.find((p) => p.id === pid)
+    if (!product) return
+    paItems = [
+      ...paItems,
+      { product_id: product.id, product_name: product.name, pieces_per_unit: '' },
+    ]
+    paAddProductId = ''
+  }
+
+  function paRemoveItem(productId) {
+    paItems = paItems.filter((item) => item.product_id !== productId)
+  }
+
+  function paUpdatePieces(productId, value) {
+    paItems = paItems.map((item) =>
+      item.product_id === productId ? { ...item, pieces_per_unit: value } : item,
+    )
+  }
+
+  async function submitPurchaseAssistant() {
+    const price = Number(paPurchasePrice)
+    if (!Number.isFinite(price) || price < 0) {
+      showFlash('error', 'Einkaufspreis ungültig')
+      return
+    }
+    const items = []
+    for (const row of paItems) {
+      const n = Number(row.pieces_per_unit)
+      if (!Number.isFinite(n) || n <= 0) {
+        showFlash('error', `Ausbeute für „${row.product_name}“ fehlt oder ist ungültig`)
+        return
+      }
+      items.push({ product_id: row.product_id, pieces_per_unit: n })
+    }
+    if (paMode === 'scratch') {
+      const name = paNewName.trim()
+      if (!name) {
+        showFlash('error', 'Materialname erforderlich zum Übernehmen')
+        return
+      }
+      paBusy = true
+      try {
+        const result = await api.purchaseAssistant.apply({
+          new_material_name: name,
+          purchase_price: price,
+          purchase_quantity: 1,
+          items,
+        })
+        showFlash(
+          'ok',
+          result.created_material
+            ? `Material „${result.material.name}“ angelegt und übernommen`
+            : 'Übernommen',
+        )
+        loadedBuckets.inventory = false
+        await ensureTabData({ silent: true })
+        paMode = 'existing'
+        paMaterialId = String(result.material.id)
+        paNewName = ''
+        await onPaMaterialChange(result.material.id)
+        markSaved()
+      } catch (err) {
+        showFlash('error', err.message || 'Übernehmen fehlgeschlagen')
+      } finally {
+        paBusy = false
+      }
+      return
+    }
+    if (!paMaterialId) {
+      showFlash('error', 'Material wählen oder „Neues Material / nur rechnen“')
+      return
+    }
+    paBusy = true
+    try {
+      const result = await api.purchaseAssistant.apply({
+        material_id: Number(paMaterialId),
+        purchase_price: price,
+        purchase_quantity: 1,
+        items,
+      })
+      showFlash('ok', `Übernommen: ${result.material.name}`)
+      loadedBuckets.inventory = false
+      await ensureTabData({ silent: true })
+      await onPaMaterialChange(result.material.id)
+      markSaved()
+    } catch (err) {
+      showFlash('error', err.message || 'Übernehmen fehlgeschlagen')
+    } finally {
+      paBusy = false
+    }
   }
 
   async function ensureTabData({ silent = false } = {}) {
@@ -5067,6 +5220,132 @@
           </article>
         {/snippet}
       </CatalogActionList>
+    </section>
+  {:else if tab === 'purchase-assistant'}
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Einkaufsassistent</h2>
+      </div>
+      <p class="empty" style="margin-top:0">
+        Einkaufspreis einer Einkaufseinheit und Ausbeute je Produkt → Stückpreis.
+        Rechnen geht auch ohne Material; Übernehmen speichert Preis, Stückliste (1÷Ausbeute) und Ausbeuten.
+      </p>
+
+      <div class="chip-row" role="group" aria-label="Materialmodus">
+        <button
+          type="button"
+          class="chip"
+          class:active={paMode === 'existing'}
+          onclick={() => {
+            paMode = 'existing'
+            paNewName = ''
+          }}
+        >Vorhandenes Material</button>
+        <button
+          type="button"
+          class="chip"
+          class:active={paMode === 'scratch'}
+          onclick={() => {
+            paMode = 'scratch'
+            paMaterialId = ''
+            paItems = []
+          }}
+        >Neues Material / nur rechnen</button>
+      </div>
+
+      <div class="form-grid" style="margin-top:1rem">
+        {#if paMode === 'existing'}
+          <label>Material
+            <FamilySelect
+              bind:value={paMaterialId}
+              items={materials}
+              emptyLabel="Material wählen…"
+              onchange={(id) => onPaMaterialChange(id)}
+            />
+          </label>
+        {:else}
+          <label>Materialname (für Übernehmen)
+            <input type="text" bind:value={paNewName} placeholder="optional zum Rechnen, Pflicht zum Speichern" autocomplete="off" />
+          </label>
+        {/if}
+        <label>Einkaufspreis (€) pro Einkaufseinheit
+          <input type="number" step="0.01" min="0" bind:value={paPurchasePrice} inputmode="decimal" />
+        </label>
+      </div>
+
+      <div class="form-grid" style="margin-top:1rem;align-items:end">
+        <label>Produkt hinzufügen
+          <FamilySelect
+            bind:value={paAddProductId}
+            items={products.filter((p) => !paItems.some((i) => i.product_id === p.id))}
+            emptyLabel="Produkt wählen…"
+          />
+        </label>
+        <div class="row-actions">
+          <button type="button" class="btn secondary" onclick={paAddProduct} disabled={!paAddProductId}>Hinzufügen</button>
+        </div>
+      </div>
+
+      {#if paItems.length}
+        <div class="table-wrap" style="margin-top:1rem">
+          <table>
+            <thead>
+              <tr>
+                <th>Produkt</th>
+                <th>Ausbeute (Stück / Einkaufseinheit)</th>
+                <th>Stückpreis</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each paItems as row (row.product_id)}
+                {@const piece = paPiecePrice(row.pieces_per_unit)}
+                <tr>
+                  <td>{row.product_name}</td>
+                  <td>
+                    <input
+                      type="number"
+                      step="0.001"
+                      min="0.001"
+                      inputmode="decimal"
+                      value={row.pieces_per_unit}
+                      oninput={(e) => paUpdatePieces(row.product_id, e.currentTarget.value)}
+                      aria-label={`Ausbeute ${row.product_name}`}
+                    />
+                  </td>
+                  <td>
+                    {#if piece != null}
+                      {formatMoney(piece)}
+                    {:else}
+                      —
+                    {/if}
+                  </td>
+                  <td>
+                    <button type="button" class="btn secondary compact" onclick={() => paRemoveItem(row.product_id)}>Entfernen</button>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {:else}
+        <p class="empty">Noch keine Produkte — bei vorhandenem Material aus der Stückliste vorbefüllt, sonst hinzufügen.</p>
+      {/if}
+
+      <div class="row-actions" style="margin-top:1.25rem;flex-wrap:wrap;gap:.5rem">
+        <button
+          type="button"
+          class="btn"
+          disabled={paBusy || (paMode === 'existing' && !paMaterialId)}
+          onclick={submitPurchaseAssistant}
+        >
+          {paBusy ? 'Speichern…' : 'Übernehmen'}
+        </button>
+        <button type="button" class="btn secondary" onclick={resetPurchaseAssistant} disabled={paBusy}>Zurücksetzen</button>
+      </div>
+      <p class="empty" style="margin-bottom:0">
+        Übernehmen setzt den Einkaufspreis am Material (Einkaufsmenge 1) und die Stücklisten-Menge je Produkt auf 1÷Ausbeute. Kein Shopify-Schreiben.
+      </p>
     </section>
   {:else if tab === 'products'}
     <ExtraGapPanels

@@ -106,6 +106,10 @@ export const api = {
   purchaseSources: {
     overview: () => request('/api/purchase-sources/overview'),
   },
+  purchaseAssistant: {
+    yields: (materialId) => request(`/api/purchase-assistant/yields/${materialId}`),
+    apply: (body) => request('/api/purchase-assistant/apply', { method: 'POST', body: JSON.stringify(body) }),
+  },
   suggestions: {
     byColor: (colorId, { materials = true, products = true } = {}) =>
       request(`/api/suggestions/by-color/${colorId}?materials=${materials}&products=${products}`),

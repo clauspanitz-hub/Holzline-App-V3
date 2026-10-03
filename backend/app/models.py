@@ -197,6 +197,10 @@ class Material(Base):
         cascade="all, delete-orphan",
         order_by="MaterialPurchaseSource.id",
     )
+    product_yields: Mapped[list["MaterialProductYield"]] = relationship(
+        back_populates="material",
+        cascade="all, delete-orphan",
+    )
 
 
 class MaterialPurchaseSource(Base):
@@ -306,6 +310,21 @@ class ProductMaterial(Base):
     component_product: Mapped[Product | None] = relationship(
         foreign_keys=[component_product_id],
     )
+
+
+class MaterialProductYield(Base):
+    """Ausbeute: wie viele Produktstück aus einer Einkaufseinheit dieses Materials."""
+
+    __tablename__ = "material_product_yields"
+    __table_args__ = (UniqueConstraint("material_id", "product_id", name="uq_material_product_yield"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("materials.id", ondelete="CASCADE"), nullable=False)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    pieces_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+
+    material: Mapped[Material] = relationship(back_populates="product_yields")
+    product: Mapped[Product] = relationship()
 
 
 class ProductSet(Base):

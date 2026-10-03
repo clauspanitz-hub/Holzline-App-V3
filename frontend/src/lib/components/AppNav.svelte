@@ -34,6 +34,7 @@
         { id: 'materials', label: 'Materialien' },
         { id: 'products', label: 'Produkte' },
         { id: 'sets', label: 'Sets' },
+        { id: 'purchase-assistant', label: 'Einkaufsassistent' },
       ],
     },
     {
