@@ -57,7 +57,10 @@
   const staffGroups = $derived([
     {
       title: 'Werkstatt',
-      items: [{ id: 'staff', label: 'Bei Mitarbeitern', badge: staffCount || undefined }],
+      items: [
+        { id: 'todos', label: 'Todos', badge: openTodos || undefined },
+        { id: 'staff', label: 'Bei Mitarbeitern', badge: staffCount || undefined },
+      ],
     },
   ])
 

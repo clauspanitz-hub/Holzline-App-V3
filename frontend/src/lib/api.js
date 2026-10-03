@@ -280,6 +280,8 @@ export const api = {
       const qs = q.toString()
       return request(`/api/todos${qs ? `?${qs}` : ''}`)
     },
+    create: (body) => request('/api/todos', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) => request(`/api/todos/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     complete: (id) => request(`/api/todos/${id}/complete`, { method: 'POST' }),
     purchaseFromCritical: (body = {}) =>
       request('/api/todos/purchase-from-critical', { method: 'POST', body: JSON.stringify(body) }),

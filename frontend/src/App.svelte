@@ -104,6 +104,17 @@
   let loadedBuckets = { catalog: false, inventory: false, orders: false, sets: false, queue: false }
   let todoCategoryFilter = $state('workshop')
   let todoStatusFilter = $state('open')
+  let todoModal = $state(null) // { mode: 'create'|'edit', id?: number, status?: string }
+  let todoForm = $state({
+    kind: 'manufacture',
+    title: '',
+    quantity: '1',
+    order_id: '',
+    order_line_id: '',
+    product_id: '',
+    material_id: '',
+    set_variant_id: '',
+  })
   let orderForm = $state(emptyOrderForm())
   let orderEditModal = $state(null) // { orderId, note, lines: [{id, product_id, material_id, set_variant_id, label, quantity}], emptyWarn }
   let manufactureTodoId = $state(null)
@@ -855,10 +866,117 @@
     return todos.filter((t) => t.status === 'open' && t.category === 'workshop').length
   }
 
+  function todoHasActionTarget(todo) {
+    if (todo.kind === 'manufacture') return !!todo.product_id
+    if (todo.kind === 'purchase') return !!todo.material_id
+    if (todo.kind === 'assemble') return !!todo.set_variant_id
+    if (todo.kind === 'create_article') return !!todo.order_id
+    return false
+  }
+
+  function emptyTodoForm() {
+    return {
+      kind: 'manufacture',
+      title: '',
+      quantity: '1',
+      order_id: '',
+      order_line_id: '',
+      product_id: '',
+      material_id: '',
+      set_variant_id: '',
+    }
+  }
+
+  function openTodoCreate() {
+    todoForm = emptyTodoForm()
+    todoModal = { mode: 'create' }
+  }
+
+  function openTodoEditor(todo) {
+    todoForm = {
+      kind: todo.kind || 'manufacture',
+      title: todo.title || '',
+      quantity: String(todo.quantity ?? 1),
+      order_id: todo.order_id != null ? String(todo.order_id) : '',
+      order_line_id: todo.order_line_id != null ? String(todo.order_line_id) : '',
+      product_id: todo.product_id != null ? String(todo.product_id) : '',
+      material_id: todo.material_id != null ? String(todo.material_id) : '',
+      set_variant_id: todo.set_variant_id != null ? String(todo.set_variant_id) : '',
+    }
+    todoModal = { mode: 'edit', id: todo.id, status: todo.status }
+  }
+
+  function closeTodoModal() {
+    todoModal = null
+  }
+
+  function todoFormPayload() {
+    const qty = Number(String(todoForm.quantity).replace(',', '.'))
+    return {
+      kind: todoForm.kind,
+      title: String(todoForm.title || '').trim(),
+      quantity: Number.isFinite(qty) && qty > 0 ? qty : 1,
+      order_id: todoForm.order_id ? Number(todoForm.order_id) : null,
+      order_line_id: todoForm.order_line_id ? Number(todoForm.order_line_id) : null,
+      product_id: todoForm.product_id ? Number(todoForm.product_id) : null,
+      material_id: todoForm.material_id ? Number(todoForm.material_id) : null,
+      set_variant_id: todoForm.set_variant_id ? Number(todoForm.set_variant_id) : null,
+    }
+  }
+
+  async function saveTodoModal() {
+    const payload = todoFormPayload()
+    if (!payload.title) {
+      showFlash('error', 'Titel erforderlich.')
+      return
+    }
+    saving = true
+    try {
+      if (todoModal?.mode === 'edit' && todoModal.id) {
+        await api.todos.update(todoModal.id, payload)
+        showFlash('ok', 'Todo gespeichert.')
+      } else {
+        await api.todos.create(payload)
+        showFlash('ok', 'Todo angelegt.')
+      }
+      closeTodoModal()
+      todos = await api.todos.list()
+      if (authUser?.role === 'admin') orders = await api.orders.list()
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
+  async function completeTodoFromModal() {
+    if (!todoModal?.id) return
+    saving = true
+    try {
+      await api.todos.complete(todoModal.id)
+      showFlash('ok', 'Todo erledigt.')
+      closeTodoModal()
+      todos = await api.todos.list()
+      if (authUser?.role === 'admin') orders = await api.orders.list()
+    } catch (error) {
+      showFlash('error', error.message)
+    } finally {
+      saving = false
+    }
+  }
+
   function startTodo(todo) {
+    if (todo.source === 'manual' && !todoHasActionTarget(todo)) {
+      openTodoEditor(todo)
+      return
+    }
     if (todo.kind === 'manufacture') {
       const product = products.find((p) => p.id === todo.product_id)
       if (!product) {
+        if (todo.source === 'manual') {
+          openTodoEditor(todo)
+          return
+        }
         showFlash('error', 'Produkt nicht gefunden.')
         return
       }
@@ -868,6 +986,10 @@
     if (todo.kind === 'purchase') {
       const material = materials.find((m) => m.id === todo.material_id)
       if (!material) {
+        if (todo.source === 'manual') {
+          openTodoEditor(todo)
+          return
+        }
         showFlash('error', 'Material nicht gefunden.')
         return
       }
@@ -876,6 +998,10 @@
     }
     if (todo.kind === 'assemble') {
       if (!todo.set_variant_id) {
+        if (todo.source === 'manual') {
+          openTodoEditor(todo)
+          return
+        }
         showFlash('error', 'Keine Set-Variante an diesem Todo.')
         return
       }
@@ -887,6 +1013,10 @@
       const line = orderLineForTodo(todo)
       if (order && (order.origin === 'shopify' || order.origin === 'etsy')) {
         openCreateProductFromOrderLine(order, line || { label: todoLabelForCreate(todo), quantity: todo.quantity })
+        return
+      }
+      if (todo.source === 'manual' && !order) {
+        openTodoEditor(todo)
         return
       }
       articleChoiceTodo = todo
@@ -1878,6 +2008,32 @@
           loadedBuckets.catalog = true
           loadedBuckets.inventory = true
         }
+        if (tab === 'todos' || tab === 'staff') {
+          const jobs = []
+          if (!loadedBuckets.orders) {
+            jobs.push(
+              Promise.all([api.orders.list(), api.todos.list()]).then(([o, td]) => {
+                orders = o
+                todos = td
+                loadedBuckets.orders = true
+              }),
+            )
+          } else if (tab === 'todos') {
+            jobs.push(api.todos.list().then((td) => { todos = td }))
+          }
+          if (!materials.length) {
+            jobs.push(api.materials.list().then((m) => { materials = m }))
+          }
+          if (!loadedBuckets.sets) {
+            jobs.push(
+              api.sets.list().then((s) => {
+                sets = s
+                loadedBuckets.sets = true
+              }),
+            )
+          }
+          if (jobs.length) await Promise.all(jobs)
+        }
         return
       }
       const t = tab
@@ -2131,8 +2287,26 @@
   const reviewOrders = $derived(orders.filter((o) => o.status === 'review'))
   const shippedOrders = $derived(orders.filter((o) => o.status === 'shipped'))
   const overviewOpenTodos = $derived(
-    todos.filter((t) => t.status === 'open' && t.category !== 'purchase' && t.order_id),
+    todos.filter((t) => t.status === 'open' && t.category !== 'purchase'),
   )
+  const todoModalOrderLines = $derived.by(() => {
+    if (!todoForm.order_id) return []
+    const order = orders.find((o) => String(o.id) === String(todoForm.order_id))
+    return order?.lines || []
+  })
+  const todoVariantOptions = $derived.by(() => {
+    const rows = []
+    for (const s of sets || []) {
+      for (const v of s.variants || []) {
+        const parts = [v.option1_value, v.option2_value, v.option3_value].filter(Boolean)
+        rows.push({
+          id: v.id,
+          label: `${s.name}${parts.length ? ` · ${parts.join(' / ')}` : ''}`,
+        })
+      }
+    }
+    return rows
+  })
   const incompleteMaterials = $derived(
     materials.filter((item) => Array.isArray(item.incomplete_fields) && item.incomplete_fields.length),
   )
@@ -4174,7 +4348,11 @@
               <td>{todo.status === 'done' ? 'erledigt' : 'offen'}</td>
               <td class="col-actions">
                 {#if todo.status === 'open'}
-                  <button type="button" class="btn" onclick={() => startTodo(todo)}>Los</button>
+                  <button type="button" class="btn" onclick={() => startTodo(todo)}>
+                    {todo.source === 'manual' && !todoHasActionTarget(todo) ? 'Bearbeiten' : 'Los'}
+                  </button>
+                {:else if todo.source === 'manual'}
+                  <button type="button" class="btn secondary" onclick={() => openTodoEditor(todo)}>Ansehen</button>
                 {/if}
               </td>
             </tr>
@@ -4190,7 +4368,11 @@
           <div class="action-card-body">
             <h3>{todoKindLabel(todo.kind)}</h3>
             <p>{todo.title}</p>
-            <p class="empty">{todo.order_label || (todo.order_id ? `#${todo.order_id}` : 'Mindestbestand')} · {formatQty(todo.quantity)}</p>
+            <p class="empty">
+              {todo.order_label
+                || (todo.order_id ? `#${todo.order_id}` : (todo.source === 'manual' ? 'manuell' : (todo.kind === 'purchase' ? 'Mindestbestand' : '—')))}
+              · {formatQty(todo.quantity)}
+            </p>
             {#if todo.kind === 'purchase' && todo.preferred_source_url}
               <div class="purchase-source-links">
                 <a
@@ -4205,7 +4387,11 @@
             {/if}
           </div>
           {#if todo.status === 'open'}
-            <button type="button" class="btn action-card-cta" onclick={() => startTodo(todo)}>Los</button>
+            <button type="button" class="btn action-card-cta" onclick={() => startTodo(todo)}>
+              {todo.source === 'manual' && !todoHasActionTarget(todo) ? 'Bearbeiten' : 'Los'}
+            </button>
+          {:else if todo.source === 'manual'}
+            <button type="button" class="btn secondary action-card-cta" onclick={() => openTodoEditor(todo)}>Ansehen</button>
           {/if}
         </article>
       {:else}
@@ -4431,13 +4617,13 @@
       <div class="panel-header">
         <h2>
           <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewTodosOpen = !overviewTodosOpen)}>
-            {overviewTodosOpen ? '▼' : '▶'} Offene Todos aus Bestellungen
+            {overviewTodosOpen ? '▼' : '▶'} Offene Werkstatt-Todos
             <span class="empty">({overviewOpenTodos.length})</span>
           </button>
         </h2>
       </div>
       {#if overviewTodosOpen}
-        {@render todosMarkup(overviewOpenTodos, 'Keine offenen Werkstatt-Todos aus Bestellungen.')}
+        {@render todosMarkup(overviewOpenTodos, 'Keine offenen Werkstatt-Todos.')}
       {/if}
     </section>
 
@@ -5222,12 +5408,19 @@
     <section class="panel todos-panel">
       <div class="panel-header">
         <h2>Todos</h2>
-        <button type="button" class="btn secondary" disabled={saving} onclick={() => generatePurchaseTodos()}>
-          Einkauf-Todos erzeugen
-        </button>
+        <div class="chip-row" style="margin:0">
+          <button type="button" class="btn" disabled={saving} onclick={() => openTodoCreate()}>
+            Todo anlegen
+          </button>
+          {#if authUser?.role === 'admin'}
+            <button type="button" class="btn secondary" disabled={saving} onclick={() => generatePurchaseTodos()}>
+              Einkauf-Todos erzeugen
+            </button>
+          {/if}
+        </div>
       </div>
       <p class="empty" style="margin-top:0">
-        Werkstatt zuerst. Tippen → Aktion. Einkauf-Todos für kritische Materialien per Knopf.
+        Werkstatt zuerst. Tippen → Aktion oder Bearbeiten. Manuell: Art + Titel reicht.
       </p>
       <div class="chip-row" role="group" aria-label="Todo-Art">
         <button type="button" class="chip" class:active={todoCategoryFilter === 'workshop'} onclick={() => (todoCategoryFilter = 'workshop')}>Werkstatt</button>
@@ -6031,6 +6224,93 @@
         <div class="modal-actions">
           <button type="button" class="btn secondary" onclick={() => (passwordModal = false)}>Abbrechen</button>
           <button class="btn" disabled={saving}>Speichern</button>
+        </div>
+      </form>
+    </div>
+  </div>
+{/if}
+
+{#if todoModal}
+  <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && closeTodoModal()}>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="todo-modal-title">
+      <h3 id="todo-modal-title">{todoModal.mode === 'edit' ? 'Todo bearbeiten' : 'Todo anlegen'}</h3>
+      <form class="form-grid" onsubmit={(e) => { e.preventDefault(); saveTodoModal() }}>
+        <label>Art
+          <select bind:value={todoForm.kind}>
+            <option value="manufacture">Fertigen</option>
+            <option value="create_article">Artikel anlegen</option>
+            <option value="assemble">Zusammenstellen</option>
+            <option value="purchase">Einkauf</option>
+          </select>
+        </label>
+        <label>Titel
+          <input type="text" bind:value={todoForm.title} required maxlength="300" placeholder="Kurzbeschreibung" />
+        </label>
+        <label>Menge
+          <input type="text" inputmode="decimal" bind:value={todoForm.quantity} />
+        </label>
+        <label>Bestellung (optional)
+          <select
+            bind:value={todoForm.order_id}
+            onchange={() => { todoForm.order_line_id = '' }}
+          >
+            <option value="">— keine —</option>
+            {#each orders as order}
+              <option value={String(order.id)}>
+                {order.customer_name || order.external_number || `Bestellung ${order.id}`}
+                · {order.status}
+              </option>
+            {/each}
+          </select>
+        </label>
+        {#if todoForm.order_id}
+          <label>Position (optional)
+            <select bind:value={todoForm.order_line_id}>
+              <option value="">— keine —</option>
+              {#each todoModalOrderLines as line}
+                <option value={String(line.id)}>{line.label} · {formatQty(line.quantity)}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
+        {#if todoForm.kind === 'manufacture' || todoForm.kind === 'create_article'}
+          <label>Produkt (optional)
+            <select bind:value={todoForm.product_id}>
+              <option value="">— keines —</option>
+              {#each products as p}
+                <option value={String(p.id)}>{p.name}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
+        {#if todoForm.kind === 'purchase'}
+          <label>Material (optional)
+            <select bind:value={todoForm.material_id}>
+              <option value="">— keines —</option>
+              {#each materials as m}
+                <option value={String(m.id)}>{m.name}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
+        {#if todoForm.kind === 'assemble'}
+          <label>Set-Variante (optional)
+            <select bind:value={todoForm.set_variant_id}>
+              <option value="">— keine —</option>
+              {#each todoVariantOptions as v}
+                <option value={String(v.id)}>{v.label}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
+        <div class="modal-actions" style="grid-column:1/-1">
+          <button type="button" class="btn secondary" onclick={closeTodoModal}>Abbrechen</button>
+          {#if todoModal.mode === 'edit' && todoModal.status === 'open'}
+            <button type="button" class="btn secondary" disabled={saving} onclick={() => completeTodoFromModal()}>
+              Erledigen
+            </button>
+          {/if}
+          <button class="btn" disabled={saving}>{todoModal.mode === 'edit' ? 'Speichern' : 'Anlegen'}</button>
         </div>
       </form>
     </div>

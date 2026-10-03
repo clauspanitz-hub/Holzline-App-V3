@@ -121,6 +121,9 @@ def sync_purchase_todos(
 
     open_todos = list(db.scalars(open_stmt).unique().all())
     for todo in open_todos:
+        # Manuelle Einkauf-Todos nicht automatisch erledigen (ADR 0027).
+        if getattr(todo, "source", "auto") == "manual":
+            continue
         material = todo.material
         if material is None or not is_material_critical(material):
             _complete_todo(todo)
@@ -163,6 +166,7 @@ def sync_purchase_todos(
                 kind="purchase",
                 category="purchase",
                 status="open",
+                source="auto",
                 title=f"Einkauf: {material.name}",
                 quantity=qty,
                 product_id=None,

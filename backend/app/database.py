@@ -207,6 +207,7 @@ def init_db() -> None:
         migrate_purchase_todos(engine)
         migrate_order_line_set_variant(engine)
         migrate_purchase_sources(engine)
+        migrate_manual_todos(engine)
         seed_admin_user(db)
         from app.services import backfill_incomplete_tags, ensure_system_incomplete_tags
 
@@ -685,6 +686,25 @@ def migrate_order_line_set_variant(engine) -> None:
                 "REFERENCES set_variants(id) ON DELETE SET NULL"
             )
         )
+
+
+def migrate_manual_todos(engine) -> None:
+    """Manuelle Todos: source + set_variant_id am Todo (ADR 0027)."""
+    insp = inspect(engine)
+    if "todos" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("todos")}
+    with engine.begin() as conn:
+        if "source" not in cols:
+            conn.execute(text("ALTER TABLE todos ADD COLUMN source VARCHAR(20) NOT NULL DEFAULT 'auto'"))
+            conn.execute(text("UPDATE todos SET source = 'auto' WHERE source IS NULL OR source = ''"))
+        if "set_variant_id" not in cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE todos ADD COLUMN set_variant_id INTEGER "
+                    "REFERENCES set_variants(id) ON DELETE SET NULL"
+                )
+            )
 
 
 def migrate_purchase_todos(engine) -> None:
