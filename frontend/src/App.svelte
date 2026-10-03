@@ -1236,7 +1236,7 @@
   async function openAssemble(todo) {
     assembleTodoId = todo.id
     assembleForm = {
-      quantity: String(todo.quantity ?? 1),
+      quantity: qtyInputValue(todo.quantity ?? 1, 0),
       location_id: String(locations.find((x) => x.name === 'Hamburg')?.id || locations[0]?.id || ''),
     }
     assemblePreview = null
@@ -1245,6 +1245,7 @@
       set_name: todo.set_name || 'Set',
       variant_label: todo.variant_label || '',
       set_variant_id: todo.set_variant_id,
+      set_id: todo.set_id ?? null,
     }
     try {
       const preview = await api.sets.assemblePreview(todo.set_variant_id, todo.quantity)
@@ -1256,6 +1257,20 @@
       }
     } catch (error) {
       assemblePreview = { bom: [], warnings: [error.message] }
+    }
+  }
+
+  async function openSetFromAssemble() {
+    const setId = assembleModal?.set_id
+    if (!setId) return
+    assembleModal = null
+    assembleTodoId = null
+    assemblePreview = null
+    await selectTab('sets')
+    try {
+      await openSet({ id: setId }, 2)
+    } catch (error) {
+      showFlash('error', error.message)
     }
   }
 
@@ -6597,7 +6612,15 @@
             </ul>
           </div>
         {:else if assemblePreview}
-          <p class="empty" style="grid-column:1/-1">{assemblePreview.warnings?.join(' ') || 'Keine Stücklistenzeilen.'}</p>
+          <div style="grid-column:1/-1">
+            <p class="empty" style="margin:0 0 .5rem">
+              Varianten-Stückliste fehlt — bitte unter Sets die Options-Zuordnung anlegen und anwenden
+              (oder manuell ergänzen). Ohne Stückliste ist Zusammenstellen nicht möglich.
+            </p>
+            {#if assembleModal.set_id}
+              <button type="button" class="btn secondary" disabled={saving} onclick={openSetFromAssemble}>Set einrichten</button>
+            {/if}
+          </div>
         {:else}
           <p class="empty" style="grid-column:1/-1">Stückliste wird geladen…</p>
         {/if}
