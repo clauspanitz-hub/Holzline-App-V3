@@ -9,6 +9,7 @@
     templateSeriesPrefix,
   } from './lib/setOptionMatch.js'
   import FamilySelect from './lib/components/FamilySelect.svelte'
+  import SetVariantSelect from './lib/components/SetVariantSelect.svelte'
   import ProductGroupSection from './lib/components/ProductGroupSection.svelte'
   import CatalogActionList from './lib/components/CatalogActionList.svelte'
   import BackupPanel from './lib/components/BackupPanel.svelte'
@@ -363,21 +364,30 @@
     }
   }
 
-  function variantOptionLabel(setItem, variant) {
+  /** Kurzes Options-Label (ohne Set-Namen), z. B. „Fisch / rot“. */
+  function shortVariantOptionLabel(variant) {
     const parts = [variant.option1_value, variant.option2_value, variant.option3_value].filter(Boolean)
-    const vLabel = parts.length ? parts.join(' / ') : variant.label || `Variante #${variant.id}`
-    return `${setItem.name} · ${vLabel}`
+    if (parts.length) return parts.join(' / ')
+    return variant.label || `Variante #${variant.id}`
   }
 
-  function allSetVariantOptions() {
+  /** Alle Set-Varianten für SetVariantSelect: Gruppe = setName, Zeile = label. */
+  const allSetVariantOptions = $derived.by(() => {
     const out = []
-    for (const s of sets) {
+    for (const s of sets || []) {
       for (const v of s.variants || []) {
-        out.push({ id: v.id, setId: s.id, label: variantOptionLabel(s, v) })
+        const label = shortVariantOptionLabel(v)
+        out.push({
+          id: v.id,
+          setId: s.id,
+          setName: s.name,
+          label,
+          fullLabel: `${s.name} · ${label}`,
+        })
       }
     }
     return out
-  }
+  })
 
   function onOrderProductPicked(index, productId) {
     const lines = [...orderForm.lines]
@@ -396,8 +406,8 @@
     const lines = [...orderForm.lines]
     lines[index] = { ...lines[index], set_variant_id: variantId, product_id: variantId ? '' : lines[index].product_id }
     if (variantId) {
-      const opt = allSetVariantOptions().find((o) => String(o.id) === String(variantId))
-      if (opt) lines[index].label = opt.label
+      const opt = allSetVariantOptions.find((o) => String(o.id) === String(variantId))
+      if (opt) lines[index].label = opt.fullLabel || `${opt.setName} · ${opt.label}`
     }
     if (variantId && index === lines.length - 1) {
       lines.push(emptyOrderLine())
@@ -2293,19 +2303,6 @@
     if (!todoForm.order_id) return []
     const order = orders.find((o) => String(o.id) === String(todoForm.order_id))
     return order?.lines || []
-  })
-  const todoVariantOptions = $derived.by(() => {
-    const rows = []
-    for (const s of sets || []) {
-      for (const v of s.variants || []) {
-        const parts = [v.option1_value, v.option2_value, v.option3_value].filter(Boolean)
-        rows.push({
-          id: v.id,
-          label: `${s.name}${parts.length ? ` · ${parts.join(' / ')}` : ''}`,
-        })
-      }
-    }
-    return rows
   })
   const incompleteMaterials = $derived(
     materials.filter((item) => Array.isArray(item.incomplete_fields) && item.incomplete_fields.length),
@@ -5292,16 +5289,14 @@
                     />
                   </label>
                   <label class="review-line-assign">Set-Variante
-                    <select
+                    <SetVariantSelect
                       value={ln.set_variant_id || ''}
+                      items={allSetVariantOptions}
+                      emptyLabel="— kein Set —"
+                      inline
                       disabled={saving}
-                      onchange={(e) => setReviewLineSetVariant(order, ln, e.currentTarget.value)}
-                    >
-                      <option value="">— kein Set —</option>
-                      {#each allSetVariantOptions() as opt}
-                        <option value={opt.id}>{opt.label}</option>
-                      {/each}
-                    </select>
+                      onchange={(v) => setReviewLineSetVariant(order, ln, v)}
+                    />
                   </label>
                   {#if !ln.product_id && !ln.material_id && !ln.set_variant_id}
                     <div class="row-actions" style="margin-top:.35rem">
@@ -5366,15 +5361,12 @@
               />
             </label>
             <label>Set-Variante
-              <select
+              <SetVariantSelect
                 value={line.set_variant_id}
-                onchange={(e) => onOrderSetVariantPicked(i, e.currentTarget.value)}
-              >
-                <option value="">— kein Set —</option>
-                {#each allSetVariantOptions() as opt}
-                  <option value={opt.id}>{opt.label}</option>
-                {/each}
-              </select>
+                items={allSetVariantOptions}
+                emptyLabel="— kein Set —"
+                onchange={(v) => onOrderSetVariantPicked(i, v)}
+              />
             </label>
             <label>Menge<input type="number" step={qtyStep(0)} min="1" bind:value={line.quantity} required /></label>
             <div class="row-actions">
@@ -6295,12 +6287,11 @@
         {/if}
         {#if todoForm.kind === 'assemble'}
           <label>Set-Variante (optional)
-            <select bind:value={todoForm.set_variant_id}>
-              <option value="">— keine —</option>
-              {#each todoVariantOptions as v}
-                <option value={String(v.id)}>{v.label}</option>
-              {/each}
-            </select>
+            <SetVariantSelect
+              bind:value={todoForm.set_variant_id}
+              items={allSetVariantOptions}
+              emptyLabel="— keine —"
+            />
           </label>
         {/if}
         <div class="modal-actions" style="grid-column:1/-1">
@@ -6351,15 +6342,12 @@
               />
             </label>
             <label>Set-Variante
-              <select
+              <SetVariantSelect
                 value={line.set_variant_id}
-                onchange={(e) => onEditLineSetVariant(i, e.currentTarget.value)}
-              >
-                <option value="">— kein Set —</option>
-                {#each allSetVariantOptions() as opt}
-                  <option value={opt.id}>{opt.label}</option>
-                {/each}
-              </select>
+                items={allSetVariantOptions}
+                emptyLabel="— kein Set —"
+                onchange={(v) => onEditLineSetVariant(i, v)}
+              />
             </label>
             <label>Menge
               <input type="number" step={qtyStep(0)} min="1" bind:value={line.quantity} required />
