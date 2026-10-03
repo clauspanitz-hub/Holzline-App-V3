@@ -3914,12 +3914,27 @@ def piece_price_from_yield(purchase_price: Decimal, pieces_per_unit: Decimal) ->
     return _m(Decimal(purchase_price) / n)
 
 
-def bom_quantity_from_yield(pieces_per_unit: Decimal) -> Decimal:
-    """BOM-Menge pro Produkt = 1/N einer Einkaufseinheit."""
+def _positive_purchase_qty(purchase_quantity: Decimal | None) -> Decimal:
+    qty = _q(purchase_quantity) if purchase_quantity is not None else Decimal("1.000")
+    if qty <= 0:
+        return Decimal("1.000")
+    return qty
+
+
+def bom_quantity_from_yield(
+    pieces_per_unit: Decimal, purchase_quantity: Decimal | None = None
+) -> Decimal:
+    """BOM-Menge = Einkaufsmenge / Ausbeute (gleiche Einheit wie Bestand)."""
     n = Decimal(pieces_per_unit)
     if n <= 0:
         raise HTTPException(status_code=400, detail="Ausbeute muss größer als 0 sein")
-    return _q(Decimal("1") / n)
+    qty = _q(_positive_purchase_qty(purchase_quantity) / n)
+    if qty <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Ausbeute ist zu groß — Stücklistenmenge würde 0 (max. 3 Nachkommastellen)",
+        )
+    return qty
 
 
 def _yield_read(
@@ -3983,7 +3998,9 @@ def list_material_yields(db: Session, material_id: int) -> list:
             continue
         if qty <= 0:
             continue
-        pieces = _q(Decimal("1") / qty)
+        pieces = _q(_positive_purchase_qty(material.purchase_quantity) / qty)
+        if pieces <= 0:
+            continue
         by_product[product.id] = _yield_read(
             material_id=material_id,
             product=product,
@@ -3997,17 +4014,17 @@ def list_material_yields(db: Session, material_id: int) -> list:
 
 
 def apply_purchase_assistant(db: Session, payload) -> "PurchaseAssistantApplyResult":
-    """Einkaufspreis + Ausbeuten übernehmen: Material anlegen/aktualisieren, BOM 1/N, Yields speichern."""
+    """Einkaufspreis + Ausbeuten übernehmen: Material anlegen/aktualisieren, BOM pq/N, Yields speichern."""
     from app.schemas import PurchaseAssistantApplyResult
 
     created_material = False
-    purchase_quantity = (
-        _q(payload.purchase_quantity) if payload.purchase_quantity is not None else Decimal("1.000")
-    )
     purchase_price = _m(payload.purchase_price)
 
     if payload.material_id is not None:
         material = _load_material(db, payload.material_id)
+        # Bestehende Einkaufsmenge behalten — sonst werden Bestand und BOM-Mengen
+        # (g/m/ml) gegen cost_per_unit einer „1er-Packung“ verrechnet.
+        purchase_quantity = _positive_purchase_qty(material.purchase_quantity)
         before_missing = material_incomplete_fields_raw(material)
         material.purchase_price = purchase_price
         material.purchase_quantity = purchase_quantity
@@ -4016,6 +4033,9 @@ def apply_purchase_assistant(db: Session, payload) -> "PurchaseAssistantApplyRes
         sync_incomplete_tags(db, material, before_missing=before_missing)
         material_id = material.id
     else:
+        purchase_quantity = _positive_purchase_qty(
+            payload.purchase_quantity if payload.purchase_quantity is not None else Decimal("1.000")
+        )
         name = (payload.new_material_name or "").strip()
         if not name:
             raise HTTPException(status_code=400, detail="Materialname erforderlich")
@@ -4057,7 +4077,7 @@ def apply_purchase_assistant(db: Session, payload) -> "PurchaseAssistantApplyRes
         pieces = _q(item.pieces_per_unit)
         if pieces <= 0:
             raise HTTPException(status_code=400, detail="Ausbeute muss größer als 0 sein")
-        qty = bom_quantity_from_yield(pieces)
+        qty = bom_quantity_from_yield(pieces, purchase_quantity)
 
         before_missing = product_incomplete_fields_raw(product)
         line = next(

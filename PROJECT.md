@@ -97,7 +97,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 ### Phase 4: Einkaufsassistent — Umgesetzt
 - [x] Seite **Einkaufsassistent** unter Lager: Einkaufspreis + Ausbeute je Produkt → Stückpreis (ADR `0028`)
 - [x] Alle Materialien wählbar; Scratch-Modus nur rechnen; Übernehmen legt Material ggf. an
-- [x] Speichert `purchase_price` (+ `purchase_quantity` 1), BOM `quantity_required = 1/N`, Tabelle `material_product_yields`
+- [x] Speichert `purchase_price` (bestehende `purchase_quantity` bleibt), BOM `quantity_required = purchase_quantity/N`, Tabelle `material_product_yields`
 - [x] Kein Shopify-Write
 
 ## 5. Geschäftsregeln (gültig)
@@ -112,4 +112,4 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - Einkauf-Todos (nur Materialien): bei Bestandsänderung erledigen wenn Mindestbestand erfüllt (ohne Ausschuss); bei erneuter Unterschreitung neues offenes Todo (ADR `0023`).
 - Umwandlung: Uni→Vintage per Name am selben Standort, ohne Materialabbuchung (ADR `0006`).
 - Material ohne Varianten-System; unterschiedliche Ausbeuten nur über Produkt-Stücklisten-Mengen.
-- Einkaufsassistent: Stückpreis = Einkaufspreis ÷ Ausbeute; Übernehmen setzt BOM `1/N` und `material_product_yields` (ADR `0028`); kein Shopify-Write.
+- Einkaufsassistent: Stückpreis = Einkaufspreis ÷ Ausbeute; Übernehmen setzt BOM `purchase_quantity/N` (bestehende Einkaufsmenge bleibt) und `material_product_yields` (ADR `0028`); kein Shopify-Write.

@@ -2132,7 +2132,6 @@
       const result = await api.purchaseAssistant.apply({
         material_id: Number(paMaterialId),
         purchase_price: price,
-        purchase_quantity: 1,
         items,
       })
       showFlash('ok', `Übernommen: ${result.material.name}`)
