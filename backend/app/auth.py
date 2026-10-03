@@ -20,19 +20,34 @@ from app.models import AuthSession, User, UserRole
 
 SESSION_COOKIE = "holzlinge_session"
 
-# Mitarbeiter: nur Lesen für Staff-UI + Umwandeln
+# Mitarbeiter: Bei Mitarbeitern + Todos (manuell anlegen/bearbeiten/erledigen, ADR 0027)
 MITARBEITER_ALLOW = (
     ("GET", re.compile(r"^/api/auth/me$")),
     ("POST", re.compile(r"^/api/auth/logout$")),
     ("POST", re.compile(r"^/api/auth/change-password$")),
     ("GET", re.compile(r"^/api/products$")),
     ("GET", re.compile(r"^/api/products/\d+$")),
+    ("GET", re.compile(r"^/api/materials$")),
+    ("GET", re.compile(r"^/api/materials/\d+$")),
+    ("GET", re.compile(r"^/api/sets$")),
+    ("GET", re.compile(r"^/api/sets/\d+$")),
+    ("GET", re.compile(r"^/api/orders$")),
+    ("GET", re.compile(r"^/api/orders/\d+$")),
     ("GET", re.compile(r"^/api/locations$")),
     ("GET", re.compile(r"^/api/movements$")),
     ("GET", re.compile(r"^/api/colors$")),
     ("GET", re.compile(r"^/api/media$")),
     ("GET", re.compile(r"^/api/units$")),
+    ("GET", re.compile(r"^/api/todos$")),
+    ("POST", re.compile(r"^/api/todos$")),
+    ("PATCH", re.compile(r"^/api/todos/\d+$")),
+    ("POST", re.compile(r"^/api/todos/\d+/complete$")),
     ("POST", re.compile(r"^/api/products/\d+/transform$")),
+    ("POST", re.compile(r"^/api/products/\d+/manufacture$")),
+    ("POST", re.compile(r"^/api/materials/\d+/stock/delta$")),
+    ("PUT", re.compile(r"^/api/materials/\d+$")),
+    ("GET", re.compile(r"^/api/sets/variants/\d+/assemble-preview$")),
+    ("POST", re.compile(r"^/api/sets/variants/\d+/assemble$")),
 )
 
 PUBLIC_API_PATHS = {

@@ -77,7 +77,9 @@ from app.schemas import (
     EtsyMailParseResult,
     ShopifyOrderSyncResult,
     TageslageRead,
+    TodoCreate,
     TodoRead,
+    TodoUpdate,
     PurchaseTodosGenerateRequest,
     PurchaseTodosGenerateResult,
     StockAdjustRequest,
@@ -807,6 +809,18 @@ def list_todos(
     db: Session = Depends(get_db),
 ) -> list[TodoRead]:
     return services.list_todos(db, category=category, status=status)
+
+
+@router.post("/todos", response_model=TodoRead)
+def create_todo(payload: TodoCreate, _: CurrentUser, db: Session = Depends(get_db)) -> TodoRead:
+    return services.create_todo(db, payload)
+
+
+@router.patch("/todos/{todo_id}", response_model=TodoRead)
+def update_todo(
+    todo_id: int, payload: TodoUpdate, _: CurrentUser, db: Session = Depends(get_db)
+) -> TodoRead:
+    return services.update_todo(db, todo_id, payload)
 
 
 @router.post("/todos/purchase-from-critical", response_model=PurchaseTodosGenerateResult)

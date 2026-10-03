@@ -888,6 +888,7 @@ class TodoRead(BaseModel):
     kind: Literal["manufacture", "create_article", "purchase", "assemble"]
     category: Literal["workshop", "purchase"]
     status: Literal["open", "done"]
+    source: Literal["auto", "manual"] = "auto"
     title: str
     quantity: Quantity
     product_id: int | None = None
@@ -903,6 +904,30 @@ class TodoRead(BaseModel):
     order_label: str | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
+
+
+class TodoCreate(BaseModel):
+    kind: Literal["manufacture", "create_article", "purchase", "assemble"]
+    title: str
+    quantity: Quantity = Decimal("1")
+    order_id: int | None = None
+    order_line_id: int | None = None
+    product_id: int | None = None
+    material_id: int | None = None
+    set_variant_id: int | None = None
+
+
+class TodoUpdate(BaseModel):
+    """Vollständiges Formular: optionale FKs mit null leeren."""
+
+    kind: Literal["manufacture", "create_article", "purchase", "assemble"]
+    title: str
+    quantity: Quantity = Decimal("1")
+    order_id: int | None = None
+    order_line_id: int | None = None
+    product_id: int | None = None
+    material_id: int | None = None
+    set_variant_id: int | None = None
 
 
 class PurchaseTodosGenerateRequest(BaseModel):

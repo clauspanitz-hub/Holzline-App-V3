@@ -572,10 +572,14 @@ class WorkTodo(Base):
     kind: Mapped[str] = mapped_column(String(30), nullable=False)  # manufacture | create_article | purchase | assemble
     category: Mapped[str] = mapped_column(String(20), nullable=False, default="workshop")  # workshop | purchase
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="open")  # open | done
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="auto")  # auto | manual
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False, default=Decimal("1"))
     product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
     material_id: Mapped[int | None] = mapped_column(ForeignKey("materials.id", ondelete="SET NULL"), nullable=True)
+    set_variant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("set_variants.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -583,6 +587,7 @@ class WorkTodo(Base):
     line: Mapped[OrderLine | None] = relationship(back_populates="todos")
     product: Mapped[Product | None] = relationship()
     material: Mapped[Material | None] = relationship()
+    set_variant: Mapped[SetVariant | None] = relationship()
 
 
 class TageslageCache(Base):

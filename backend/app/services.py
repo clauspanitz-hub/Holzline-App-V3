@@ -3059,9 +3059,12 @@ def _todo_read(todo: WorkTodo) -> "TodoRead":
 
     order = todo.order
     line = todo.line
-    variant = line.set_variant if line is not None else None
+    variant = todo.set_variant
+    if variant is None and line is not None:
+        variant = line.set_variant
     set_obj = variant.product_set if variant is not None else None
     kind = todo.kind if todo.kind in ("manufacture", "create_article", "purchase", "assemble") else "create_article"
+    source = todo.source if getattr(todo, "source", None) in ("auto", "manual") else "auto"
     pref = preferred_source(todo.material) if kind == "purchase" and todo.material else None
     return TodoRead(
         id=todo.id,
@@ -3070,11 +3073,12 @@ def _todo_read(todo: WorkTodo) -> "TodoRead":
         kind=kind,
         category=todo.category if todo.category in ("workshop", "purchase") else "workshop",
         status=todo.status if todo.status in ("open", "done") else "open",
+        source=source,
         title=todo.title,
         quantity=_q(todo.quantity),
         product_id=todo.product_id,
         material_id=todo.material_id,
-        set_variant_id=variant.id if variant else (line.set_variant_id if line else None),
+        set_variant_id=variant.id if variant else getattr(todo, "set_variant_id", None),
         set_id=set_obj.id if set_obj else (variant.set_id if variant else None),
         product_name=todo.product.name if todo.product else None,
         material_name=todo.material.name if todo.material else None,
@@ -3203,7 +3207,8 @@ def _needs_manufacture(db: Session, product: Product, qty: Decimal) -> bool:
 
 def _sync_line_todos(db: Session, line: OrderLine) -> None:
     for todo in list(line.todos):
-        if todo.status == "open":
+        # Manuelle Todos bleiben (ADR 0027); nur Auto-Todos neu synchronisieren.
+        if todo.status == "open" and getattr(todo, "source", "auto") != "manual":
             db.delete(todo)
     db.flush()
 
@@ -3217,6 +3222,7 @@ def _sync_line_todos(db: Session, line: OrderLine) -> None:
                 kind="assemble",
                 category="workshop",
                 status="open",
+                source="auto",
                 title=f"Zusammenstellen: {_set_line_label(variant)}",
                 quantity=qty,
             )
@@ -3230,6 +3236,7 @@ def _sync_line_todos(db: Session, line: OrderLine) -> None:
                 kind="create_article",
                 category="workshop",
                 status="open",
+                source="auto",
                 title=f"Artikel anlegen: {line.label}",
                 quantity=qty,
             )
@@ -3245,6 +3252,7 @@ def _sync_line_todos(db: Session, line: OrderLine) -> None:
                     kind="manufacture",
                     category="workshop",
                     status="open",
+                    source="auto",
                     title=f"Fertigen: {product.name}",
                     quantity=qty,
                     product_id=product.id,
@@ -3554,6 +3562,7 @@ def queue_create_article(db: Session, order_id: int, line_id: int) -> "OrderRead
             kind="create_article",
             category="workshop",
             status="open",
+            source="auto",
             title=f"Artikel anlegen: {label}",
             quantity=_q(line.quantity),
         )
@@ -3686,6 +3695,159 @@ def ignore_etsy_mail(db: Session, mail_id: int) -> None:
     db.commit()
 
 
+def _todo_load(db: Session, todo_id: int) -> WorkTodo:
+    todo = db.scalars(
+        select(WorkTodo)
+        .where(WorkTodo.id == todo_id)
+        .options(
+            selectinload(WorkTodo.product),
+            selectinload(WorkTodo.material)
+            .selectinload(Material.purchase_sources)
+            .selectinload(MaterialPurchaseSource.shop),
+            selectinload(WorkTodo.order),
+            selectinload(WorkTodo.set_variant).selectinload(SetVariant.product_set),
+            selectinload(WorkTodo.line)
+            .selectinload(OrderLine.set_variant)
+            .selectinload(SetVariant.product_set),
+        )
+    ).first()
+    if todo is None:
+        raise HTTPException(status_code=404, detail="Todo nicht gefunden")
+    return todo
+
+
+def _todo_category_for_kind(kind: str) -> str:
+    return "purchase" if kind == "purchase" else "workshop"
+
+
+def _apply_todo_refs(
+    db: Session,
+    *,
+    order_id: int | None,
+    order_line_id: int | None,
+    product_id: int | None,
+    material_id: int | None,
+    set_variant_id: int | None,
+) -> tuple[int | None, int | None, int | None, int | None, int | None]:
+    resolved_order_id = order_id
+    resolved_line_id = order_line_id
+    if order_line_id is not None:
+        line = db.get(OrderLine, order_line_id)
+        if line is None:
+            raise HTTPException(status_code=400, detail="Bestellposition nicht gefunden")
+        if order_id is not None and line.order_id != order_id:
+            raise HTTPException(status_code=400, detail="Position gehört nicht zur Bestellung")
+        resolved_order_id = line.order_id
+        resolved_line_id = line.id
+    elif order_id is not None:
+        order = db.get(CustomerOrder, order_id)
+        if order is None:
+            raise HTTPException(status_code=400, detail="Bestellung nicht gefunden")
+        resolved_order_id = order.id
+        resolved_line_id = None
+
+    resolved_product = None
+    if product_id is not None:
+        resolved_product = _load_product(db, product_id)
+    resolved_material = None
+    if material_id is not None:
+        resolved_material = _load_material(db, material_id)
+    resolved_variant = None
+    if set_variant_id is not None:
+        resolved_variant = _load_set_variant(db, set_variant_id)
+
+    return (
+        resolved_order_id,
+        resolved_line_id,
+        resolved_product.id if resolved_product else None,
+        resolved_material.id if resolved_material else None,
+        resolved_variant.id if resolved_variant else None,
+    )
+
+
+def create_todo(db: Session, payload: "TodoCreate") -> "TodoRead":
+    from app.schemas import TodoCreate
+
+    if not isinstance(payload, TodoCreate):
+        payload = TodoCreate.model_validate(payload)
+    title = (payload.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Titel erforderlich")
+    qty = _q(payload.quantity)
+    if qty <= 0:
+        raise HTTPException(status_code=400, detail="Menge muss > 0 sein")
+    order_id, line_id, product_id, material_id, set_variant_id = _apply_todo_refs(
+        db,
+        order_id=payload.order_id,
+        order_line_id=payload.order_line_id,
+        product_id=payload.product_id,
+        material_id=payload.material_id,
+        set_variant_id=payload.set_variant_id,
+    )
+    todo = WorkTodo(
+        order_id=order_id,
+        order_line_id=line_id,
+        kind=payload.kind,
+        category=_todo_category_for_kind(payload.kind),
+        status="open",
+        source="manual",
+        title=title[:300],
+        quantity=qty,
+        product_id=product_id,
+        material_id=material_id,
+        set_variant_id=set_variant_id,
+    )
+    db.add(todo)
+    db.flush()
+    if order_id is not None:
+        order = _order_load(db, order_id)
+        _refresh_order_status(db, order)
+    db.commit()
+    return _todo_read(_todo_load(db, todo.id))
+
+
+def update_todo(db: Session, todo_id: int, payload: "TodoUpdate") -> "TodoRead":
+    from app.schemas import TodoUpdate
+
+    if not isinstance(payload, TodoUpdate):
+        payload = TodoUpdate.model_validate(payload)
+    todo = db.get(WorkTodo, todo_id)
+    if todo is None:
+        raise HTTPException(status_code=404, detail="Todo nicht gefunden")
+    if getattr(todo, "source", "auto") != "manual":
+        raise HTTPException(status_code=400, detail="Nur manuelle Todos können bearbeitet werden")
+    title = (payload.title or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Titel erforderlich")
+    qty = _q(payload.quantity)
+    if qty <= 0:
+        raise HTTPException(status_code=400, detail="Menge muss > 0 sein")
+    prev_order_id = todo.order_id
+    order_id, line_id, product_id, material_id, set_variant_id = _apply_todo_refs(
+        db,
+        order_id=payload.order_id,
+        order_line_id=payload.order_line_id,
+        product_id=payload.product_id,
+        material_id=payload.material_id,
+        set_variant_id=payload.set_variant_id,
+    )
+    todo.kind = payload.kind
+    todo.category = _todo_category_for_kind(payload.kind)
+    todo.title = title[:300]
+    todo.quantity = qty
+    todo.order_id = order_id
+    todo.order_line_id = line_id
+    todo.product_id = product_id
+    todo.material_id = material_id
+    todo.set_variant_id = set_variant_id
+    db.flush()
+    for oid in {prev_order_id, order_id} - {None}:
+        order = _order_load(db, oid)
+        _refresh_order_status(db, order)
+    db.commit()
+    return _todo_read(_todo_load(db, todo_id))
+
+
 def list_todos(
     db: Session,
     category: str | None = None,
@@ -3706,6 +3868,7 @@ def list_todos(
             .selectinload(Material.purchase_sources)
             .selectinload(MaterialPurchaseSource.shop),
             selectinload(WorkTodo.order),
+            selectinload(WorkTodo.set_variant).selectinload(SetVariant.product_set),
             selectinload(WorkTodo.line)
             .selectinload(OrderLine.set_variant)
             .selectinload(SetVariant.product_set),
@@ -3738,17 +3901,4 @@ def complete_todo(db: Session, todo_id: int) -> "TodoRead":
         order = _order_load(db, todo.order_id)
         _refresh_order_status(db, order)
     db.commit()
-    db.refresh(todo)
-    todo = db.scalars(
-        select(WorkTodo)
-        .where(WorkTodo.id == todo_id)
-        .options(
-            selectinload(WorkTodo.product),
-            selectinload(WorkTodo.material),
-            selectinload(WorkTodo.order),
-            selectinload(WorkTodo.line)
-            .selectinload(OrderLine.set_variant)
-            .selectinload(SetVariant.product_set),
-        )
-    ).first()
-    return _todo_read(todo)
+    return _todo_read(_todo_load(db, todo_id))
