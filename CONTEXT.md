@@ -41,12 +41,12 @@ Der Preis für eine komplette Einkaufsmenge (Packung), nicht der Preis pro Verbr
 _Avoid_: Stückpreis (das ist Preis/Einheit); Verkaufspreis
 
 **Einkaufseinheit**:
-Die komplette Packung/Platte/Rolle beim Einkauf — generischer Begriff im Einkaufsassistenten (nicht nur „Platte“). Entspricht typisch `purchase_quantity = 1` beim Übernehmen aus dem Assistenten.
-_Avoid_: Nur „Platte“ als UI-Label; Einkaufseinheit = Verbrauchseinheit der Stückliste
+Die komplette Packung/Platte/Rolle beim Einkauf — generischer Begriff im Einkaufsassistenten (nicht nur „Platte“). Entspricht der gepflegten `purchase_quantity` (z. B. 750 g Filament oder 1 Platte). Neue Materialien aus dem Assistenten starten bei 1.
+_Avoid_: Nur „Platte“ als UI-Label; Übernehmen setzt Einkaufsmenge bestehender Materialien auf 1
 
 **Ausbeute** (Einkaufsassistent):
-Wie viele Produktstück aus **einer** Einkaufseinheit dieses Materials möglich wären. Stückpreis = Einkaufspreis ÷ Ausbeute. Wird als `pieces_per_unit` gespeichert; in der Stückliste als Menge `1/N`.
-_Avoid_: Ausbeute = Lagerbestand; Ausbeute nur für Leimholz
+Wie viele Produktstück aus **einer** Einkaufseinheit dieses Materials möglich wären. Stückpreis = Einkaufspreis ÷ Ausbeute. Wird als `pieces_per_unit` gespeichert; in der Stückliste als Menge `purchase_quantity / N` (gleiche Einheit wie Lagerbestand).
+_Avoid_: Ausbeute = Lagerbestand; Ausbeute nur für Leimholz; BOM immer `1/N` unabhängig von der Einkaufsmenge
 
 **Einkaufsassistent**:
 Seite unter Lager: Einkaufspreis + Ausbeute je Produkt → Live-Stückpreis; Übernehmen speichert Materialpreis, BOM und Ausbeuten. Auch ohne bestehendes Material zum Rechnen; zum Speichern Name Pflicht (legt Material an). Kein Shopify-Write.

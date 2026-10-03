@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from fastapi import HTTPException
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, seed_locations
-from app.models import Material, MaterialProductYield, Product, ProductMaterial, Unit
+from app.models import Location, Material, MaterialProductYield, MaterialStock, Product, ProductMaterial, Unit
 from app.schemas import PurchaseAssistantApply, PurchaseAssistantItem
 from app.services import (
     apply_purchase_assistant,
     bom_quantity_from_yield,
+    list_material_yields,
     material_cost_for_product,
     piece_price_from_yield,
     _load_product,
@@ -154,3 +156,102 @@ def test_apply_creates_material_then_bom():
         )
     ).one()
     assert y.pieces_per_unit == Decimal("6.000")
+
+
+def test_apply_preserves_purchase_quantity_and_scales_bom():
+    """Bestehende Einkaufsmenge (z. B. 750 g Filament) darf nicht auf 1 gesetzt werden."""
+    db = _session()
+    material = Material(
+        name="PLA Schwarz",
+        unit=Unit.G,
+        purchase_quantity=Decimal("750"),
+        purchase_price=Decimal("25.00"),
+        cost_per_unit=Decimal("0.0333"),
+    )
+    db.add(material)
+    db.flush()
+    loc = db.scalars(select(Location).where(Location.name == "Hamburg")).one()
+    db.add(MaterialStock(material_id=material.id, location_id=loc.id, quantity=Decimal("750")))
+    ring = _product(db, "Ring Uni")
+    other = _product(db, "Ring Vintage")
+    db.add(
+        ProductMaterial(
+            product_id=ring.id,
+            material_id=material.id,
+            component_product_id=None,
+            quantity_required=Decimal("12"),
+        )
+    )
+    db.add(
+        ProductMaterial(
+            product_id=other.id,
+            material_id=material.id,
+            component_product_id=None,
+            quantity_required=Decimal("15"),
+        )
+    )
+    db.flush()
+
+    derived = list_material_yields(db, material.id)
+    by_name = {row.product_name: row for row in derived}
+    assert by_name["Ring Uni"].pieces_per_unit == Decimal("62.500")  # 750 / 12
+    assert by_name["Ring Vintage"].pieces_per_unit == Decimal("50.000")  # 750 / 15
+
+    result = apply_purchase_assistant(
+        db,
+        PurchaseAssistantApply(
+            material_id=material.id,
+            purchase_price=Decimal("30.00"),
+            purchase_quantity=Decimal("1"),  # Frontend/ADR schickte bisher immer 1
+            items=[PurchaseAssistantItem(product_id=ring.id, pieces_per_unit=Decimal("60"))],
+        ),
+    )
+
+    assert result.material.purchase_quantity == Decimal("750.000")
+    assert result.material.purchase_price == Decimal("30.00")
+    assert result.material.cost_per_unit == Decimal("0.0400")  # 30 / 750
+
+    stock = db.scalars(
+        select(MaterialStock).where(MaterialStock.material_id == material.id)
+    ).one()
+    assert stock.quantity == Decimal("750")
+
+    line_ring = db.scalars(
+        select(ProductMaterial).where(
+            ProductMaterial.product_id == ring.id,
+            ProductMaterial.material_id == material.id,
+        )
+    ).one()
+    assert line_ring.quantity_required == Decimal("12.500")  # 750 / 60
+
+    line_other = db.scalars(
+        select(ProductMaterial).where(
+            ProductMaterial.product_id == other.id,
+            ProductMaterial.material_id == material.id,
+        )
+    ).one()
+    assert line_other.quantity_required == Decimal("15.000")
+
+    prod_other = _load_product(db, other.id)
+    # 15 g * (30 / 750) = 0.60 — nicht 15 * 30
+    assert material_cost_for_product(prod_other) == Decimal("0.60")
+
+
+def test_apply_rejects_yield_that_quantizes_bom_to_zero():
+    db = _session()
+    material = _material(db)
+    product = _product(db, "Winzig")
+    try:
+        apply_purchase_assistant(
+            db,
+            PurchaseAssistantApply(
+                material_id=material.id,
+                purchase_price=Decimal("10.00"),
+                items=[PurchaseAssistantItem(product_id=product.id, pieces_per_unit=Decimal("2000"))],
+            ),
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert "Stücklistenmenge würde 0" in str(exc.detail)
+    else:
+        raise AssertionError("erwartete HTTPException bei Ausbeute 2000")
