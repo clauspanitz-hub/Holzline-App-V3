@@ -152,7 +152,10 @@ Dauerhaft im Repo:
 
 | Tag / Branch | Bedeutung |
 |--------------|-----------|
-| **`ui-v1.6`** / `main` (nach Merge) | Bestell-Edit Dialog Layout (Selects kollabieren nicht) |
+| **`ui-v1.9`** / `main` (nach Merge) | Set-Varianten-Picker (`SetVariantSelect`, FamilySelect-Muster) |
+| **`ui-v1.8`** / `main` | Manuelle Todos (ADR `0027`) |
+| **`ui-v1.7`** / `main` | Zusammenstellen leere BOM — Next-Action + Mengenanzeige |
+| **`ui-v1.6`** / `main` | Bestell-Edit Dialog Layout (Selects kollabieren nicht) |
 | **`ui-v1.5`** / `main` | Bestell-Edit Dialog (ADR `0026`) |
 | **`ui-v1.4`** / `main` | Materialien/Produkte als Aktionskarten + Dialoge |
 | **`ui-v1.3`** | Kontrast hart für alle Formularfelder |
@@ -160,23 +163,23 @@ Dauerhaft im Repo:
 | **`ui-v1`** | Slice 1 vor Kontrast-Pass (Tag fest; GitHub ließ Update nicht zu) |
 | **`ui-classic`** | UI **vor** dem Redesign |
 
-**Aktuell deployen — nach Merge Tag `ui-v1.6` (oder `main`):**
+**Aktuell deployen — nach Merge Tag `ui-v1.9` (oder `main`):**
 
 ```bash
 cd /opt/holzlinge-inventar
 git fetch --tags origin
-git checkout ui-v1.6   # oder: git checkout main && git pull
+git checkout ui-v1.9   # oder: git checkout main && git pull
 git log -1 --oneline
 docker compose build --no-cache
 docker compose up -d --force-recreate
 ```
 
-**Vorgänger — Tag `ui-v1.5`:**
+**Vorgänger — Tag `ui-v1.8`:**
 
 ```bash
 cd /opt/holzlinge-inventar
 git fetch --tags origin
-git checkout ui-v1.5
+git checkout ui-v1.8
 git log -1 --oneline
 docker compose build --no-cache
 docker compose up -d --force-recreate
