@@ -40,6 +40,18 @@ _Avoid_: Manuell Pflichtfeld; ersetzt Bestellmenge ohne Nachfrage
 Der Preis für eine komplette Einkaufsmenge (Packung), nicht der Preis pro Verbrauchseinheit.
 _Avoid_: Stückpreis (das ist Preis/Einheit); Verkaufspreis
 
+**Einkaufseinheit**:
+Die komplette Packung/Platte/Rolle beim Einkauf — generischer Begriff im Einkaufsassistenten (nicht nur „Platte“). Entspricht typisch `purchase_quantity = 1` beim Übernehmen aus dem Assistenten.
+_Avoid_: Nur „Platte“ als UI-Label; Einkaufseinheit = Verbrauchseinheit der Stückliste
+
+**Ausbeute** (Einkaufsassistent):
+Wie viele Produktstück aus **einer** Einkaufseinheit dieses Materials möglich wären. Stückpreis = Einkaufspreis ÷ Ausbeute. Wird als `pieces_per_unit` gespeichert; in der Stückliste als Menge `1/N`.
+_Avoid_: Ausbeute = Lagerbestand; Ausbeute nur für Leimholz
+
+**Einkaufsassistent**:
+Seite unter Lager: Einkaufspreis + Ausbeute je Produkt → Live-Stückpreis; Übernehmen speichert Materialpreis, BOM und Ausbeuten. Auch ohne bestehendes Material zum Rechnen; zum Speichern Name Pflicht (legt Material an). Kein Shopify-Write.
+_Avoid_: Assistent = Einkauf-Todo; Assistent schreibt Verkaufspreise
+
 **Verkaufspreis**:
 Der aktuelle Verkaufspreis eines **Produkts** in Euro. Unabhängig von **Materialherstellkosten**. In der App am Produkt pflegbar; beim Shopify-CSV übernehmen, wo die Zeile einem Lagerprodukt zuordenbar ist (typisch Variant Price). Leer oder 0 wird ohne Nachfrage gefüllt. Ist schon ein Preis gesetzt und der CSV-Wert weicht ab: zuerst Sammelfrage (**alle CSV** / **alle behalten** / **einzeln**); einzeln öffnet eine Liste je Produkt (bisher vs. CSV) mit denselben Sammelaktionen. **Sets** haben in der App keinen Verkaufspreis (der bleibt am Shop-Listing). Leer oder 0 gilt als unvollständig (`fehlt Verkaufspreis`), ignorierbar wie die anderen `fehlt …`-Tags.
 _Avoid_: Verkaufspreis = Materialherstellkosten; Verkaufspreis am Set; nur Shop-Read-only ohne Pflege in der App; leerer Preis ohne Unvollständigkeit; Re-Import überschreibt gesetzte Preise still

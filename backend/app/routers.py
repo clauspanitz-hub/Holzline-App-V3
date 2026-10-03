@@ -82,6 +82,9 @@ from app.schemas import (
     TodoUpdate,
     PurchaseTodosGenerateRequest,
     PurchaseTodosGenerateResult,
+    PurchaseAssistantApply,
+    PurchaseAssistantApplyResult,
+    PurchaseAssistantYieldRead,
     StockAdjustRequest,
     StockDeltaRequest,
     StockMovementRead,
@@ -401,6 +404,26 @@ def transfer_material(
     db: Session = Depends(get_db),
 ) -> MaterialRead:
     return services.transfer_material(db, material_id, payload)
+
+
+@router.get(
+    "/purchase-assistant/yields/{material_id}",
+    response_model=list[PurchaseAssistantYieldRead],
+)
+def list_purchase_assistant_yields(
+    material_id: int, db: Session = Depends(get_db)
+) -> list[PurchaseAssistantYieldRead]:
+    return services.list_material_yields(db, material_id)
+
+
+@router.post(
+    "/purchase-assistant/apply",
+    response_model=PurchaseAssistantApplyResult,
+)
+def apply_purchase_assistant(
+    payload: PurchaseAssistantApply, db: Session = Depends(get_db)
+) -> PurchaseAssistantApplyResult:
+    return services.apply_purchase_assistant(db, payload)
 
 
 @router.get("/products", response_model=list[ProductRead])

@@ -208,6 +208,7 @@ def init_db() -> None:
         migrate_order_line_set_variant(engine)
         migrate_purchase_sources(engine)
         migrate_manual_todos(engine)
+        migrate_material_product_yields(engine)
         seed_admin_user(db)
         from app.services import backfill_incomplete_tags, ensure_system_incomplete_tags
 
@@ -705,6 +706,27 @@ def migrate_manual_todos(engine) -> None:
                     "REFERENCES set_variants(id) ON DELETE SET NULL"
                 )
             )
+
+
+def migrate_material_product_yields(engine) -> None:
+    """Ausbeute je Material–Produkt für Einkaufsassistent (ADR 0028)."""
+    insp = inspect(engine)
+    if "material_product_yields" in insp.get_table_names():
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE material_product_yields (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+                    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+                    pieces_per_unit NUMERIC(14, 3) NOT NULL,
+                    CONSTRAINT uq_material_product_yield UNIQUE (material_id, product_id)
+                )
+                """
+            )
+        )
 
 
 def migrate_purchase_todos(engine) -> None:

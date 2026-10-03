@@ -24,6 +24,7 @@ from app.models import (
     Location,
     Material,
     MaterialFamily,
+    MaterialProductYield,
     MaterialPurchaseSource,
     MaterialStock,
     OptionMapping,
@@ -38,6 +39,7 @@ from app.models import (
     StockMovement,
     StockMovementKind,
     Tag,
+    Unit,
     WorkTodo,
 )
 from app.schemas import (
@@ -3902,3 +3904,218 @@ def complete_todo(db: Session, todo_id: int) -> "TodoRead":
         _refresh_order_status(db, order)
     db.commit()
     return _todo_read(_todo_load(db, todo_id))
+
+
+def piece_price_from_yield(purchase_price: Decimal, pieces_per_unit: Decimal) -> Decimal:
+    """Stückpreis = Einkaufspreis ÷ Ausbeute (eine Einkaufseinheit)."""
+    n = Decimal(pieces_per_unit)
+    if n <= 0:
+        return Decimal("0.00")
+    return _m(Decimal(purchase_price) / n)
+
+
+def bom_quantity_from_yield(pieces_per_unit: Decimal) -> Decimal:
+    """BOM-Menge pro Produkt = 1/N einer Einkaufseinheit."""
+    n = Decimal(pieces_per_unit)
+    if n <= 0:
+        raise HTTPException(status_code=400, detail="Ausbeute muss größer als 0 sein")
+    return _q(Decimal("1") / n)
+
+
+def _yield_read(
+    *,
+    material_id: int,
+    product: Product,
+    pieces_per_unit: Decimal,
+    purchase_price: Decimal,
+    quantity_required: Decimal | None = None,
+    from_yield: bool = True,
+) -> "PurchaseAssistantYieldRead":
+    from app.schemas import PurchaseAssistantYieldRead
+
+    return PurchaseAssistantYieldRead(
+        material_id=material_id,
+        product_id=product.id,
+        product_name=product.name,
+        pieces_per_unit=_q(pieces_per_unit),
+        unit_piece_price=piece_price_from_yield(purchase_price, pieces_per_unit),
+        quantity_required=_q(quantity_required) if quantity_required is not None else None,
+        from_yield=from_yield,
+    )
+
+
+def list_material_yields(db: Session, material_id: int) -> list:
+    """Gespeicherte Ausbeuten + BOM-Vorbefüllung für den Einkaufsassistenten."""
+    material = _load_material(db, material_id)
+    price = Decimal(material.purchase_price)
+    by_product: dict[int, object] = {}
+
+    yield_rows = db.scalars(
+        select(MaterialProductYield)
+        .where(MaterialProductYield.material_id == material_id)
+        .options(selectinload(MaterialProductYield.product))
+    ).all()
+    for row in yield_rows:
+        product = row.product or db.get(Product, row.product_id)
+        if product is None:
+            continue
+        by_product[product.id] = _yield_read(
+            material_id=material_id,
+            product=product,
+            pieces_per_unit=Decimal(row.pieces_per_unit),
+            purchase_price=price,
+            from_yield=True,
+        )
+
+    bom_lines = db.scalars(
+        select(ProductMaterial)
+        .where(ProductMaterial.material_id == material_id)
+        .options(selectinload(ProductMaterial.product))
+    ).all()
+    for line in bom_lines:
+        product = line.product or db.get(Product, line.product_id)
+        if product is None:
+            continue
+        qty = Decimal(line.quantity_required)
+        if product.id in by_product:
+            existing = by_product[product.id]
+            by_product[product.id] = existing.model_copy(update={"quantity_required": _q(qty)})
+            continue
+        if qty <= 0:
+            continue
+        pieces = _q(Decimal("1") / qty)
+        by_product[product.id] = _yield_read(
+            material_id=material_id,
+            product=product,
+            pieces_per_unit=pieces,
+            purchase_price=price,
+            quantity_required=qty,
+            from_yield=False,
+        )
+
+    return sorted(by_product.values(), key=lambda r: r.product_name.casefold())
+
+
+def apply_purchase_assistant(db: Session, payload) -> "PurchaseAssistantApplyResult":
+    """Einkaufspreis + Ausbeuten übernehmen: Material anlegen/aktualisieren, BOM 1/N, Yields speichern."""
+    from app.schemas import PurchaseAssistantApplyResult
+
+    created_material = False
+    purchase_quantity = (
+        _q(payload.purchase_quantity) if payload.purchase_quantity is not None else Decimal("1.000")
+    )
+    purchase_price = _m(payload.purchase_price)
+
+    if payload.material_id is not None:
+        material = _load_material(db, payload.material_id)
+        before_missing = material_incomplete_fields_raw(material)
+        material.purchase_price = purchase_price
+        material.purchase_quantity = purchase_quantity
+        material.cost_per_unit = _unit_cost(purchase_price, purchase_quantity)
+        _stamp_update(material)
+        sync_incomplete_tags(db, material, before_missing=before_missing)
+        material_id = material.id
+    else:
+        name = (payload.new_material_name or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Materialname erforderlich")
+        if db.scalars(select(Material.id).where(Material.name == name).limit(1)).first():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Materialname „{name}“ ist bereits vergeben",
+            )
+        location = default_location(db)
+        material = Material(
+            name=name,
+            unit=Unit.STK,
+            purchase_quantity=purchase_quantity,
+            purchase_price=purchase_price,
+            cost_per_unit=_unit_cost(purchase_price, purchase_quantity),
+        )
+        db.add(material)
+        db.flush()
+        db.add(
+            MaterialStock(
+                material_id=material.id,
+                location_id=location.id,
+                quantity=Decimal("0"),
+            )
+        )
+        sync_incomplete_tags(db, material, before_missing=[])
+        material_id = material.id
+        created_material = True
+
+    seen_products: set[int] = set()
+    for item in payload.items:
+        if item.product_id in seen_products:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Produkt #{item.product_id} mehrfach in der Ausbeute-Liste",
+            )
+        seen_products.add(item.product_id)
+        product = _load_product(db, item.product_id)
+        pieces = _q(item.pieces_per_unit)
+        if pieces <= 0:
+            raise HTTPException(status_code=400, detail="Ausbeute muss größer als 0 sein")
+        qty = bom_quantity_from_yield(pieces)
+
+        before_missing = product_incomplete_fields_raw(product)
+        line = next(
+            (ln for ln in product.materials if ln.material_id == material_id),
+            None,
+        )
+        if line is None:
+            line = ProductMaterial(
+                product_id=product.id,
+                material_id=material_id,
+                component_product_id=None,
+                quantity_required=qty,
+            )
+            db.add(line)
+        else:
+            line.quantity_required = qty
+        db.flush()
+        db.expire(product, ["materials"])
+        product = _load_product(db, product.id)
+        sync_incomplete_tags(db, product, before_missing=before_missing)
+        _stamp_update(product)
+
+        existing_yield = db.scalars(
+            select(MaterialProductYield).where(
+                MaterialProductYield.material_id == material_id,
+                MaterialProductYield.product_id == product.id,
+            )
+        ).first()
+        if existing_yield is None:
+            db.add(
+                MaterialProductYield(
+                    material_id=material_id,
+                    product_id=product.id,
+                    pieces_per_unit=pieces,
+                )
+            )
+        else:
+            existing_yield.pieces_per_unit = pieces
+
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        msg = str(getattr(exc, "orig", exc)).lower()
+        if "unique" in msg or "name" in msg:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Materialname oder Ausbeute bereits vorhanden",
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Einkaufsassistent konnte nicht speichern: {exc.orig}",
+        ) from exc
+
+    material = _load_material(db, material_id)
+    yields = list_material_yields(db, material_id)
+    return PurchaseAssistantApplyResult(
+        material=material_read(material),
+        yields=yields,
+        created_material=created_material,
+    )
