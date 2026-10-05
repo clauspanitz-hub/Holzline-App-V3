@@ -109,7 +109,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - Sets haben keinen Lagerbestand; Zusammenstellen bei Bestellung = Phase 2 (Bestellungen).
 - Fertigen erhöht Produktbestand an einem gewählten Standort, Materialabbuchung an gewähltem/selben Standort (Start: ein Standort pro Buchung).
 - Baubare Sets aus Summe der Standorte ohne Ausschuss (ADR `0003`, `0006`).
-- Einkauf-Todos (nur Materialien): bei Bestandsänderung erledigen wenn Mindestbestand erfüllt (ohne Ausschuss); bei erneuter Unterschreitung neues offenes Todo (ADR `0023`).
+- Einkauf-Todos (nur Materialien): bei Bestandsänderung erledigen wenn Mindestbestand erfüllt und kein Standort negativ (ohne Ausschuss); bei Unterschreitung, Bestand ≤ 0 oder Standort-Negativbestand (z. B. nach Fertigen) neues offenes Todo (ADR `0023`).
 - Umwandlung: Uni→Vintage per Name am selben Standort, ohne Materialabbuchung (ADR `0006`).
 - Material ohne Varianten-System; unterschiedliche Ausbeuten nur über Produkt-Stücklisten-Mengen.
 - Einkaufsassistent: Stückpreis = Einkaufspreis ÷ Ausbeute; Übernehmen setzt BOM `1/N` und `material_product_yields` (ADR `0028`); kein Shopify-Write.
