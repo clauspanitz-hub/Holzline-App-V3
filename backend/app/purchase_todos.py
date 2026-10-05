@@ -39,6 +39,7 @@ def material_stock_available(material: Material) -> Decimal:
 
 
 def is_material_critical(material: Material) -> bool:
+    """Fehlmenge: verfügbar ≤ 0 oder unter Mindestbestand (ohne Ausschuss)."""
     available = material_stock_available(material)
     if available <= 0:
         return True
@@ -46,6 +47,22 @@ def is_material_critical(material: Material) -> bool:
     if min_stock is not None and available < _q(min_stock):
         return True
     return False
+
+
+def material_has_negative_location(material: Material) -> bool:
+    """Negativbestand an mind. einem Standort ohne Ausschuss (ADR 0002 / Filter Negativbestand)."""
+    for stock in material.stocks:
+        location = getattr(stock, "location", None)
+        if location is not None and getattr(location, "name", None) == AUSSCHUSS_LOCATION_NAME:
+            continue
+        if _q(stock.quantity) < 0:
+            return True
+    return False
+
+
+def material_needs_purchase_todo(material: Material) -> bool:
+    """Offenes Einkauf-Todo nötig: kritisch (ADR 0019) oder Standort-Negativbestand nach Fertigung."""
+    return is_material_critical(material) or material_has_negative_location(material)
 
 
 def suggested_purchase_quantity(material: Material) -> Decimal:
@@ -93,10 +110,11 @@ def sync_purchase_todos(
     include_ignored: bool = False,
     create_missing: bool = True,
 ) -> dict[str, int]:
-    """Erledigt offene Einkauf-Todos bei erfülltem Mindestbestand; legt bei Unterschreitung neue an.
+    """Erledigt offene Einkauf-Todos bei erfülltem Mindestbestand; legt bei Unterschreitung/Negativ neue an.
 
-    - Erledigt (nicht löschen), wenn Material fehlt oder nicht mehr kritisch.
-    - Neues offenes Todo, wenn kritisch und keines offen (max. eines offen pro Material).
+    - Erledigt (nicht löschen), wenn Material fehlt oder kein Einkauf mehr nötig
+      (nicht kritisch und kein Standort-Negativbestand ohne Ausschuss).
+    - Neues offenes Todo, wenn nötig und keines offen (max. eines offen pro Material).
     - Altes erledigtes Todo bleibt stehen.
     - ``material_ids`` begrenzt auf betroffene Materialien (Bestandsänderung); ``None`` = alle.
     """
@@ -125,7 +143,7 @@ def sync_purchase_todos(
         if getattr(todo, "source", "auto") == "manual":
             continue
         material = todo.material
-        if material is None or not is_material_critical(material):
+        if material is None or not material_needs_purchase_todo(material):
             _complete_todo(todo)
             completed_stale += 1
 
@@ -150,7 +168,7 @@ def sync_purchase_todos(
         existing_open.add(todo.material_id)
 
     for material in materials:
-        if not is_material_critical(material):
+        if not material_needs_purchase_todo(material):
             continue
         if bool(getattr(material, "overview_ignored", False)) and not include_ignored:
             skipped_ignored += 1

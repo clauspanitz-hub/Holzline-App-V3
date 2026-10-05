@@ -9,4 +9,4 @@ Diese Datei dient als Zwischenspeicher für Ideen, die während der Entwicklung 
 - [ ] Historie/Audit-Log aller Fertigungsvorgänge und manuellen Bestandsänderungen
 - [ ] Automatische Benachrichtigung via Webhook/Telegram bei kritischem Mindestbestand
 - [ ] Übersicht UI entwirren (Tabellen/Filter, weniger Dichte)
-- [ ] Bei Negativbestand nach Fertigung: Bestell-/Einkaufs-Todo (Phase 3)
+- [x] Bei Negativbestand nach Fertigung: Bestell-/Einkaufs-Todo (Phase 3; ADR `0023`)

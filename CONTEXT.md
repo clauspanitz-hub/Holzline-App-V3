@@ -147,8 +147,8 @@ Ein Ort, an dem Material- oder Produktbestand liegt. Physisch: Hamburg, Dahlenbu
 _Avoid_: Location als UI-Begriff, Bin, Am Waldpark 27 / Werkstatt Rissen / Lager Petra (Shopify-Namen, nicht kanonisch)
 
 **Mindestbestand**:
-Optionale Untergrenze je Material oder Produkt. Unterschreitung (oder verfügbarer Bestand ≤ 0 / negativ, ohne Ausschuss) markiert den Artikel als **kritisch** (Fehlmenge): in der Übersicht und zusätzlich in Extra-Blöcken auf den Seiten Materialien und Produkte. Kritische **Materialien** → Einkauf-Todos automatisch bei Bestandsänderung sowie per Knopf (ADR `0019`, `0023`).
-_Avoid_: Sollbestand als Pflichtfeld; kritische Übersicht als Ersatz für die Todo-Liste; „Fehlmenge“ als eigenes Objekt neben kritischem Artikel
+Optionale Untergrenze je Material oder Produkt. Unterschreitung (oder verfügbarer Bestand ≤ 0 / negativ, ohne Ausschuss) markiert den Artikel als **kritisch** (Fehlmenge): in der Übersicht und zusätzlich in Extra-Blöcken auf den Seiten Materialien und Produkte. Kritische **Materialien** → Einkauf-Todos automatisch bei Bestandsänderung sowie per Knopf (ADR `0019`, `0023`). Zusätzlich: Standort-**Negativbestand** (ohne Ausschuss), typisch nach Fertigen/Zusammenstellen → ebenfalls offenes Einkauf-Todo, auch wenn die Summe anderer Standorte den Mindestbestand noch deckt.
+_Avoid_: Sollbestand als Pflichtfeld; kritische Übersicht als Ersatz für die Todo-Liste; „Fehlmenge“ als eigenes Objekt neben kritischem Artikel; Einkauf-Todos für Produkte
 
 **Baubare Variante**:
 Eine Set-Variante, deren zusammenstellbare Stückzahl sich aus dem über alle Standorte summierten Bestand der Stücklistenzeilen ergibt (`Minimum` über `floor(Bestand/Menge)`). Ob Material-Zeilen mitzählen, ist je Set einstellbar.
