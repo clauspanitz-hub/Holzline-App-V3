@@ -47,7 +47,8 @@
   let overviewIgnoredOpen = $state(false)
   let overviewOrdersOpen = $state(true)
   let overviewTodosOpen = $state(true)
-  let overviewTageslageOpen = $state(true)
+  /** Tageslage standard zu — Fokus bleibt auf Bestellungen/Todos (weniger Dichte). */
+  let overviewTageslageOpen = $state(false)
   let tageslage = $state(null)
   let tageslageLoading = $state(false)
   let extraMatCriticalOpen = $state(false)
@@ -4739,13 +4740,21 @@
       </div>
     </section>
   {:else if tab === 'overview'}
+    <div class="overview-page">
     {#if negativeMaterials.length || negativeProducts.length}
-      <div class="banner flash warn">
-        Negativbestand vorhanden — Details in den Listen prüfen.
+      <div class="banner flash warn overview-neg-banner">
+        <span>Negativbestand vorhanden — zuerst Engpässe prüfen.</span>
+        <button
+          type="button"
+          class="btn secondary compact"
+          onclick={() => {
+            overviewCriticalOpen = true
+          }}
+        >Engpässe öffnen</button>
       </div>
     {/if}
 
-    <section class="panel" class:collapsed={!overviewOrdersOpen}>
+    <section class="panel overview-panel" class:collapsed={!overviewOrdersOpen}>
       <div class="panel-header">
         <h2>
           <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewOrdersOpen = !overviewOrdersOpen)}>
@@ -4756,14 +4765,18 @@
         <button class="btn secondary" onclick={refresh}>Aktualisieren</button>
       </div>
       {#if overviewOrdersOpen}
+        <p class="overview-section-job">Offene und versandbereite Aufträge — zuordnen, fertigen, versenden.</p>
         {#if reviewOrders.length}
-          <p class="empty">Zur Prüfung: {reviewOrders.length} — unter Bestellungen zuordnen und abnicken.</p>
+          <p class="empty overview-inline-hint">
+            Zur Prüfung: {reviewOrders.length} —
+            <button type="button" class="linkish" onclick={() => selectTab('orders')}>unter Bestellungen abnicken</button>
+          </p>
         {/if}
         {@render ordersMarkup(currentOrders, 'Keine aktuellen Bestellungen.')}
       {/if}
     </section>
 
-    <section class="panel" class:collapsed={!overviewTodosOpen}>
+    <section class="panel overview-panel" class:collapsed={!overviewTodosOpen}>
       <div class="panel-header">
         <h2>
           <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewTodosOpen = !overviewTodosOpen)}>
@@ -4771,13 +4784,15 @@
             <span class="empty">({overviewOpenTodos.length})</span>
           </button>
         </h2>
+        <button type="button" class="btn secondary" onclick={() => selectTab('todos')}>Alle Todos</button>
       </div>
       {#if overviewTodosOpen}
+        <p class="overview-section-job">Was heute in der Werkstatt ansteht — „Los“ startet die Aktion.</p>
         {@render todosMarkup(overviewOpenTodos, 'Keine offenen Werkstatt-Todos.')}
       {/if}
     </section>
 
-    <section class="panel tageslage-panel" class:collapsed={!overviewTageslageOpen}>
+    <section class="panel overview-panel tageslage-panel" class:collapsed={!overviewTageslageOpen}>
       <div class="panel-header">
         <h2>
           <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewTageslageOpen = !overviewTageslageOpen)}>
@@ -4790,18 +4805,19 @@
           class="btn secondary"
           disabled={tageslageLoading || saving}
           onclick={() => loadTageslage({ refresh: true })}
-        >Aktualisieren</button>
+        >Neu laden</button>
       </div>
       {#if overviewTageslageOpen}
+        <p class="overview-section-job">Kurzlage und nächste Schritte — Kennzahlen plus Tagesbriefing.</p>
         {#if tageslageLoading && !tageslage}
           <p class="empty">Lade Tageslage…</p>
         {:else if tageslage}
-          <div class="tageslage-stats">
-            <span><strong>{tageslage.stats?.current_orders ?? 0}</strong> aktuelle Bestellungen</span>
-            <span><strong>{tageslage.stats?.review_orders ?? 0}</strong> zur Prüfung</span>
-            <span><strong>{tageslage.stats?.open_todos ?? 0}</strong> offene Todos</span>
+          <div class="tageslage-stats" aria-label="Kennzahlen">
+            <span class="tageslage-stat"><strong>{tageslage.stats?.current_orders ?? 0}</strong> Bestellungen</span>
+            <span class="tageslage-stat"><strong>{tageslage.stats?.review_orders ?? 0}</strong> Prüfung</span>
+            <span class="tageslage-stat"><strong>{tageslage.stats?.open_todos ?? 0}</strong> Todos</span>
             {#if tageslage.stats?.todos_by_kind}
-              <span class="empty">
+              <span class="empty tageslage-stat-detail">
                 Fertigen {tageslage.stats.todos_by_kind.manufacture || 0}
                 · Anlegen {tageslage.stats.todos_by_kind.create_article || 0}
               </span>
@@ -4831,7 +4847,7 @@
           {#if tageslage.error}
             <p class="empty">
               {#if tageslage.error === 'rate_limit'}
-                Gemini-Kontingent erreicht — Fallback aktiv. Später „Aktualisieren“.
+                Gemini-Kontingent erreicht — Fallback aktiv. Später „Neu laden“.
               {:else if tageslage.error === 'model_404'}
                 Gemini-Modell nicht gefunden — Fallback aktiv.
               {:else}
@@ -4845,7 +4861,7 @@
       {/if}
     </section>
 
-    <section class="panel" class:collapsed={!overviewCriticalOpen}>
+    <section class="panel overview-panel" class:collapsed={!overviewCriticalOpen}>
       <div class="panel-header">
         <h2>
           <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewCriticalOpen = !overviewCriticalOpen)}>
@@ -4858,155 +4874,150 @@
         </button>
       </div>
       {#if overviewCriticalOpen}
-        <p class="empty">
-          Produkte und Materialien mit Gesamt ≤ 0 oder unter Mindestbestand. Einträge können dauerhaft ignoriert werden.
+        <p class="overview-section-job">
+          Gesamt ≤ 0 oder unter Mindestbestand — Bearbeiten oder dauerhaft ignorieren.
         </p>
-        <h3>Produkte</h3>
-        <div class="table-wrap stock-table-wrap">
-          <table class="stock-table">
-            <thead>
-              <tr>
-                <th>
-                  <button type="button" class="th-sort" onclick={() => toggleListSort('overviewProducts', 'name')}>
-                    Name{sortMark(listUi.overviewProducts.sortKey, 'name', listUi.overviewProducts.sortDir)}
-                  </button>
-                </th>
-                {#each orderedLocations as loc}
-                  <th class="num">
-                    <button type="button" class="th-sort" onclick={() => toggleListSort('overviewProducts', `stock:${loc.id}`)}>
-                      {loc.name}{sortMark(listUi.overviewProducts.sortKey, `stock:${loc.id}`, listUi.overviewProducts.sortDir)}
-                    </button>
-                  </th>
-                {/each}
-                <th class="num">
-                  <button type="button" class="th-sort" onclick={() => toggleListSort('overviewProducts', 'total')}>
-                    Gesamt{sortMark(listUi.overviewProducts.sortKey, 'total', listUi.overviewProducts.sortDir)}
-                  </button>
-                </th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <ProductGroupSection
-                groups={overviewProductGroups}
-                {collapsedFamilies}
-                colSpan={orderedLocations.length + 3}
-                emptyMessage="Keine kritischen Produkte."
-                onToggleCollapse={toggleFamilyCollapse}
-              >
-                {#snippet row({ product })}
-                  <tr class="row-click" onclick={() => openEditProduct(product, { ids: visibleGroupItemIds(overviewProductGroups) })}>
-                    <td>
-                      {product.name}
-                      {#if formatMinStock(product)}
-                        <div class="min-stock-hint">Min. {formatMinStock(product)}</div>
-                      {/if}
-                    </td>
-                    {#each orderedLocations as loc}
-                      <td class="num" class:neg={stockAt(product, loc.id) < 0}>{formatQty(stockAt(product, loc.id), 0)}</td>
-                    {/each}
-                    <td class="num" class:neg={Number(product.stock_total) <= 0 || product.is_negative}>
-                      {formatQty(product.stock_total, 0)}
-                    </td>
-                    <td onclick={(e) => e.stopPropagation()}>
-                      <div class="row-actions">
-                        <button class="btn secondary" onclick={() => openEditProduct(product, { ids: visibleGroupItemIds(overviewProductGroups) })}>Bearbeiten</button>
-                        <button class="btn secondary" disabled={saving} onclick={() => setOverviewIgnored('product', product, true)}>Ignorieren</button>
-                      </div>
-                    </td>
-                  </tr>
-                {/snippet}
-              </ProductGroupSection>
-            </tbody>
-          </table>
-        </div>
 
-        <h3>Materialien</h3>
-        <div class="table-wrap stock-table-wrap">
-          <table class="stock-table">
-            <thead>
-              <tr>
-                <th>
-                  <button type="button" class="th-sort" onclick={() => toggleListSort('overviewMaterials', 'name')}>
-                    Name{sortMark(listUi.overviewMaterials.sortKey, 'name', listUi.overviewMaterials.sortDir)}
-                  </button>
-                </th>
-                {#each materialLocations as loc}
-                  <th class="num">
-                    <button type="button" class="th-sort" onclick={() => toggleListSort('overviewMaterials', `stock:${loc.id}`)}>
-                      {loc.name}{sortMark(listUi.overviewMaterials.sortKey, `stock:${loc.id}`, listUi.overviewMaterials.sortDir)}
-                    </button>
-                  </th>
-                {/each}
-                <th class="num">
-                  <button type="button" class="th-sort" onclick={() => toggleListSort('overviewMaterials', 'total')}>
-                    Gesamt{sortMark(listUi.overviewMaterials.sortKey, 'total', listUi.overviewMaterials.sortDir)}
-                  </button>
-                </th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <ProductGroupSection
-                groups={overviewMaterialGroups}
-                {collapsedFamilies}
-                colSpan={materialLocations.length + 3}
-                emptyMessage="Keine kritischen Materialien."
-                onToggleCollapse={toggleFamilyCollapse}
-              >
-                {#snippet row({ item: material })}
-                  <tr class="row-click" onclick={() => openEditMaterial(material, { ids: visibleGroupItemIds(overviewMaterialGroups) })}>
-                    <td>
-                      {material.name}
-                      {#if formatMinStock(material)}
-                        <div class="min-stock-hint">Min. {formatMinStock(material)} {material.unit}</div>
-                      {/if}
-                    </td>
-                    {#each materialLocations as loc}
-                      <td class="num" class:neg={stockAt(material, loc.id) < 0}>{formatQty(stockAt(material, loc.id), itemDecimals(material))}</td>
-                    {/each}
-                    <td class="num" class:neg={Number(material.stock_total) <= 0 || material.is_negative}>
-                      {formatQty(material.stock_total, itemDecimals(material))} {material.unit}
-                    </td>
-                    <td onclick={(e) => e.stopPropagation()}>
-                      <div class="row-actions">
-                        <button class="btn secondary" onclick={() => openEditMaterial(material, { ids: visibleGroupItemIds(overviewMaterialGroups) })}>Bearbeiten</button>
-                        <button class="btn secondary" disabled={saving} onclick={() => setOverviewIgnored('material', material, true)}>Ignorieren</button>
-                      </div>
-                    </td>
-                  </tr>
-                {/snippet}
-              </ProductGroupSection>
-            </tbody>
-          </table>
+        <h3 class="overview-subhead">Produkte</h3>
+        <div class="chip-row overview-sort-chips" role="group" aria-label="Kritische Produkte sortieren">
+          <button
+            type="button"
+            class="chip"
+            class:active={listUi.overviewProducts.sortKey === 'name'}
+            onclick={() => toggleListSort('overviewProducts', 'name')}
+          >Name{sortMark(listUi.overviewProducts.sortKey, 'name', listUi.overviewProducts.sortDir)}</button>
+          <button
+            type="button"
+            class="chip"
+            class:active={listUi.overviewProducts.sortKey === 'total'}
+            onclick={() => toggleListSort('overviewProducts', 'total')}
+          >Gesamt{sortMark(listUi.overviewProducts.sortKey, 'total', listUi.overviewProducts.sortDir)}</button>
         </div>
+        <CatalogActionList
+          groups={overviewProductGroups}
+          {collapsedFamilies}
+          emptyMessage="Keine kritischen Produkte."
+          onToggleCollapse={toggleFamilyCollapse}
+        >
+          {#snippet card({ product })}
+            <article class="card action-card catalog-card" class:neg={Number(product.stock_total) <= 0 || product.is_negative}>
+              <div class="action-card-body">
+                <h3>{product.name}</h3>
+                <div class="stock-chip-row" aria-label="Bestand">
+                  <span class="stock-chip total" class:neg={Number(product.stock_total) <= 0 || product.is_negative}>
+                    Gesamt {formatQty(product.stock_total, 0)}
+                  </span>
+                  {#each orderedLocations as loc}
+                    <span class="stock-chip" class:neg={stockAt(product, loc.id) < 0}>
+                      {loc.name} {formatQty(stockAt(product, loc.id), 0)}
+                    </span>
+                  {/each}
+                </div>
+                {#if formatMinStock(product)}
+                  <p class="min-stock-hint">Min. {formatMinStock(product)}</p>
+                {/if}
+              </div>
+              <div class="overview-card-ctas">
+                <button
+                  type="button"
+                  class="btn action-card-cta"
+                  onclick={() => openEditProduct(product, { ids: visibleGroupItemIds(overviewProductGroups) })}
+                >Bearbeiten</button>
+                <button
+                  type="button"
+                  class="btn secondary"
+                  disabled={saving}
+                  onclick={() => setOverviewIgnored('product', product, true)}
+                >Ignorieren</button>
+              </div>
+            </article>
+          {/snippet}
+        </CatalogActionList>
+
+        <h3 class="overview-subhead">Materialien</h3>
+        <div class="chip-row overview-sort-chips" role="group" aria-label="Kritische Materialien sortieren">
+          <button
+            type="button"
+            class="chip"
+            class:active={listUi.overviewMaterials.sortKey === 'name'}
+            onclick={() => toggleListSort('overviewMaterials', 'name')}
+          >Name{sortMark(listUi.overviewMaterials.sortKey, 'name', listUi.overviewMaterials.sortDir)}</button>
+          <button
+            type="button"
+            class="chip"
+            class:active={listUi.overviewMaterials.sortKey === 'total'}
+            onclick={() => toggleListSort('overviewMaterials', 'total')}
+          >Gesamt{sortMark(listUi.overviewMaterials.sortKey, 'total', listUi.overviewMaterials.sortDir)}</button>
+        </div>
+        <CatalogActionList
+          groups={overviewMaterialGroups}
+          {collapsedFamilies}
+          emptyMessage="Keine kritischen Materialien."
+          onToggleCollapse={toggleFamilyCollapse}
+        >
+          {#snippet card({ item: material })}
+            <article class="card action-card catalog-card" class:neg={Number(material.stock_total) <= 0 || material.is_negative}>
+              <div class="action-card-body">
+                <h3>{material.name}</h3>
+                <div class="stock-chip-row" aria-label="Bestand">
+                  <span class="stock-chip total" class:neg={Number(material.stock_total) <= 0 || material.is_negative}>
+                    Gesamt {formatQty(material.stock_total, itemDecimals(material))} {material.unit}
+                  </span>
+                  {#each materialLocations as loc}
+                    <span class="stock-chip" class:neg={stockAt(material, loc.id) < 0}>
+                      {loc.name} {formatQty(stockAt(material, loc.id), itemDecimals(material))}
+                    </span>
+                  {/each}
+                </div>
+                {#if formatMinStock(material)}
+                  <p class="min-stock-hint">Min. {formatMinStock(material)} {material.unit}</p>
+                {/if}
+              </div>
+              <div class="overview-card-ctas">
+                <button
+                  type="button"
+                  class="btn action-card-cta"
+                  onclick={() => openEditMaterial(material, { ids: visibleGroupItemIds(overviewMaterialGroups) })}
+                >Bearbeiten</button>
+                <button
+                  type="button"
+                  class="btn secondary"
+                  disabled={saving}
+                  onclick={() => setOverviewIgnored('material', material, true)}
+                >Ignorieren</button>
+              </div>
+            </article>
+          {/snippet}
+        </CatalogActionList>
 
         {#if ignoredCriticalProducts.length || ignoredCriticalMaterials.length}
-          <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewIgnoredOpen = !overviewIgnoredOpen)}>
-            {overviewIgnoredOpen ? '▼' : '▶'} Ignorierte Engpässe
-            <span class="empty">({ignoredCriticalProducts.length + ignoredCriticalMaterials.length})</span>
-          </button>
-          {#if overviewIgnoredOpen}
-            <ul class="plain-list">
-              {#each ignoredCriticalProducts as product}
-                <li class="bom-line">
-                  <div>Produkt <strong>{product.name}</strong></div>
-                  <button class="btn secondary" disabled={saving} onclick={() => setOverviewIgnored('product', product, false)}>Wieder anzeigen</button>
-                </li>
-              {/each}
-              {#each ignoredCriticalMaterials as material}
-                <li class="bom-line">
-                  <div>Material <strong>{material.name}</strong></div>
-                  <button class="btn secondary" disabled={saving} onclick={() => setOverviewIgnored('material', material, false)}>Wieder anzeigen</button>
-                </li>
-              {/each}
-            </ul>
-          {/if}
+          <div class="overview-ignored-block">
+            <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewIgnoredOpen = !overviewIgnoredOpen)}>
+              {overviewIgnoredOpen ? '▼' : '▶'} Ignorierte Engpässe
+              <span class="empty">({ignoredCriticalProducts.length + ignoredCriticalMaterials.length})</span>
+            </button>
+            {#if overviewIgnoredOpen}
+              <ul class="plain-list">
+                {#each ignoredCriticalProducts as product}
+                  <li class="bom-line">
+                    <div>Produkt <strong>{product.name}</strong></div>
+                    <button class="btn secondary" disabled={saving} onclick={() => setOverviewIgnored('product', product, false)}>Wieder anzeigen</button>
+                  </li>
+                {/each}
+                {#each ignoredCriticalMaterials as material}
+                  <li class="bom-line">
+                    <div>Material <strong>{material.name}</strong></div>
+                    <button class="btn secondary" disabled={saving} onclick={() => setOverviewIgnored('material', material, false)}>Wieder anzeigen</button>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </div>
         {/if}
       {/if}
     </section>
 
-    <section class="panel" class:collapsed={!overviewIncompleteOpen}>
+    <section class="panel overview-panel" class:collapsed={!overviewIncompleteOpen}>
       <div class="panel-header">
         <h2>
           <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewIncompleteOpen = !overviewIncompleteOpen)}>
@@ -5016,60 +5027,65 @@
         </h2>
       </div>
       {#if overviewIncompleteOpen}
-        <p class="empty">Fehlende Stammdaten (System-Tags „fehlt …“).</p>
-        <h3>Produkte</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Name</th><th>Fehlt</th><th></th></tr></thead>
-            <tbody>
-              <ProductGroupSection
-                groups={incompleteProductGroups}
-                {collapsedFamilies}
-                colSpan={3}
-                emptyMessage="Keine unvollständigen Produkte."
-                onToggleCollapse={toggleFamilyCollapse}
-              >
-                {#snippet row({ product })}
-                  <tr class="row-click" onclick={() => openEditProduct(product, { ids: visibleGroupItemIds(incompleteProductGroups) })}>
-                    <td>{product.name}</td>
-                    <td>{incompleteHint(product) || '—'}</td>
-                    <td onclick={(e) => e.stopPropagation()}>
-                      <button class="btn secondary" onclick={() => openEditProduct(product, { ids: visibleGroupItemIds(incompleteProductGroups) })}>Bearbeiten</button>
-                    </td>
-                  </tr>
-                {/snippet}
-              </ProductGroupSection>
-            </tbody>
-          </table>
-        </div>
-        <h3>Materialien</h3>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Name</th><th>Fehlt</th><th></th></tr></thead>
-            <tbody>
-              <ProductGroupSection
-                groups={incompleteMaterialGroups}
-                {collapsedFamilies}
-                colSpan={3}
-                emptyMessage="Keine unvollständigen Materialien."
-                onToggleCollapse={toggleFamilyCollapse}
-              >
-                {#snippet row({ item: material })}
-                  <tr class="row-click" onclick={() => openEditMaterial(material, { ids: visibleGroupItemIds(incompleteMaterialGroups) })}>
-                    <td>{material.name}</td>
-                    <td>{incompleteHint(material) || '—'}</td>
-                    <td onclick={(e) => e.stopPropagation()}>
-                      <button class="btn secondary" onclick={() => openEditMaterial(material, { ids: visibleGroupItemIds(incompleteMaterialGroups) })}>Bearbeiten</button>
-                    </td>
-                  </tr>
-                {/snippet}
-              </ProductGroupSection>
-            </tbody>
-          </table>
-        </div>
+        <p class="overview-section-job">Fehlende Stammdaten (System-Tags „fehlt …“) — einmal nachziehen.</p>
+
+        <h3 class="overview-subhead">Produkte</h3>
+        <CatalogActionList
+          groups={incompleteProductGroups}
+          {collapsedFamilies}
+          emptyMessage="Keine unvollständigen Produkte."
+          onToggleCollapse={toggleFamilyCollapse}
+        >
+          {#snippet card({ product })}
+            <article class="card action-card catalog-card">
+              <div class="action-card-body">
+                <h3>{product.name}</h3>
+                {#if incompleteHint(product)}
+                  <div class="incomplete-hint">
+                    <span class="incomplete-icon" aria-hidden="true">!</span>
+                    {incompleteHint(product)}
+                  </div>
+                {/if}
+              </div>
+              <button
+                type="button"
+                class="btn action-card-cta"
+                onclick={() => openEditProduct(product, { ids: visibleGroupItemIds(incompleteProductGroups) })}
+              >Bearbeiten</button>
+            </article>
+          {/snippet}
+        </CatalogActionList>
+
+        <h3 class="overview-subhead">Materialien</h3>
+        <CatalogActionList
+          groups={incompleteMaterialGroups}
+          {collapsedFamilies}
+          emptyMessage="Keine unvollständigen Materialien."
+          onToggleCollapse={toggleFamilyCollapse}
+        >
+          {#snippet card({ item: material })}
+            <article class="card action-card catalog-card">
+              <div class="action-card-body">
+                <h3>{material.name}</h3>
+                {#if incompleteHint(material)}
+                  <div class="incomplete-hint">
+                    <span class="incomplete-icon" aria-hidden="true">!</span>
+                    {incompleteHint(material)}
+                  </div>
+                {/if}
+              </div>
+              <button
+                type="button"
+                class="btn action-card-cta"
+                onclick={() => openEditMaterial(material, { ids: visibleGroupItemIds(incompleteMaterialGroups) })}
+              >Bearbeiten</button>
+            </article>
+          {/snippet}
+        </CatalogActionList>
       {/if}
     </section>
     <BackupPanel onFlash={showFlash} onImported={refresh} />
+    </div>
   {:else if tab === 'materials'}
     <ExtraGapPanels
       kind="material"
