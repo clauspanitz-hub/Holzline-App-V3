@@ -289,6 +289,27 @@ export const api = {
     complete: (id) => request(`/api/todos/${id}/complete`, { method: 'POST' }),
     purchaseFromCritical: (body = {}) =>
       request('/api/todos/purchase-from-critical', { method: 'POST', body: JSON.stringify(body) }),
+    /** Materialbedarf (offene Einkauf-Todos) als Datei-Download (CSV oder PDF). */
+    exportPurchaseDemand: async (format) => {
+      const ext = format === 'pdf' ? 'pdf' : 'csv'
+      const response = await fetch(`/api/todos/purchase-export.${ext}`, { credentials: 'include' })
+      if (!response.ok) {
+        const text = await response.text()
+        let data = null
+        try {
+          data = text ? JSON.parse(text) : null
+        } catch {
+          data = text
+        }
+        throw new Error(messageFromFailedResponse(data, response, 'Export fehlgeschlagen'))
+      }
+      const blob = await response.blob()
+      const header = response.headers.get('Content-Disposition') || ''
+      const match = /filename="([^"]+)"/i.exec(header)
+      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+      const filename = match?.[1] || `materialbedarf-${stamp}.${ext}`
+      return { blob, filename }
+    },
   },
   overview: {
     tageslage: (refresh = false) =>

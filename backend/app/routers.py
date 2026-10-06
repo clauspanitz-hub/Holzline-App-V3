@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import backup, services
+from app import backup, material_demand_export, services
 from app.auth import (
     AdminUser,
     CurrentUser,
@@ -844,6 +844,39 @@ def update_todo(
     todo_id: int, payload: TodoUpdate, _: CurrentUser, db: Session = Depends(get_db)
 ) -> TodoRead:
     return services.update_todo(db, todo_id, payload)
+
+
+@router.get("/todos/purchase-export.csv")
+def export_purchase_demand_csv(_: CurrentUser, db: Session = Depends(get_db)) -> Response:
+    """Materialbedarf (offene Einkauf-Todos) als CSV für Lieferantenbestellungen."""
+    rows = material_demand_export.collect_demand_rows(db)
+    payload = material_demand_export.build_csv(rows)
+    stamp = material_demand_export.export_stamp()
+    return Response(
+        content=payload,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="materialbedarf-{stamp}.csv"',
+        },
+    )
+
+
+@router.get("/todos/purchase-export.pdf")
+def export_purchase_demand_pdf(_: CurrentUser, db: Session = Depends(get_db)) -> Response:
+    """Materialbedarf (offene Einkauf-Todos) als PDF für Lieferantenbestellungen."""
+    rows = material_demand_export.collect_demand_rows(db)
+    try:
+        payload = material_demand_export.build_pdf(rows)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    stamp = material_demand_export.export_stamp()
+    return Response(
+        content=payload,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="materialbedarf-{stamp}.pdf"',
+        },
+    )
 
 
 @router.post("/todos/purchase-from-critical", response_model=PurchaseTodosGenerateResult)

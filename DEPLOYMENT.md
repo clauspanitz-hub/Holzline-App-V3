@@ -152,7 +152,8 @@ Dauerhaft im Repo:
 
 | Tag / Branch | Bedeutung |
 |--------------|-----------|
-| **`ui-v1.11`** / Branch (nach Merge `main`) | Übersicht entwirrt: Aktionskarten, Tageslage zu, weniger Dichte |
+| **`ui-v1.12`** / Branch (nach Merge `main`) | Materialbedarf-Export PDF/CSV aus offenen Einkauf-Todos (ADR `0029`) |
+| **`ui-v1.11`** / `main` | Übersicht entwirrt: Aktionskarten, Tageslage zu, weniger Dichte |
 | **`ui-v1.10`** / `main` | Einkaufsassistent Stückpreis/Ausbeute (ADR `0028`) |
 | **`ui-v1.9`** / `main` | Set-Varianten-Picker (`SetVariantSelect`, FamilySelect-Muster) |
 | **`ui-v1.8`** / `main` | Manuelle Todos (ADR `0027`) |
@@ -165,12 +166,23 @@ Dauerhaft im Repo:
 | **`ui-v1`** | Slice 1 vor Kontrast-Pass (Tag fest; GitHub ließ Update nicht zu) |
 | **`ui-classic`** | UI **vor** dem Redesign |
 
-**Aktuell deployen — nach Merge Tag `ui-v1.11` (oder `main`):**
+**Aktuell deployen — nach Merge Tag `ui-v1.12` (oder `main`):**
 
 ```bash
 cd /opt/holzlinge-inventar
 git fetch --tags origin
-git checkout ui-v1.11   # oder: git checkout main && git pull
+git checkout ui-v1.12   # oder: git checkout main && git pull
+git log -1 --oneline
+docker compose build --no-cache
+docker compose up -d --force-recreate
+```
+
+**Vorgänger — Tag `ui-v1.11`:**
+
+```bash
+cd /opt/holzlinge-inventar
+git fetch --tags origin
+git checkout ui-v1.11
 git log -1 --oneline
 docker compose build --no-cache
 docker compose up -d --force-recreate

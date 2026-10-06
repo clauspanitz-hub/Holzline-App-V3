@@ -39,6 +39,7 @@ MITARBEITER_ALLOW = (
     ("GET", re.compile(r"^/api/media$")),
     ("GET", re.compile(r"^/api/units$")),
     ("GET", re.compile(r"^/api/todos$")),
+    ("GET", re.compile(r"^/api/todos/purchase-export\.(csv|pdf)$")),
     ("POST", re.compile(r"^/api/todos$")),
     ("PATCH", re.compile(r"^/api/todos/\d+$")),
     ("POST", re.compile(r"^/api/todos/\d+/complete$")),

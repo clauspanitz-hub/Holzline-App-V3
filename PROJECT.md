@@ -91,6 +91,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 ### Phase 3: Optimierung & Einkauf — Umgesetzt
 - [x] Einkaufsliste aus fehlenden Materialien (Todo-Art Einkauf; ADR `0019`/`0023`)
 - [x] Einkaufsquellen + Alternativen am Material (ADR `0021`)
+- [x] Materialbedarf-Export PDF/CSV aus offenen Einkauf-Todos (ADR `0029`)
 - [x] Mindestbestand je Material/Produkt → Warnungen in Übersicht (vorgezogen in 1.5)
 - [x] Toast-Stack (bis Klick, optional „Zur Stelle?“); Material-Filter Negativbestand (ADR `0024`)
 
