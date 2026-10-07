@@ -223,6 +223,10 @@ _Avoid_: Stilles Löschen ohne Spur; Tag „Ausschuss“ statt Standort; Ausschu
 Eigene Ansicht für Produkte mit Bestand > 0 an MA1/MA2, inkl. Zugang zur Bewegungshistorie. Kein Ersatz für die normale Produktliste und **kein** Produkt-Bearbeiten von dort (Stammdaten nur unter Produkte). Der Knopf Umwandeln erscheint nur bei „Uni“ im Namen und vorhandenem Vintage-Ziel.
 _Avoid_: Nur Tabellenfilter statt eigener Überblick; Tags als alleinige „bei MA“-Anzeige; Bearbeiten-Dialog auf Bei Mitarbeitern; Stammdaten-Pflege im MA-Überblick; Anzeige nur bei manuellem „Wird zu“
 
+**Materialbedarf-Export**:
+Download der offenen **Einkauf-Todos** als Bedarfsliste für Lieferantenbestellungen — **CSV** (Semikolon, Excel DE) und **PDF** (Querformat). Buttons unter Todos (**Bedarf CSV** / **Bedarf PDF**). Enthält Material, Bestellmenge, Einheit, verfügbaren Bestand, Mindestbestand und bevorzugte Bezugsquelle (Shop + URL). Kein Ersatz für die Todo-Liste selbst; kein Shopify-/Barcode-/Telegram-Anschluss (ADR `0029`).
+_Avoid_: Export aller kritischen Materialien ohne Todo; BOM-Bedarf aus Fertigen als Pflicht in diesem Schnitt; stiller Shop-Write; nur Browser-Druck ohne Datei
+
 **Datensicherung** (Export/Import):
 JSON-Datei für **Inventar** (Kataloge, Materialien, Produkte, Bestände, Sets u. a.) zum Herunterladen und Wiederherstellen — nicht Bestellungen, Todos, Shop-Zuordnungen, Tageslage oder Benutzer (dafür Host-Backup der SQLite). Bewegungs-Historie optional per Checkbox (Standard: aus). Beim Import wählt der Nutzer: **Ersetzen** (bestehende Daten werden geleert/ersetzt) oder **Zusammenführen** (Match über Name bzw. SKU/Handle/Farbe+Medium; fehlende anlegen, Stammdaten aktualisieren; Bestände je Standort beim Match **setzen**, nicht addieren) — jeweils mit Bestätigung. Kein Ersatz für Host-Backups der SQLite-Datei.
 _Avoid_: Stiller Import ohne Moduswahl; Merge über interne IDs als Normalfall; Bestände beim Merge addieren; nur Excel-CSVs als einzige Sicherung; Datensicherung als vollständiger Ersatz für die ganze SQLite inkl. Bestellungen

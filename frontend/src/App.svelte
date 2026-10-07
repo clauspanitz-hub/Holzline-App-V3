@@ -1079,6 +1079,26 @@
     }
   }
 
+  async function exportPurchaseDemand(format) {
+    saving = true
+    try {
+      const { blob, filename } = await api.todos.exportPurchaseDemand(format)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      showFlash('ok', format === 'pdf' ? 'Materialbedarf als PDF geladen.' : 'Materialbedarf als CSV geladen.')
+    } catch (error) {
+      showFlash('error', error.message || 'Export fehlgeschlagen.')
+    } finally {
+      saving = false
+    }
+  }
+
   function todoLabelForCreate(todo) {
     return String(todo.title || '').replace(/^Artikel anlegen:\s*/i, '').trim()
   }
@@ -5704,10 +5724,29 @@
               Einkauf-Todos erzeugen
             </button>
           {/if}
+          <button
+            type="button"
+            class="btn secondary"
+            disabled={saving}
+            title="Offene Einkauf-Todos als CSV für Lieferanten"
+            onclick={() => exportPurchaseDemand('csv')}
+          >
+            Bedarf CSV
+          </button>
+          <button
+            type="button"
+            class="btn secondary"
+            disabled={saving}
+            title="Offene Einkauf-Todos als PDF für Lieferanten"
+            onclick={() => exportPurchaseDemand('pdf')}
+          >
+            Bedarf PDF
+          </button>
         </div>
       </div>
       <p class="empty" style="margin-top:0">
         Werkstatt zuerst. Tippen → Aktion oder Bearbeiten. Manuell: Art + Titel reicht.
+        Bedarf CSV/PDF = offene Einkauf-Todos für Lieferantenbestellungen.
       </p>
       <div class="chip-row" role="group" aria-label="Todo-Art">
         <button type="button" class="chip" class:active={todoCategoryFilter === 'workshop'} onclick={() => (todoCategoryFilter = 'workshop')}>Werkstatt</button>
