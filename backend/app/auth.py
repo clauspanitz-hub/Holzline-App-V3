@@ -45,7 +45,8 @@ MITARBEITER_ALLOW = (
     ("POST", re.compile(r"^/api/products/\d+/transform$")),
     ("POST", re.compile(r"^/api/products/\d+/manufacture$")),
     ("POST", re.compile(r"^/api/materials/\d+/stock/delta$")),
-    ("PUT", re.compile(r"^/api/materials/\d+$")),
+    # Stammdaten-Update ist PATCH (Einkauf-Dialog setzt Preis + zuletzt bestellt).
+    ("PATCH", re.compile(r"^/api/materials/\d+$")),
     ("GET", re.compile(r"^/api/sets/variants/\d+/assemble-preview$")),
     ("POST", re.compile(r"^/api/sets/variants/\d+/assemble$")),
 )
