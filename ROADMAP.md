@@ -4,7 +4,6 @@ Diese Datei dient als Zwischenspeicher für Ideen, die während der Entwicklung 
 
 ## Backlog (offen)
 
-- [ ] Export von Materialbedarfslisten als PDF/CSV für Lieferantenbestellungen
 - [ ] Historie/Audit-Log aller Fertigungsvorgänge und manuellen Bestandsänderungen
 
 ## Erledigt
@@ -12,6 +11,7 @@ Diese Datei dient als Zwischenspeicher für Ideen, die während der Entwicklung 
 - [x] Benutzer-Rollen (Admin vs. Mitarbeiter) — ADR `0010`
 - [x] Übersicht UI entwirren (Tabellen/Filter, weniger Dichte) — `ui-v1.11`
 - [x] Bei Negativbestand nach Fertigung: Bestell-/Einkaufs-Todo (Phase 3; ADR `0023`)
+- [x] Export von Materialbedarfslisten als PDF/CSV für Lieferantenbestellungen — ADR `0029`, `ui-v1.12`
 
 ## Viel später / Frozen (kein aktueller Bedarf)
 
