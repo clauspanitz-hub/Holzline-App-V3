@@ -383,3 +383,5 @@ cd frontend
 npm install
 npm run dev
 ```
+
+**CI:** Bei jedem PR und Push auf `main` laufen GitHub Actions (`.github/workflows/ci.yml`): Backend-`pytest` und Frontend-Build — ohne Cursor-Token-Kosten im Alltag.
