@@ -93,16 +93,24 @@ Der Vorgang, bei dem eine Menge eines Produkts hergestellt wird: Produktbestand 
 _Avoid_: Produzieren, Herstellen, Buchen (als alleiniger Begriff für diesen Vorgang); Zusammenstellen eines Sets (das ist kein Fertigen auf Set-Ebene); Zeiterfassung/Produktions-Tracking (das ist **Produktion**, kein Bestandsvorgang)
 
 **Produktion** / **Produktions-Tracking**:
-Werkstatt-Seite zum Erfassen von **Prozessen** und **Schritten** mit parallelen **Zeitspuren** (Arbeitszeit und Maschinenzeit), optional Produkt und Stückzahlen. **Produktkosten** pro Produkttyp aus Ø-Zeiten × aktuellen Tarifen; Historie nach Prozess-Abschluss. Entkoppelt von Fertigen/Lager (ADR `0030`).
-_Avoid_: Fertigen als Synonym; Kosten je physischem Einzelstück; Shopify-Write; Vorlagen/Gemini in Slice 1
+Werkstatt-Seite: **Produktionslauf** (Hauptname, optional Multi-Select Produkte/Familien) mit darunterliegenden **Prozessen** (früher „Schritte“), parallelen **Zeitspuren** (Arbeitszeit und Maschinenzeit), Schätzung + Messung (Messung bevorzugt). **Produktkosten** pro Produkttyp aus Ø-Zeiten × aktuellen Tarifen; Historie nach Lauf-Abschluss (gleicher Satz für alle Verknüpfungen); Familien-Ø filterbar. Entkoppelt von Fertigen/Lager (ADR `0030`).
+_Avoid_: Fertigen als Synonym; Kosten je physischem Einzelstück; Shopify-Write; Vorlagen/Gemini; Material-/Werkzeug-Haltbarkeit am Prozess (Backlog)
+
+**Produktionslauf**:
+Oberste Tracking-Ebene mit freiem Hauptnamen; optional mehrere Produkte und/oder Produktfamilien; darunter bis ~10 Prozesse.
+_Avoid_: Einzelschritt als Lauf; Fertigen-Buchung
+
+**Prozess** (Produktion):
+Tätigkeit unter einem Produktionslauf (Fräsen, Schleifen, …) mit eigener Stückzahl, Schätzung/Messung und Timern.
+_Avoid_: „Schritt“ als UI-Hauptbegriff (deprecated Alias); Lauf und Prozess verwechseln
 
 **Maschine** (Produktion):
 Stammdaten-Gerät (z. B. Drucker, Fräse) mit Name, optionaler Notiz und Leistung (W) für Energiekosten.
-_Avoid_: Standort als Maschine; Freitext statt Stammdaten in Slice 1
+_Avoid_: Standort als Maschine; Freitext statt Stammdaten
 
 **Stundensatz** (Produktion):
 Katalogeintrag €/h; Default am Benutzer für Arbeits-Zeitspuren, Override am Track möglich.
-_Avoid_: Einziger globaler Lohnsatz als einzige Option; Tarif je Maschine in Slice 1
+_Avoid_: Einziger globaler Lohnsatz als einzige Option; Tarif je Maschine
 
 **Zusammenstellen**:
 Bei Bestellung eines Sets die benötigten Komponenten laut Varianten-Stückliste (Produkte und Materialien) an einem gewählten Standort vom Lager abbuchen (ohne Set-Bestand zu erhöhen). Todo unter Werkstatt; Dialog mit BOM-Vorschau; leere Stückliste blockiert die Buchung.

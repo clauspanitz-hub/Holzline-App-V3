@@ -1,4 +1,4 @@
-"""Produktions-Tracking: Zeiten, Maschinen, Produktkosten (ADR 0030)."""
+"""Produktions-Tracking: Läufe, Prozesse, Zeiten, Maschinen, Produktkosten (ADR 0030)."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from app.models import (
     Machine,
     Product,
     ProductCostSnapshot,
+    ProductFamily,
     ProductionProcess,
     ProductionStep,
     ProductionTimeTrack,
@@ -24,6 +25,7 @@ from app.models import (
 
 ENERGY_SETTING_KEY = "energy_eur_per_kwh"
 ZERO = Decimal("0")
+MAX_PROCESSES_PER_RUN = 10
 
 
 def _utcnow() -> datetime:
@@ -45,6 +47,13 @@ def _qty(value: Decimal | None) -> Decimal | None:
         return None
     q = _dec(value)
     return q if q > 0 else None
+
+
+def _secs_or_none(value: Decimal | None) -> Decimal | None:
+    if value is None:
+        return None
+    s = _dec(value)
+    return s if s >= 0 else None
 
 
 def get_energy_tariff(db: Session) -> Decimal:
@@ -198,20 +207,23 @@ def delete_machine(db: Session, machine_id: int) -> None:
     db.commit()
 
 
-# --- Processes / steps / tracks ---------------------------------------------
+# --- Runs (Produktionsläufe) / processes (Prozesse) / tracks -----------------
 
 
 def _process_query():
     return select(ProductionProcess).options(
         selectinload(ProductionProcess.steps).selectinload(ProductionStep.tracks),
         selectinload(ProductionProcess.product),
+        selectinload(ProductionProcess.product_links),
+        selectinload(ProductionProcess.family_links),
+        selectinload(ProductionProcess.created_by),
     )
 
 
 def get_process(db: Session, process_id: int) -> ProductionProcess:
     row = db.scalars(_process_query().where(ProductionProcess.id == process_id)).first()
     if not row:
-        raise HTTPException(status_code=404, detail="Prozess nicht gefunden")
+        raise HTTPException(status_code=404, detail="Produktionslauf nicht gefunden")
     return row
 
 
@@ -220,24 +232,110 @@ def list_board(db: Session, *, status: str = "active") -> list[ProductionProcess
     return list(db.scalars(q).all())
 
 
+def _family_ids_expanded(db: Session, family_ids: list[int]) -> set[int]:
+    """Elternfamilie schließt Unterfamilien-IDs ein."""
+    if not family_ids:
+        return set()
+    expanded: set[int] = set(family_ids)
+    children = db.scalars(
+        select(ProductFamily).where(ProductFamily.parent_id.in_(list(expanded)))
+    ).all()
+    for child in children:
+        expanded.add(child.id)
+    return expanded
+
+
+def _resolve_products(db: Session, product_ids: list[int] | None) -> list[Product]:
+    if not product_ids:
+        return []
+    unique = list(dict.fromkeys(int(pid) for pid in product_ids))
+    rows = list(db.scalars(select(Product).where(Product.id.in_(unique))).all())
+    found = {p.id for p in rows}
+    missing = [pid for pid in unique if pid not in found]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Produkt nicht gefunden: {missing[0]}")
+    # preserve order
+    by_id = {p.id: p for p in rows}
+    return [by_id[pid] for pid in unique]
+
+
+def _resolve_families(db: Session, family_ids: list[int] | None) -> list[ProductFamily]:
+    if not family_ids:
+        return []
+    unique = list(dict.fromkeys(int(fid) for fid in family_ids))
+    rows = list(db.scalars(select(ProductFamily).where(ProductFamily.id.in_(unique))).all())
+    found = {f.id for f in rows}
+    missing = [fid for fid in unique if fid not in found]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Produktfamilie nicht gefunden: {missing[0]}")
+    by_id = {f.id: f for f in rows}
+    return [by_id[fid] for fid in unique]
+
+
+def _set_run_links(
+    db: Session,
+    row: ProductionProcess,
+    *,
+    product_ids: list[int] | None = None,
+    family_ids: list[int] | None = None,
+    legacy_product_id: int | None = None,
+    clear_links: bool = False,
+) -> None:
+    if clear_links:
+        row.product_links = []
+        row.family_links = []
+        row.product_id = None
+        return
+
+    if product_ids is not None or legacy_product_id is not None:
+        ids = list(product_ids) if product_ids is not None else []
+        if legacy_product_id is not None and legacy_product_id not in ids:
+            ids = [legacy_product_id, *ids]
+        row.product_links = _resolve_products(db, ids)
+        row.product_id = row.product_links[0].id if row.product_links else None
+
+    if family_ids is not None:
+        row.family_links = _resolve_families(db, family_ids)
+
+
+def linked_product_ids(db: Session, process: ProductionProcess) -> set[int]:
+    """Alle Produkttypen, die denselben Kosten-Satz dieses Laufs erhalten (Q19 A)."""
+    ids: set[int] = {p.id for p in (process.product_links or [])}
+    if process.product_id:
+        ids.add(process.product_id)
+    fam_ids = [f.id for f in (process.family_links or [])]
+    if fam_ids:
+        expanded = _family_ids_expanded(db, fam_ids)
+        for pid in db.scalars(select(Product.id).where(Product.family_id.in_(expanded))).all():
+            ids.add(pid)
+    return ids
+
+
 def create_process(
     db: Session,
     user: User,
     *,
     title: str | None = None,
     product_id: int | None = None,
+    product_ids: list[int] | None = None,
+    family_ids: list[int] | None = None,
     quantity: Decimal | None = None,
 ) -> ProductionProcess:
-    if product_id is not None and not db.get(Product, product_id):
-        raise HTTPException(status_code=400, detail="Produkt nicht gefunden")
     row = ProductionProcess(
         title=(title.strip() if title and title.strip() else None),
-        product_id=product_id,
         quantity=_qty(quantity),
         status="active",
         created_by_user_id=user.id,
     )
     db.add(row)
+    db.flush()
+    _set_run_links(
+        db,
+        row,
+        product_ids=product_ids,
+        family_ids=family_ids,
+        legacy_product_id=product_id,
+    )
     db.commit()
     return get_process(db, row.id)
 
@@ -249,21 +347,30 @@ def update_process(
     title: str | None = None,
     product_id: int | None = None,
     clear_product: bool = False,
+    product_ids: list[int] | None = None,
+    family_ids: list[int] | None = None,
+    clear_links: bool = False,
     quantity: Decimal | None = None,
     clear_quantity: bool = False,
 ) -> ProductionProcess:
     row = get_process(db, process_id)
-    if row.status != "active" and (title is not None or clear_product or product_id is not None):
-        # allow quantity/title edits on done? keep simple: only active for structural edits
-        pass
     if title is not None:
         row.title = title.strip() or None
-    if clear_product:
-        row.product_id = None
-    elif product_id is not None:
-        if not db.get(Product, product_id):
-            raise HTTPException(status_code=400, detail="Produkt nicht gefunden")
-        row.product_id = product_id
+    if clear_links or clear_product:
+        _set_run_links(db, row, clear_links=True)
+    elif product_ids is not None or family_ids is not None or product_id is not None:
+        # Legacy product_id allein = Produkte ersetzen; product_ids explizit setzen
+        if product_ids is not None:
+            pids = product_ids
+            legacy = None
+        elif product_id is not None:
+            pids = [product_id]
+            legacy = None
+        else:
+            pids = [p.id for p in row.product_links]
+            legacy = None
+        fids = family_ids if family_ids is not None else [f.id for f in row.family_links]
+        _set_run_links(db, row, product_ids=pids, family_ids=fids, legacy_product_id=legacy)
     if clear_quantity:
         row.quantity = None
     elif quantity is not None:
@@ -279,13 +386,20 @@ def add_step(
     name: str,
     *,
     quantity: Decimal | None = None,
+    estimated_labor_seconds: Decimal | None = None,
+    estimated_machine_seconds: Decimal | None = None,
 ) -> ProductionProcess:
     process = get_process(db, process_id)
     if process.status != "active":
-        raise HTTPException(status_code=400, detail="Abgeschlossener Prozess — Schritt nicht anlegbar")
+        raise HTTPException(status_code=400, detail="Abgeschlossener Lauf — Prozess nicht anlegbar")
+    if len(process.steps) >= MAX_PROCESSES_PER_RUN:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximal {MAX_PROCESSES_PER_RUN} Prozesse pro Produktionslauf",
+        )
     clean = name.strip()
     if not clean:
-        raise HTTPException(status_code=400, detail="Schrittname erforderlich")
+        raise HTTPException(status_code=400, detail="Prozessname erforderlich")
     qty = _qty(quantity)
     if qty is None:
         qty = _qty(process.quantity)
@@ -295,6 +409,8 @@ def add_step(
             process_id=process.id,
             name=clean,
             quantity=qty,
+            estimated_labor_seconds=_secs_or_none(estimated_labor_seconds),
+            estimated_machine_seconds=_secs_or_none(estimated_machine_seconds),
             sort_hint=sort_hint,
         )
     )
@@ -310,19 +426,31 @@ def update_step(
     name: str | None = None,
     quantity: Decimal | None = None,
     clear_quantity: bool = False,
+    estimated_labor_seconds: Decimal | None = None,
+    clear_estimated_labor: bool = False,
+    estimated_machine_seconds: Decimal | None = None,
+    clear_estimated_machine: bool = False,
 ) -> ProductionProcess:
     step = db.get(ProductionStep, step_id)
     if not step:
-        raise HTTPException(status_code=404, detail="Schritt nicht gefunden")
+        raise HTTPException(status_code=404, detail="Prozess nicht gefunden")
     if name is not None:
         clean = name.strip()
         if not clean:
-            raise HTTPException(status_code=400, detail="Schrittname erforderlich")
+            raise HTTPException(status_code=400, detail="Prozessname erforderlich")
         step.name = clean
     if clear_quantity:
         step.quantity = None
     elif quantity is not None:
         step.quantity = _qty(quantity)
+    if clear_estimated_labor:
+        step.estimated_labor_seconds = None
+    elif estimated_labor_seconds is not None:
+        step.estimated_labor_seconds = _secs_or_none(estimated_labor_seconds)
+    if clear_estimated_machine:
+        step.estimated_machine_seconds = None
+    elif estimated_machine_seconds is not None:
+        step.estimated_machine_seconds = _secs_or_none(estimated_machine_seconds)
     step.updated_at = _utcnow()
     step.process.updated_at = _utcnow()
     db.commit()
@@ -343,9 +471,9 @@ def start_track(
         raise HTTPException(status_code=400, detail="kind muss labor oder machine sein")
     step = db.get(ProductionStep, step_id)
     if not step:
-        raise HTTPException(status_code=404, detail="Schritt nicht gefunden")
+        raise HTTPException(status_code=404, detail="Prozess nicht gefunden")
     if step.process.status != "active":
-        raise HTTPException(status_code=400, detail="Prozess ist abgeschlossen")
+        raise HTTPException(status_code=400, detail="Produktionslauf ist abgeschlossen")
     rate_id = labor_rate_id
     if kind == "labor":
         if rate_id is None:
@@ -453,6 +581,28 @@ def _machine_power(db: Session, machine_id: int | None, cache: dict[int, Decimal
     return val
 
 
+def measured_step_seconds(step: ProductionStep, kind: str) -> Decimal:
+    total = ZERO
+    for track in step.tracks:
+        if track.kind != kind or track.ended_at is None:
+            continue
+        total += track_duration_seconds(track)
+    return total
+
+
+def has_completed_tracks(step: ProductionStep, kind: str) -> bool:
+    return any(t.kind == kind and t.ended_at is not None for t in step.tracks)
+
+
+def effective_step_seconds(step: ProductionStep, kind: str) -> Decimal:
+    """Messung wenn vorhanden, sonst Schätzung (Q20 A)."""
+    if has_completed_tracks(step, kind):
+        return measured_step_seconds(step, kind)
+    if kind == "labor":
+        return _dec(step.estimated_labor_seconds) if step.estimated_labor_seconds is not None else ZERO
+    return _dec(step.estimated_machine_seconds) if step.estimated_machine_seconds is not None else ZERO
+
+
 def compute_process_unit_costs(
     db: Session,
     process: ProductionProcess,
@@ -460,7 +610,8 @@ def compute_process_unit_costs(
     energy_tariff: Decimal | None = None,
     live_rates: bool = True,
 ) -> dict[str, Decimal]:
-    """Summe (Zeiten÷Schrittmenge) × Tarife → Kosten pro Stück für diesen Prozess."""
+    """Summe (effektive Zeiten÷Prozessmenge) × Tarife → Kosten pro Stück für diesen Lauf."""
+    del live_rates  # immer aktuelle Tarife / Track-Sätze
     tariff = energy_tariff if energy_tariff is not None else get_energy_tariff(db)
     rate_cache: dict[int, Decimal] = {}
     power_cache: dict[int, Decimal | None] = {}
@@ -469,28 +620,49 @@ def compute_process_unit_costs(
     labor_eur = ZERO
     energy_kwh = ZERO
 
+    fallback_rate_id = None
+    if process.created_by and process.created_by.labor_rate_id:
+        fallback_rate_id = process.created_by.labor_rate_id
+
     for step in process.steps:
         qty = step_quantity(step, process)
         if not qty:
             continue
-        for track in step.tracks:
-            if track.ended_at is None:
-                continue
-            secs = track_duration_seconds(track)
-            hours = secs / Decimal("3600")
-            per_unit_secs = secs / qty
-            if track.kind == "labor":
-                labor_secs += per_unit_secs
-                rate = _rate_eur(db, track.labor_rate_id, rate_cache) if live_rates else _rate_eur(
-                    db, track.labor_rate_id, rate_cache
-                )
+
+        # --- Labor ---
+        if has_completed_tracks(step, "labor"):
+            for track in step.tracks:
+                if track.kind != "labor" or track.ended_at is None:
+                    continue
+                secs = track_duration_seconds(track)
+                hours = secs / Decimal("3600")
+                labor_secs += secs / qty
+                rate = _rate_eur(db, track.labor_rate_id, rate_cache)
                 labor_eur += (hours / qty) * rate
-            elif track.kind == "machine":
-                machine_secs += per_unit_secs
+        else:
+            est = _dec(step.estimated_labor_seconds) if step.estimated_labor_seconds is not None else ZERO
+            if est > 0:
+                labor_secs += est / qty
+                rate = _rate_eur(db, fallback_rate_id, rate_cache)
+                labor_eur += ((est / Decimal("3600")) / qty) * rate
+
+        # --- Machine ---
+        if has_completed_tracks(step, "machine"):
+            for track in step.tracks:
+                if track.kind != "machine" or track.ended_at is None:
+                    continue
+                secs = track_duration_seconds(track)
+                hours = secs / Decimal("3600")
+                machine_secs += secs / qty
                 power = _machine_power(db, track.machine_id, power_cache)
                 if power is not None and power > 0:
                     kwh = hours * (power / Decimal("1000"))
                     energy_kwh += kwh / qty
+        else:
+            est = _dec(step.estimated_machine_seconds) if step.estimated_machine_seconds is not None else ZERO
+            if est > 0:
+                machine_secs += est / qty
+                # ohne Maschinen-Track keine Leistung → Energie 0 aus Schätzung
 
     energy_eur = energy_kwh * tariff
     return {
@@ -507,7 +679,6 @@ def complete_process(db: Session, process_id: int) -> ProductionProcess:
     process = get_process(db, process_id)
     if process.status == "done":
         return process
-    # stop open tracks
     now = _utcnow()
     for step in process.steps:
         for track in step.tracks:
@@ -519,36 +690,63 @@ def complete_process(db: Session, process_id: int) -> ProductionProcess:
     process.updated_at = now
     db.flush()
 
-    if process.product_id:
+    target_ids = linked_product_ids(db, process)
+    if target_ids:
         costs = compute_process_unit_costs(db, process)
-        db.add(
-            ProductCostSnapshot(
-                product_id=process.product_id,
-                process_id=process.id,
-                captured_at=now,
-                labor_seconds_per_unit=costs["labor_seconds_per_unit"],
-                machine_seconds_per_unit=costs["machine_seconds_per_unit"],
-                labor_eur_per_unit=costs["labor_eur_per_unit"],
-                energy_kwh_per_unit=costs["energy_kwh_per_unit"],
-                energy_eur_per_unit=costs["energy_eur_per_unit"],
-                total_eur_per_unit=costs["total_eur_per_unit"],
+        for pid in sorted(target_ids):
+            db.add(
+                ProductCostSnapshot(
+                    product_id=pid,
+                    process_id=process.id,
+                    captured_at=now,
+                    labor_seconds_per_unit=costs["labor_seconds_per_unit"],
+                    machine_seconds_per_unit=costs["machine_seconds_per_unit"],
+                    labor_eur_per_unit=costs["labor_eur_per_unit"],
+                    energy_kwh_per_unit=costs["energy_kwh_per_unit"],
+                    energy_eur_per_unit=costs["energy_eur_per_unit"],
+                    total_eur_per_unit=costs["total_eur_per_unit"],
+                )
             )
-        )
     db.commit()
     return get_process(db, process_id)
+
+
+def _runs_for_product(db: Session, product_id: int) -> list[ProductionProcess]:
+    """Abgeschlossene Läufe, die diesem Produkttyp zugeordnet sind (direkt oder via Familie)."""
+    product = db.get(Product, product_id)
+    if not product:
+        return []
+    family_match_ids: set[int] = set()
+    if product.family_id:
+        fam = db.get(ProductFamily, product.family_id)
+        if fam:
+            family_match_ids.add(fam.id)
+            if fam.parent_id:
+                family_match_ids.add(fam.parent_id)
+
+    candidates = list(
+        db.scalars(
+            _process_query().where(ProductionProcess.status == "done")
+        ).all()
+    )
+    matched: list[ProductionProcess] = []
+    for process in candidates:
+        link_ids = {p.id for p in (process.product_links or [])}
+        if process.product_id:
+            link_ids.add(process.product_id)
+        if product_id in link_ids:
+            matched.append(process)
+            continue
+        fam_ids = {f.id for f in (process.family_links or [])}
+        if fam_ids & family_match_ids:
+            matched.append(process)
+    return matched
 
 
 def current_product_cost(db: Session, product_id: int) -> dict[str, Any]:
     if not db.get(Product, product_id):
         raise HTTPException(status_code=404, detail="Produkt nicht gefunden")
-    processes = list(
-        db.scalars(
-            _process_query().where(
-                ProductionProcess.product_id == product_id,
-                ProductionProcess.status == "done",
-            )
-        ).all()
-    )
+    processes = _runs_for_product(db, product_id)
     if not processes:
         return {
             "product_id": product_id,
@@ -572,7 +770,6 @@ def current_product_cost(db: Session, product_id: int) -> dict[str, Any]:
     counted = 0
     for process in processes:
         costs = compute_process_unit_costs(db, process, energy_tariff=tariff, live_rates=True)
-        # skip empty cost samples
         if (
             costs["labor_seconds_per_unit"] == ZERO
             and costs["machine_seconds_per_unit"] == ZERO
@@ -617,3 +814,62 @@ def list_product_cost_history(db: Session, product_id: int) -> list[ProductCostS
             .order_by(ProductCostSnapshot.captured_at.desc())
         ).all()
     )
+
+
+def _products_in_family(db: Session, family_id: int) -> list[Product]:
+    family = db.get(ProductFamily, family_id)
+    if not family:
+        raise HTTPException(status_code=404, detail="Produktfamilie nicht gefunden")
+    expanded = _family_ids_expanded(db, [family_id])
+    return list(
+        db.scalars(select(Product).where(Product.family_id.in_(expanded)).order_by(Product.name)).all()
+    )
+
+
+def current_family_cost(db: Session, family_id: int) -> dict[str, Any]:
+    """Familien-Ø der Produktkosten; bei abweichenden Einzelwerten Durchschnitt (Q22 A)."""
+    products = _products_in_family(db, family_id)
+    family = db.get(ProductFamily, family_id)
+    assert family is not None
+    items: list[dict[str, Any]] = []
+    for product in products:
+        cost = current_product_cost(db, product.id)
+        items.append(
+            {
+                "product_id": product.id,
+                "product_name": product.name,
+                "sample_count": cost["sample_count"],
+                "total_eur_per_unit": cost["total_eur_per_unit"],
+                "labor_eur_per_unit": cost["labor_eur_per_unit"],
+                "energy_eur_per_unit": cost["energy_eur_per_unit"],
+            }
+        )
+    with_samples = [i for i in items if i["sample_count"] > 0]
+    if not with_samples:
+        return {
+            "family_id": family_id,
+            "family_name": family.name,
+            "product_count": len(items),
+            "sample_product_count": 0,
+            "prices_differ": False,
+            "avg_total_eur_per_unit": ZERO,
+            "avg_labor_eur_per_unit": ZERO,
+            "avg_energy_eur_per_unit": ZERO,
+            "products": items,
+        }
+    n = Decimal(len(with_samples))
+    avg_total = _money(sum((i["total_eur_per_unit"] for i in with_samples), ZERO) / n)
+    avg_labor = _money(sum((i["labor_eur_per_unit"] for i in with_samples), ZERO) / n)
+    avg_energy = _money(sum((i["energy_eur_per_unit"] for i in with_samples), ZERO) / n)
+    distinct = {str(i["total_eur_per_unit"]) for i in with_samples}
+    return {
+        "family_id": family_id,
+        "family_name": family.name,
+        "product_count": len(items),
+        "sample_product_count": len(with_samples),
+        "prices_differ": len(distinct) > 1,
+        "avg_total_eur_per_unit": avg_total,
+        "avg_labor_eur_per_unit": avg_labor,
+        "avg_energy_eur_per_unit": avg_energy,
+        "products": items,
+    }

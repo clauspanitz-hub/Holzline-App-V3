@@ -680,13 +680,30 @@ class AppSetting(Base):
     value: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
 
+# Slice 2: Multi-Link Produktionslauf ↔ Produkte / Produktfamilien (ADR 0030)
+production_process_products = Table(
+    "production_process_products",
+    Base.metadata,
+    Column("process_id", ForeignKey("production_processes.id", ondelete="CASCADE"), primary_key=True),
+    Column("product_id", ForeignKey("products.id", ondelete="CASCADE"), primary_key=True),
+)
+
+production_process_families = Table(
+    "production_process_families",
+    Base.metadata,
+    Column("process_id", ForeignKey("production_processes.id", ondelete="CASCADE"), primary_key=True),
+    Column("family_id", ForeignKey("product_families.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
 class ProductionProcess(Base):
-    """Laufende oder abgeschlossene Produktions-Session (ADR 0030)."""
+    """Produktionslauf (Slice 2) / früher „Prozess“ (Slice 1) — ADR 0030."""
 
     __tablename__ = "production_processes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)  # Hauptname
+    # Legacy Einzel-Link (Slice 1); Slice 2 bevorzugt junction product_links
     product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
     quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")  # active | done
@@ -697,7 +714,9 @@ class ProductionProcess(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    product: Mapped[Product | None] = relationship()
+    product: Mapped[Product | None] = relationship(foreign_keys=[product_id])
+    product_links: Mapped[list["Product"]] = relationship(secondary=production_process_products)
+    family_links: Mapped[list["ProductFamily"]] = relationship(secondary=production_process_families)
     created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_user_id])
     steps: Mapped[list["ProductionStep"]] = relationship(
         back_populates="process",
@@ -707,6 +726,8 @@ class ProductionProcess(Base):
 
 
 class ProductionStep(Base):
+    """Prozess unter einem Produktionslauf (Slice 2) / früher „Schritt“ (Slice 1)."""
+
     __tablename__ = "production_steps"
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -715,6 +736,8 @@ class ProductionStep(Base):
     )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    estimated_labor_seconds: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    estimated_machine_seconds: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     sort_hint: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)

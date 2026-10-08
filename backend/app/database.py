@@ -210,6 +210,7 @@ def init_db() -> None:
         migrate_manual_todos(engine)
         migrate_material_product_yields(engine)
         migrate_production_tracking(engine)
+        migrate_production_tracking_slice2(engine)
         seed_admin_user(db)
         from app.services import backfill_incomplete_tags, ensure_system_incomplete_tags
 
@@ -745,6 +746,47 @@ def migrate_production_tracking(engine) -> None:
                 "REFERENCES labor_rates(id) ON DELETE SET NULL"
             )
         )
+
+
+def migrate_production_tracking_slice2(engine) -> None:
+    """Slice 2: Multi-Link Lauf↔Produkt/Familie + Schätzzeiten an Prozessen (ADR 0030)."""
+    from app.models import Base as _Base
+
+    insp = inspect(engine)
+    tables = set(insp.get_table_names())
+    if "production_processes" not in tables:
+        return
+
+    # Junction-Tabellen + neue Spalten via create_all (fehlende Tabellen)
+    _Base.metadata.create_all(
+        engine,
+        tables=[
+            _Base.metadata.tables["production_process_products"],
+            _Base.metadata.tables["production_process_families"],
+        ],
+    )
+
+    step_cols = {c["name"] for c in insp.get_columns("production_steps")}
+    with engine.begin() as conn:
+        if "estimated_labor_seconds" not in step_cols:
+            conn.execute(
+                text("ALTER TABLE production_steps ADD COLUMN estimated_labor_seconds NUMERIC(14, 3)")
+            )
+        if "estimated_machine_seconds" not in step_cols:
+            conn.execute(
+                text("ALTER TABLE production_steps ADD COLUMN estimated_machine_seconds NUMERIC(14, 3)")
+            )
+        # Legacy product_id → junction (idempotent)
+        if "production_process_products" in set(inspect(engine).get_table_names()):
+            conn.execute(
+                text(
+                    """
+                    INSERT OR IGNORE INTO production_process_products (process_id, product_id)
+                    SELECT id, product_id FROM production_processes
+                    WHERE product_id IS NOT NULL
+                    """
+                )
+            )
 
 
 def migrate_purchase_todos(engine) -> None:

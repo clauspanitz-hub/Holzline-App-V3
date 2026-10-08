@@ -49,11 +49,12 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **tageslage_cache:** ein Eintrag pro Kalendertag (Zusammenfassung, Spruch, Nächste Schritte; ADR `0016`)
 - **incoming_mails:** IMAP-Warteschlange (Rohtext; Etsy-Parser → Bestellung zur Prüfung; ADR `0018`)
 
-### Phase 5 (Produktion) — Slice 1
+### Phase 5 (Produktion) — Slice 1+2
 - **labor_rates / machines / app_settings:** Stundensätze, Maschinen (inkl. `power_w`), Stromtarif
 - **users.labor_rate_id:** Default-Stundensatz
-- **production_processes / production_steps / production_time_tracks:** parallele Sessions (labor|machine)
-- **product_cost_snapshots:** Historie nach Prozess-Abschluss (ADR `0030`)
+- **production_processes** (= Produktionslauf) **/ production_steps** (= Prozesse) **/ production_time_tracks:** parallele Sessions (labor|machine); Schätzung + Messung
+- **production_process_products / production_process_families:** Multi-Link Produkte und Familien am Lauf
+- **product_cost_snapshots:** Historie nach Lauf-Abschluss für alle verknüpften Produkttypen (ADR `0030`)
 
 **Einheiten:** `Stk`, `m`, `kg`, `g`, `m²`, `l`, `ml`
 
@@ -107,10 +108,11 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Speichert `purchase_price` (+ `purchase_quantity` 1), BOM `quantity_required = 1/N`, Tabelle `material_product_yields`
 - [x] Kein Shopify-Write
 
-### Phase 5: Produktions-Tracking — Slice 1
+### Phase 5: Produktions-Tracking — Slice 1+2
 - [x] Session-Board: parallele Prozesse/Schritte, Timer Arbeit+Maschine, Mengen Prozess+Schritt (ADR `0030`)
 - [x] Maschinen- + Stundensatz-Stammdaten, Stromtarif; Produktkosten aktuell + Historie
 - [x] Entkoppelt von Fertigen; kein Shopify-Write; keine Vorlagen/Gemini
+- [x] Slice 2: Produktionslauf→Prozesse; Multi-Select Produkt+Familie; Schätzung+Messung; Familien-Ø (ADR `0030`)
 
 ## 5. Geschäftsregeln (gültig)
 - Keine Reservierungs-/Verschnittlogik.
@@ -125,4 +127,4 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - Umwandlung: Uni→Vintage per Name am selben Standort, ohne Materialabbuchung (ADR `0006`).
 - Material ohne Varianten-System; unterschiedliche Ausbeuten nur über Produkt-Stücklisten-Mengen.
 - Einkaufsassistent: Stückpreis = Einkaufspreis ÷ Ausbeute; Übernehmen setzt BOM `1/N` und `material_product_yields` (ADR `0028`); kein Shopify-Write.
-- Produktions-Tracking: parallele Zeitspuren Arbeit/Maschine; Produktkosten pro Typ (Ø×live Tarife + Session-Historie); kein Bestands-Write in Slice 1 (ADR `0030`).
+- Produktions-Tracking: parallele Zeitspuren Arbeit/Maschine; Produktkosten pro Typ (Ø×live Tarife + Session-Historie); Lauf mit Multi-Link + Schätzung/Messung; kein Bestands-Write in Slice 1–2 (ADR `0030`).
