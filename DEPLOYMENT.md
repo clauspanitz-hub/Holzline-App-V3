@@ -152,7 +152,8 @@ Dauerhaft im Repo:
 
 | Tag / Branch | Bedeutung |
 |--------------|-----------|
-| **`ui-v1.14`** / Branch (nach Merge `main`) | Produktions-Tracking Slice 2: Lauf→Prozesse, Multi-Link, Schätzung/Messung (ADR `0030`) |
+| **`ui-v1.15`** / Branch (nach Merge `main`) | Produktion UX: nach Lauf-Start Board+Prozess-Schicht sichtbar (Nesting Q17/Q21) |
+| **`ui-v1.14`** / `main` | Produktions-Tracking Slice 2: Lauf→Prozesse, Multi-Link, Schätzung/Messung (ADR `0030`) |
 | **`ui-v1.13`** / `main` | Produktions-Tracking Slice 1 (ADR `0030`) |
 | **`ui-v1.12`** / Branch (nach Merge `main`) | Materialbedarf-Export PDF/CSV aus offenen Einkauf-Todos (ADR `0029`) |
 | **`ui-v1.11`** / `main` | Übersicht entwirrt: Aktionskarten, Tageslage zu, weniger Dichte |
@@ -168,12 +169,23 @@ Dauerhaft im Repo:
 | **`ui-v1`** | Slice 1 vor Kontrast-Pass (Tag fest; GitHub ließ Update nicht zu) |
 | **`ui-classic`** | UI **vor** dem Redesign |
 
-**Aktuell deployen — nach Merge Tag `ui-v1.14` (oder `main`):**
+**Aktuell deployen — nach Merge Tag `ui-v1.15` (oder `main`):**
 
 ```bash
 cd /opt/holzlinge-inventar
 git fetch --tags origin
-git checkout ui-v1.14   # oder: git checkout main && git pull --ff-only origin main
+git checkout ui-v1.15   # oder: git checkout main && git pull --ff-only origin main
+git log -1 --oneline
+docker compose build --no-cache
+docker compose up -d --force-recreate
+```
+
+**Vorgänger — Tag `ui-v1.14`:**
+
+```bash
+cd /opt/holzlinge-inventar
+git fetch --tags origin
+git checkout ui-v1.14
 git log -1 --oneline
 docker compose build --no-cache
 docker compose up -d --force-recreate

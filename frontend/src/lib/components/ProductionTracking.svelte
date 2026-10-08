@@ -17,11 +17,17 @@
   let users = $state([])
   let loading = $state(false)
   let adminOpen = $state(false)
+  let createOpen = $state(true)
+  let focusRunId = $state(null)
   let costProductId = $state('')
   let costFamilyId = $state('')
   let costCurrent = $state(null)
   let costHistory = $state([])
   let familyCost = $state(null)
+
+  function emptyProcessDraft() {
+    return { name: '', quantity: '', est_labor_min: '', est_machine_min: '' }
+  }
 
   let newRun = $state({
     title: '',
@@ -29,7 +35,8 @@
     family_ids: [],
     quantity: '',
   })
-  let stepDrafts = $state({}) // runId -> { name, quantity, est_labor_min, est_machine_min }
+  let newProcesses = $state([emptyProcessDraft()])
+  let stepDrafts = $state({}) // runId -> draft
   let machineDraft = $state({ name: '', note: '', power_w: '' })
   let rateDraft = $state({ name: '', eur_per_hour: '' })
   let energyDraft = $state('')
@@ -60,6 +67,7 @@
       settings = s
       energyDraft = String(s.energy_eur_per_kwh ?? '')
       if (u) users = u
+      if (!board.length) createOpen = true
     } catch (e) {
       onToast(e.message || 'Laden fehlgeschlagen', 'error')
     } finally {
@@ -77,7 +85,7 @@
     if (!stepDrafts[runId]) {
       stepDrafts = {
         ...stepDrafts,
-        [runId]: { name: '', quantity: '', est_labor_min: '', est_machine_min: '' },
+        [runId]: emptyProcessDraft(),
       }
     }
   }
@@ -146,6 +154,41 @@
     return parts.length ? parts.join(', ') : '—'
   }
 
+  function scrollToRun(runId) {
+    queueMicrotask(() => {
+      const el = document.getElementById(`run-${runId}`)
+      el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+
+  function openCreateForm() {
+    createOpen = true
+    focusRunId = null
+    queueMicrotask(() => {
+      document.getElementById('create-run')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+
+  function setNewProcess(index, patch) {
+    newProcesses = newProcesses.map((row, i) => (i === index ? { ...row, ...patch } : row))
+  }
+
+  function addNewProcessRow() {
+    if (newProcesses.length >= 10) {
+      onToast('Maximal 10 Prozesse pro Lauf', 'error')
+      return
+    }
+    newProcesses = [...newProcesses, emptyProcessDraft()]
+  }
+
+  function removeNewProcessRow(index) {
+    if (newProcesses.length <= 1) {
+      newProcesses = [emptyProcessDraft()]
+      return
+    }
+    newProcesses = newProcesses.filter((_, i) => i !== index)
+  }
+
   async function createRun() {
     try {
       const body = {
@@ -154,10 +197,28 @@
         family_ids: newRun.family_ids.length ? newRun.family_ids : null,
         quantity: newRun.quantity !== '' ? Number(newRun.quantity) : null,
       }
-      await api.production.createProcess(body)
+      const created = await api.production.createProcess(body)
+      const initials = newProcesses.filter((p) => p.name.trim()).slice(0, 10)
+      for (const p of initials) {
+        await api.production.addStep(created.id, {
+          name: p.name.trim(),
+          quantity: p.quantity !== '' ? Number(p.quantity) : null,
+          estimated_labor_seconds: minToSecs(p.est_labor_min),
+          estimated_machine_seconds: minToSecs(p.est_machine_min),
+        })
+      }
       newRun = { title: '', product_ids: [], family_ids: [], quantity: '' }
+      newProcesses = [emptyProcessDraft()]
+      createOpen = false
+      focusRunId = created.id
       await reload()
-      onToast('Produktionslauf gestartet', 'ok')
+      onToast(
+        initials.length
+          ? `Lauf gestartet · ${initials.length} Prozess(e)`
+          : 'Lauf gestartet — jetzt Prozesse anlegen',
+        'ok',
+      )
+      scrollToRun(created.id)
     } catch (e) {
       onToast(e.message || 'Fehler', 'error')
     }
@@ -178,6 +239,11 @@
       onToast('Prozessname fehlt', 'error')
       return
     }
+    const count = board.find((r) => r.id === runId)?.steps?.length ?? 0
+    if (count >= 10) {
+      onToast('Maximal 10 Prozesse pro Lauf', 'error')
+      return
+    }
     try {
       await api.production.addStep(runId, {
         name: d.name.trim(),
@@ -185,11 +251,10 @@
         estimated_labor_seconds: minToSecs(d.est_labor_min),
         estimated_machine_seconds: minToSecs(d.est_machine_min),
       })
-      stepDrafts = {
-        ...stepDrafts,
-        [runId]: { name: '', quantity: '', est_labor_min: '', est_machine_min: '' },
-      }
+      stepDrafts = { ...stepDrafts, [runId]: emptyProcessDraft() }
+      focusRunId = runId
       await reload()
+      onToast('Prozess angelegt', 'ok')
     } catch (e) {
       onToast(e.message || 'Fehler', 'error')
     }
@@ -238,6 +303,7 @@
   async function completeRun(id) {
     try {
       await api.production.completeProcess(id)
+      if (focusRunId === id) focusRunId = null
       await reload()
       onToast('Produktionslauf abgeschlossen', 'ok')
     } catch (e) {
@@ -338,6 +404,9 @@
     <h2>Produktion</h2>
     <div class="row-actions">
       <button type="button" class="btn secondary compact" onclick={() => reload()} disabled={loading}>Aktualisieren</button>
+      {#if board.length && !createOpen}
+        <button type="button" class="btn compact" onclick={openCreateForm}>Neuer Lauf</button>
+      {/if}
       {#if isAdmin}
         <button type="button" class="btn secondary compact" onclick={() => (adminOpen = !adminOpen)}>
           {adminOpen ? 'Stammdaten zu' : 'Stammdaten'}
@@ -346,8 +415,8 @@
     </div>
   </div>
   <p class="empty" style="margin-top:0">
-    Produktionslauf mit Hauptname → darunter Prozesse (bis ~10). Schätzung + Messung;
-    Kosten nutzen Messung wenn vorhanden. Kein Fertigen/Lager.
+    Ablauf: Produktionslauf anlegen → darunter Prozesse (bis 10) mit Schätzung, Messung und Timer.
+    Multi-Select Produkte/Familien am Lauf. Kein Fertigen/Lager.
   </p>
 
   {#if isAdmin && adminOpen}
@@ -411,63 +480,19 @@
       {/each}
     </div>
   {/if}
-
-  <div class="form-grid" style="margin-top:1rem">
-    <label>Hauptname
-      <input bind:value={newRun.title} placeholder="z. B. Geburtstagsring aus Buche" />
-    </label>
-    <label>Stückzahl Lauf
-      <input type="number" min="0" step="1" bind:value={newRun.quantity} placeholder="optional" />
-    </label>
-  </div>
-
-  <div class="multi-pick">
-    <div>
-      <div class="multi-pick-title">Produkte</div>
-      <div class="check-grid">
-        {#each products as p}
-          <label class="check-row">
-            <input
-              type="checkbox"
-              checked={newRun.product_ids.includes(p.id)}
-              onchange={() => {
-                newRun = { ...newRun, product_ids: toggleId(newRun.product_ids, p.id) }
-              }}
-            />
-            <span>{p.name}</span>
-          </label>
-        {/each}
-      </div>
-    </div>
-    <div>
-      <div class="multi-pick-title">Produktfamilien</div>
-      <div class="check-grid">
-        {#each productFamilies as f}
-          <label class="check-row">
-            <input
-              type="checkbox"
-              checked={newRun.family_ids.includes(f.id)}
-              onchange={() => {
-                newRun = { ...newRun, family_ids: toggleId(newRun.family_ids, f.id) }
-              }}
-            />
-            <span>{familyLabel(f)}</span>
-          </label>
-        {/each}
-      </div>
-    </div>
-  </div>
-
-  <div class="row-actions" style="margin-top:0.75rem">
-    <button type="button" class="btn" onclick={createRun}>Lauf starten</button>
-  </div>
 </section>
 
-{#if !board.length}
-  <p class="empty">Keine aktiven Produktionsläufe — starte einen oben.</p>
-{:else}
+{#if board.length}
+  <div class="board-heading">
+    <h3>Aktive Läufe</h3>
+    <span class="muted">{board.length} offen</span>
+  </div>
   {#each board as run}
-    <section class="panel process-card">
+    <section
+      id="run-{run.id}"
+      class="panel process-card"
+      class:focused={focusRunId === run.id}
+    >
       <div class="panel-header">
         <h3>{run.title || runLinksLabel(run) || `Lauf #${run.id}`}</h3>
         <button type="button" class="btn secondary compact" onclick={() => completeRun(run.id)}>Abschließen</button>
@@ -476,29 +501,246 @@
         Verknüpfung: {runLinksLabel(run)} · Stückzahl: {run.quantity ?? '—'} · Default-Satz: {defaultRateLabel()}
       </p>
 
-      <div class="form-grid">
-        <label>Hauptname
-          <input
-            value={run.title ?? ''}
-            onchange={(e) => patchRun(run.id, { title: e.currentTarget.value })}
-          />
-        </label>
-        <label>Stückzahl Lauf
-          <input
-            type="number"
-            min="0"
-            step="1"
-            value={run.quantity ?? ''}
-            onchange={(e) => {
-              const v = e.currentTarget.value
-              if (v === '') patchRun(run.id, { clear_quantity: true })
-              else patchRun(run.id, { quantity: Number(v) })
-            }}
-          />
-        </label>
-      </div>
+      <details class="run-meta-details">
+        <summary>Lauf bearbeiten (Name, Stück, Produkte/Familien)</summary>
+        <div class="form-grid">
+          <label>Hauptname
+            <input
+              value={run.title ?? ''}
+              onchange={(e) => patchRun(run.id, { title: e.currentTarget.value })}
+            />
+          </label>
+          <label>Stückzahl Lauf
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={run.quantity ?? ''}
+              onchange={(e) => {
+                const v = e.currentTarget.value
+                if (v === '') patchRun(run.id, { clear_quantity: true })
+                else patchRun(run.id, { quantity: Number(v) })
+              }}
+            />
+          </label>
+        </div>
 
-      <div class="multi-pick compact">
+        <div class="multi-pick compact">
+          <div>
+            <div class="multi-pick-title">Produkte</div>
+            <div class="check-grid">
+              {#each products as p}
+                <label class="check-row">
+                  <input
+                    type="checkbox"
+                    checked={(run.product_ids || []).includes(p.id)}
+                    onchange={() => {
+                      const next = toggleId(run.product_ids || [], p.id)
+                      patchRun(run.id, { product_ids: next, family_ids: run.family_ids || [] })
+                    }}
+                  />
+                  <span>{p.name}</span>
+                </label>
+              {/each}
+            </div>
+          </div>
+          <div>
+            <div class="multi-pick-title">Familien</div>
+            <div class="check-grid">
+              {#each productFamilies as f}
+                <label class="check-row">
+                  <input
+                    type="checkbox"
+                    checked={(run.family_ids || []).includes(f.id)}
+                    onchange={() => {
+                      const next = toggleId(run.family_ids || [], f.id)
+                      patchRun(run.id, { product_ids: run.product_ids || [], family_ids: next })
+                    }}
+                  />
+                  <span>{familyLabel(f)}</span>
+                </label>
+              {/each}
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <div class="process-section">
+        <div class="process-section-head">
+          <h4>Prozesse</h4>
+          <span class="chip soft">{run.steps?.length ?? 0}/10</span>
+        </div>
+
+        {#if !(run.steps?.length)}
+          <p class="process-empty">
+            Noch keine Prozesse. Lege z.&nbsp;B. Fräsen, Schleifen an — Name, Stück, Schätzung; danach Timer für die Messung.
+          </p>
+        {/if}
+
+        {#each run.steps as step}
+          <div class="step-block">
+            <div class="step-head">
+              <strong>{step.name}</strong>
+              <span class="muted">Stück: {step.quantity ?? run.quantity ?? '—'}</span>
+              <span class="muted">Schätzung A {fmtSecs(step.estimated_labor_seconds)} / M {fmtSecs(step.estimated_machine_seconds)}</span>
+              <span class="muted">Messung A {fmtSecs(step.measured_labor_seconds)} / M {fmtSecs(step.measured_machine_seconds)}</span>
+              <span class="chip soft">effektiv A {fmtSecs(step.effective_labor_seconds)} / M {fmtSecs(step.effective_machine_seconds)}</span>
+            </div>
+
+            <div class="form-grid inline-est">
+              <label>Schätzung Arbeit (Min)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={secsToMinInput(step.estimated_labor_seconds)}
+                  onchange={(e) => {
+                    const v = e.currentTarget.value
+                    if (v === '') patchProcess(step.id, { clear_estimated_labor: true })
+                    else patchProcess(step.id, { estimated_labor_seconds: minToSecs(v) })
+                  }}
+                />
+              </label>
+              <label>Schätzung Maschine (Min)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={secsToMinInput(step.estimated_machine_seconds)}
+                  onchange={(e) => {
+                    const v = e.currentTarget.value
+                    if (v === '') patchProcess(step.id, { clear_estimated_machine: true })
+                    else patchProcess(step.id, { estimated_machine_seconds: minToSecs(v) })
+                  }}
+                />
+              </label>
+              <label>Stückzahl Prozess
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={step.quantity ?? ''}
+                  onchange={(e) => {
+                    const v = e.currentTarget.value
+                    if (v === '') patchProcess(step.id, { clear_quantity: true })
+                    else patchProcess(step.id, { quantity: Number(v) })
+                  }}
+                />
+              </label>
+            </div>
+
+            <div class="track-list">
+              {#each step.tracks as track}
+                <div class="track-row" class:running={track.running}>
+                  <span class="chip">{track.kind === 'labor' ? 'Arbeit' : 'Maschine'}</span>
+                  {#if track.kind === 'machine' && track.machine_id}
+                    <span class="muted">{machines.find((m) => m.id === track.machine_id)?.name || `#${track.machine_id}`}</span>
+                  {/if}
+                  {#if track.kind === 'labor' && track.labor_rate_id}
+                    <span class="muted">{laborRates.find((r) => r.id === track.labor_rate_id)?.name || `Satz #${track.labor_rate_id}`}</span>
+                  {/if}
+                  <span class="timer">{fmtDuration(track.started_at, track.ended_at)}</span>
+                  {#if track.running}
+                    <button type="button" class="btn compact" onclick={() => stopTrack(track.id)}>Stop</button>
+                  {:else}
+                    <span class="muted">bis {formatDateTime(track.ended_at)}</span>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+            <div class="row-actions wrap">
+              <button type="button" class="btn secondary compact" onclick={() => startLabor(step.id)}>Arbeit Start</button>
+              <select bind:value={machinePick[step.id]}>
+                <option value="">Maschine…</option>
+                {#each machines as m}
+                  <option value={m.id}>{m.name}{#if m.power_w != null} ({m.power_w} W){/if}</option>
+                {/each}
+              </select>
+              <button
+                type="button"
+                class="btn secondary compact"
+                onclick={() => startMachine(step.id, machinePick[step.id])}
+              >Maschine Start</button>
+            </div>
+          </div>
+        {/each}
+
+        <div class="add-process" class:emphasize={!(run.steps?.length)}>
+          <div class="add-process-title">Prozess hinzufügen</div>
+          <div class="form-grid">
+            <label>Name
+              <input
+                value={draft(run.id).name}
+                oninput={(e) => setDraft(run.id, { name: e.currentTarget.value })}
+                placeholder="z. B. Schleifen"
+              />
+            </label>
+            <label>Stückzahl
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={draft(run.id).quantity}
+                oninput={(e) => setDraft(run.id, { quantity: e.currentTarget.value })}
+                placeholder="Default aus Lauf"
+              />
+            </label>
+            <label>Schätzung Arbeit (Min)
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={draft(run.id).est_labor_min}
+                oninput={(e) => setDraft(run.id, { est_labor_min: e.currentTarget.value })}
+              />
+            </label>
+            <label>Schätzung Maschine (Min)
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                value={draft(run.id).est_machine_min}
+                oninput={(e) => setDraft(run.id, { est_machine_min: e.currentTarget.value })}
+              />
+            </label>
+            <div class="row-actions" style="align-self:end">
+              <button type="button" class="btn" onclick={() => addProcess(run.id)}>
+                Prozess anlegen ({run.steps?.length ?? 0}/10)
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  {/each}
+{:else if !createOpen}
+  <p class="empty">Keine aktiven Produktionsläufe — starte einen unten.</p>
+{/if}
+
+{#if createOpen}
+  <section id="create-run" class="panel create-panel">
+    <div class="panel-header">
+      <h3>Neuen Produktionslauf</h3>
+      {#if board.length}
+        <button type="button" class="btn secondary compact" onclick={() => (createOpen = false)}>Schließen</button>
+      {/if}
+    </div>
+    <p class="muted create-hint">
+      1) Hauptname + optional Produkte/Familien · 2) optional erste Prozesse · 3) Start — du landest auf dem Lauf-Board.
+    </p>
+
+    <div class="form-grid">
+      <label>Hauptname
+        <input bind:value={newRun.title} placeholder="z. B. Geburtstagsring aus Buche" />
+      </label>
+      <label>Stückzahl Lauf
+        <input type="number" min="0" step="1" bind:value={newRun.quantity} placeholder="optional" />
+      </label>
+    </div>
+
+    <details class="links-details" open={!board.length}>
+      <summary>Produkte &amp; Familien (Multi-Select)</summary>
+      <div class="multi-pick">
         <div>
           <div class="multi-pick-title">Produkte</div>
           <div class="check-grid">
@@ -506,10 +748,9 @@
               <label class="check-row">
                 <input
                   type="checkbox"
-                  checked={(run.product_ids || []).includes(p.id)}
+                  checked={newRun.product_ids.includes(p.id)}
                   onchange={() => {
-                    const next = toggleId(run.product_ids || [], p.id)
-                    patchRun(run.id, { product_ids: next, family_ids: run.family_ids || [] })
+                    newRun = { ...newRun, product_ids: toggleId(newRun.product_ids, p.id) }
                   }}
                 />
                 <span>{p.name}</span>
@@ -518,16 +759,15 @@
           </div>
         </div>
         <div>
-          <div class="multi-pick-title">Familien</div>
+          <div class="multi-pick-title">Produktfamilien</div>
           <div class="check-grid">
             {#each productFamilies as f}
               <label class="check-row">
                 <input
                   type="checkbox"
-                  checked={(run.family_ids || []).includes(f.id)}
+                  checked={newRun.family_ids.includes(f.id)}
                   onchange={() => {
-                    const next = toggleId(run.family_ids || [], f.id)
-                    patchRun(run.id, { product_ids: run.product_ids || [], family_ids: next })
+                    newRun = { ...newRun, family_ids: toggleId(newRun.family_ids, f.id) }
                   }}
                 />
                 <span>{familyLabel(f)}</span>
@@ -536,139 +776,73 @@
           </div>
         </div>
       </div>
+    </details>
 
-      {#each run.steps as step}
-        <div class="step-block">
-          <div class="step-head">
-            <strong>{step.name}</strong>
-            <span class="muted">Stück: {step.quantity ?? run.quantity ?? '—'}</span>
-            <span class="muted">Schätzung A {fmtSecs(step.estimated_labor_seconds)} / M {fmtSecs(step.estimated_machine_seconds)}</span>
-            <span class="muted">Messung A {fmtSecs(step.measured_labor_seconds)} / M {fmtSecs(step.measured_machine_seconds)}</span>
-            <span class="chip soft">effektiv A {fmtSecs(step.effective_labor_seconds)} / M {fmtSecs(step.effective_machine_seconds)}</span>
-          </div>
-
-          <div class="form-grid inline-est">
-            <label>Schätzung Arbeit (Min)
-              <input
-                type="number"
-                min="0"
-                step="0.5"
-                value={secsToMinInput(step.estimated_labor_seconds)}
-                onchange={(e) => {
-                  const v = e.currentTarget.value
-                  if (v === '') patchProcess(step.id, { clear_estimated_labor: true })
-                  else patchProcess(step.id, { estimated_labor_seconds: minToSecs(v) })
-                }}
-              />
-            </label>
-            <label>Schätzung Maschine (Min)
-              <input
-                type="number"
-                min="0"
-                step="0.5"
-                value={secsToMinInput(step.estimated_machine_seconds)}
-                onchange={(e) => {
-                  const v = e.currentTarget.value
-                  if (v === '') patchProcess(step.id, { clear_estimated_machine: true })
-                  else patchProcess(step.id, { estimated_machine_seconds: minToSecs(v) })
-                }}
-              />
-            </label>
-            <label>Stückzahl Prozess
-              <input
-                type="number"
-                min="0"
-                step="1"
-                value={step.quantity ?? ''}
-                onchange={(e) => {
-                  const v = e.currentTarget.value
-                  if (v === '') patchProcess(step.id, { clear_quantity: true })
-                  else patchProcess(step.id, { quantity: Number(v) })
-                }}
-              />
-            </label>
-          </div>
-
-          <div class="track-list">
-            {#each step.tracks as track}
-              <div class="track-row" class:running={track.running}>
-                <span class="chip">{track.kind === 'labor' ? 'Arbeit' : 'Maschine'}</span>
-                {#if track.kind === 'machine' && track.machine_id}
-                  <span class="muted">{machines.find((m) => m.id === track.machine_id)?.name || `#${track.machine_id}`}</span>
-                {/if}
-                {#if track.kind === 'labor' && track.labor_rate_id}
-                  <span class="muted">{laborRates.find((r) => r.id === track.labor_rate_id)?.name || `Satz #${track.labor_rate_id}`}</span>
-                {/if}
-                <span class="timer">{fmtDuration(track.started_at, track.ended_at)}</span>
-                {#if track.running}
-                  <button type="button" class="btn compact" onclick={() => stopTrack(track.id)}>Stop</button>
-                {:else}
-                  <span class="muted">bis {formatDateTime(track.ended_at)}</span>
-                {/if}
-              </div>
-            {/each}
-          </div>
-          <div class="row-actions wrap">
-            <button type="button" class="btn secondary compact" onclick={() => startLabor(step.id)}>Arbeit Start</button>
-            <select bind:value={machinePick[step.id]}>
-              <option value="">Maschine…</option>
-              {#each machines as m}
-                <option value={m.id}>{m.name}{#if m.power_w != null} ({m.power_w} W){/if}</option>
-              {/each}
-            </select>
-            <button
-              type="button"
-              class="btn secondary compact"
-              onclick={() => startMachine(step.id, machinePick[step.id])}
-            >Maschine Start</button>
+    <div class="create-processes">
+      <div class="process-section-head">
+        <h4>Prozesse (optional vor Start)</h4>
+        <span class="chip soft">{newProcesses.filter((p) => p.name.trim()).length}/10</span>
+      </div>
+      <p class="muted" style="margin:0 0 0.5rem">
+        Kannst du hier schon anlegen oder nach dem Start auf dem Lauf-Board.
+      </p>
+      {#each newProcesses as row, index}
+        <div class="create-process-row">
+          <label>Name
+            <input
+              value={row.name}
+              oninput={(e) => setNewProcess(index, { name: e.currentTarget.value })}
+              placeholder="z. B. Fräsen"
+            />
+          </label>
+          <label>Stück
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={row.quantity}
+              oninput={(e) => setNewProcess(index, { quantity: e.currentTarget.value })}
+            />
+          </label>
+          <label>Schätz. Arbeit (Min)
+            <input
+              type="number"
+              min="0"
+              step="0.5"
+              value={row.est_labor_min}
+              oninput={(e) => setNewProcess(index, { est_labor_min: e.currentTarget.value })}
+            />
+          </label>
+          <label>Schätz. Maschine (Min)
+            <input
+              type="number"
+              min="0"
+              step="0.5"
+              value={row.est_machine_min}
+              oninput={(e) => setNewProcess(index, { est_machine_min: e.currentTarget.value })}
+            />
+          </label>
+          <div class="row-actions" style="align-self:end">
+            <button type="button" class="btn secondary compact" onclick={() => removeNewProcessRow(index)}>Entfernen</button>
           </div>
         </div>
       {/each}
+      {#if newProcesses.length < 10}
+        <button type="button" class="btn secondary compact" onclick={addNewProcessRow}>Weitere Prozesszeile</button>
+      {/if}
+    </div>
 
-      <div class="form-grid" style="margin-top:0.75rem">
-        <label>Prozess hinzufügen
-          <input
-            value={draft(run.id).name}
-            oninput={(e) => setDraft(run.id, { name: e.currentTarget.value })}
-            placeholder="z. B. Schleifen"
-          />
-        </label>
-        <label>Stückzahl
-          <input
-            type="number"
-            min="0"
-            step="1"
-            value={draft(run.id).quantity}
-            oninput={(e) => setDraft(run.id, { quantity: e.currentTarget.value })}
-            placeholder="Default aus Lauf"
-          />
-        </label>
-        <label>Schätzung Arbeit (Min)
-          <input
-            type="number"
-            min="0"
-            step="0.5"
-            value={draft(run.id).est_labor_min}
-            oninput={(e) => setDraft(run.id, { est_labor_min: e.currentTarget.value })}
-          />
-        </label>
-        <label>Schätzung Maschine (Min)
-          <input
-            type="number"
-            min="0"
-            step="0.5"
-            value={draft(run.id).est_machine_min}
-            oninput={(e) => setDraft(run.id, { est_machine_min: e.currentTarget.value })}
-          />
-        </label>
-        <div class="row-actions" style="align-self:end">
-          <button type="button" class="btn secondary" onclick={() => addProcess(run.id)}>
-            Prozess anlegen ({run.steps?.length ?? 0}/10)
-          </button>
-        </div>
-      </div>
-    </section>
-  {/each}
+    <div class="row-actions" style="margin-top:0.75rem">
+      <button type="button" class="btn" onclick={createRun}>Lauf starten</button>
+    </div>
+  </section>
+{:else if !board.length}
+  <section class="panel">
+    <p class="empty" style="margin:0">Noch kein aktiver Lauf.</p>
+    <div class="row-actions" style="margin-top:0.75rem">
+      <button type="button" class="btn" onclick={openCreateForm}>Produktionslauf anlegen</button>
+    </div>
+  </section>
 {/if}
 
 <section class="panel">
@@ -773,8 +947,58 @@
 </section>
 
 <style>
+  .board-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin: 1rem 0 0.35rem;
+  }
+  .board-heading h3 {
+    margin: 0;
+  }
   .process-card {
-    margin-top: 1rem;
+    margin-top: 0.75rem;
+    scroll-margin-top: 1rem;
+  }
+  .process-card.focused {
+    outline: 2px solid color-mix(in srgb, var(--accent, #2f6f4e) 55%, transparent);
+    outline-offset: 2px;
+  }
+  .process-section {
+    margin-top: 0.85rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid color-mix(in srgb, var(--border, #ccc) 80%, transparent);
+  }
+  .process-section-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.35rem;
+  }
+  .process-section-head h4 {
+    margin: 0;
+  }
+  .process-empty {
+    margin: 0.35rem 0 0.75rem;
+    padding: 0.65rem 0.75rem;
+    background: color-mix(in srgb, var(--accent, #2f6f4e) 12%, transparent);
+    border-radius: 0.35rem;
+    font-size: 0.95em;
+  }
+  .add-process {
+    margin-top: 0.75rem;
+    padding: 0.65rem;
+    border: 1px dashed color-mix(in srgb, var(--border, #ccc) 90%, transparent);
+    border-radius: 0.35rem;
+  }
+  .add-process.emphasize {
+    border-color: color-mix(in srgb, var(--accent, #2f6f4e) 55%, transparent);
+    background: color-mix(in srgb, var(--accent, #2f6f4e) 8%, transparent);
+  }
+  .add-process-title {
+    font-weight: 600;
+    margin-bottom: 0.35rem;
   }
   .step-block {
     margin-top: 0.75rem;
@@ -808,7 +1032,42 @@
     font-size: 0.9em;
   }
   .run-meta {
+    margin: 0 0 0.5rem;
+  }
+  .run-meta-details,
+  .links-details {
+    margin: 0.35rem 0 0.5rem;
+  }
+  .run-meta-details summary,
+  .links-details summary {
+    cursor: pointer;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+  .create-panel {
+    margin-top: 1rem;
+  }
+  .create-hint {
     margin: 0 0 0.75rem;
+  }
+  .create-processes {
+    margin-top: 0.85rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid color-mix(in srgb, var(--border, #ccc) 80%, transparent);
+  }
+  .create-process-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+    margin-bottom: 0.65rem;
+    padding-bottom: 0.65rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--border, #ccc) 55%, transparent);
+  }
+  @media (min-width: 720px) {
+    .create-process-row {
+      grid-template-columns: 1.4fr 0.7fr 0.9fr 0.9fr auto;
+      align-items: end;
+    }
   }
   .row-actions.wrap {
     flex-wrap: wrap;
@@ -832,7 +1091,7 @@
     display: grid;
     grid-template-columns: 1fr;
     gap: 0.75rem;
-    margin-top: 0.75rem;
+    margin-top: 0.5rem;
   }
   @media (min-width: 720px) {
     .multi-pick {

@@ -14,4 +14,4 @@ Session-Board für parallele **Produktionsläufe** mit **Prozessen** darunter (v
 | Multi-Link | `production_process_products` + `production_process_families` |
 | Kosten | Gleicher Ø-Satz für alle verknüpften Produkte (inkl. Familienmitglieder) |
 | Zeiten | `estimated_*_seconds` am Prozess; Messung aus Tracks; Preferenz Messung |
-| UI | Inline-Zellen; Produktkosten + Familien-Ø |
+| UI | Inline-Zellen; Produktkosten + Familien-Ø; nach Lauf-Start Fokus auf Prozess-Board (nicht Create-Dead-End) |
