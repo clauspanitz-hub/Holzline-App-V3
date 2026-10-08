@@ -2685,7 +2685,18 @@ def _upsert_sets_from_catalog(
         for key, variant_data in variants.items():
             if key in existing_keys:
                 continue
-            db.add(SetVariant(set_id=existing.id, **variant_data))
+            # Parser legt sku/price für Verkaufspreis-Match ab — SetVariant hat diese Spalten nicht.
+            db.add(
+                SetVariant(
+                    set_id=existing.id,
+                    option1_name=variant_data.get("option1_name"),
+                    option1_value=variant_data.get("option1_value"),
+                    option2_name=variant_data.get("option2_name"),
+                    option2_value=variant_data.get("option2_value"),
+                    option3_name=variant_data.get("option3_name"),
+                    option3_value=variant_data.get("option3_value"),
+                )
+            )
             upserted += 1
         total_upserted += upserted
         summaries.append(
