@@ -24,6 +24,7 @@
       title: 'Werkstatt',
       items: [
         { id: 'todos', label: 'Todos', badge: openTodos || undefined },
+        { id: 'production', label: 'Produktion' },
         { id: 'overview', label: 'Übersicht' },
         { id: 'staff', label: 'Bei Mitarbeitern', badge: staffCount || undefined },
       ],
@@ -60,6 +61,7 @@
       title: 'Werkstatt',
       items: [
         { id: 'todos', label: 'Todos', badge: openTodos || undefined },
+        { id: 'production', label: 'Produktion' },
         { id: 'staff', label: 'Bei Mitarbeitern', badge: staffCount || undefined },
       ],
     },

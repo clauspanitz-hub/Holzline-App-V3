@@ -49,6 +49,12 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **tageslage_cache:** ein Eintrag pro Kalendertag (Zusammenfassung, Spruch, Nächste Schritte; ADR `0016`)
 - **incoming_mails:** IMAP-Warteschlange (Rohtext; Etsy-Parser → Bestellung zur Prüfung; ADR `0018`)
 
+### Phase 5 (Produktion) — Slice 1
+- **labor_rates / machines / app_settings:** Stundensätze, Maschinen (inkl. `power_w`), Stromtarif
+- **users.labor_rate_id:** Default-Stundensatz
+- **production_processes / production_steps / production_time_tracks:** parallele Sessions (labor|machine)
+- **product_cost_snapshots:** Historie nach Prozess-Abschluss (ADR `0030`)
+
 **Einheiten:** `Stk`, `m`, `kg`, `g`, `m²`, `l`, `ml`
 
 ## 4. Phasen-Roadmap
@@ -101,6 +107,11 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Speichert `purchase_price` (+ `purchase_quantity` 1), BOM `quantity_required = 1/N`, Tabelle `material_product_yields`
 - [x] Kein Shopify-Write
 
+### Phase 5: Produktions-Tracking — Slice 1
+- [x] Session-Board: parallele Prozesse/Schritte, Timer Arbeit+Maschine, Mengen Prozess+Schritt (ADR `0030`)
+- [x] Maschinen- + Stundensatz-Stammdaten, Stromtarif; Produktkosten aktuell + Historie
+- [x] Entkoppelt von Fertigen; kein Shopify-Write; keine Vorlagen/Gemini
+
 ## 5. Geschäftsregeln (gültig)
 - Keine Reservierungs-/Verschnittlogik.
 - **Auth (Phase 2):** Pflicht-Login; Rollen Admin und Mitarbeiter (ADR `0010`).
@@ -114,3 +125,4 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - Umwandlung: Uni→Vintage per Name am selben Standort, ohne Materialabbuchung (ADR `0006`).
 - Material ohne Varianten-System; unterschiedliche Ausbeuten nur über Produkt-Stücklisten-Mengen.
 - Einkaufsassistent: Stückpreis = Einkaufspreis ÷ Ausbeute; Übernehmen setzt BOM `1/N` und `material_product_yields` (ADR `0028`); kein Shopify-Write.
+- Produktions-Tracking: parallele Zeitspuren Arbeit/Maschine; Produktkosten pro Typ (Ø×live Tarife + Session-Historie); kein Bestands-Write in Slice 1 (ADR `0030`).

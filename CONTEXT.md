@@ -90,7 +90,19 @@ _Avoid_: Recipe, BOM, Rezept, Bill of Materials (in der UI); Produkt-Stückliste
 
 **Fertigen**:
 Der Vorgang, bei dem eine Menge eines Produkts hergestellt wird: Produktbestand steigt; Stücklistenzeilen werden am gewählten Standort abgebucht (Material **oder** Komponenten-Produkt, eine Ebene — keine rekursive Materialabbuchung der Komponenten).
-_Avoid_: Produzieren, Herstellen, Buchen (als alleiniger Begriff für diesen Vorgang); Zusammenstellen eines Sets (das ist kein Fertigen auf Set-Ebene)
+_Avoid_: Produzieren, Herstellen, Buchen (als alleiniger Begriff für diesen Vorgang); Zusammenstellen eines Sets (das ist kein Fertigen auf Set-Ebene); Zeiterfassung/Produktions-Tracking (das ist **Produktion**, kein Bestandsvorgang)
+
+**Produktion** / **Produktions-Tracking**:
+Werkstatt-Seite zum Erfassen von **Prozessen** und **Schritten** mit parallelen **Zeitspuren** (Arbeitszeit und Maschinenzeit), optional Produkt und Stückzahlen. **Produktkosten** pro Produkttyp aus Ø-Zeiten × aktuellen Tarifen; Historie nach Prozess-Abschluss. Entkoppelt von Fertigen/Lager (ADR `0030`).
+_Avoid_: Fertigen als Synonym; Kosten je physischem Einzelstück; Shopify-Write; Vorlagen/Gemini in Slice 1
+
+**Maschine** (Produktion):
+Stammdaten-Gerät (z. B. Drucker, Fräse) mit Name, optionaler Notiz und Leistung (W) für Energiekosten.
+_Avoid_: Standort als Maschine; Freitext statt Stammdaten in Slice 1
+
+**Stundensatz** (Produktion):
+Katalogeintrag €/h; Default am Benutzer für Arbeits-Zeitspuren, Override am Track möglich.
+_Avoid_: Einziger globaler Lohnsatz als einzige Option; Tarif je Maschine in Slice 1
 
 **Zusammenstellen**:
 Bei Bestellung eines Sets die benötigten Komponenten laut Varianten-Stückliste (Produkte und Materialien) an einem gewählten Standort vom Lager abbuchen (ohne Set-Bestand zu erhöhen). Todo unter Werkstatt; Dialog mit BOM-Vorschau; leere Stückliste blockiert die Buchung.
@@ -252,6 +264,6 @@ Eine nachvollziehbare Umbuchung oder Umwandlung, relevant vor allem mit virtuell
 _Avoid_: Tag-Historie; implizite Umbuchung ohne Eintrag
 
 **Benutzer** / **Login**:
-Zugang zur App nur nach Anmeldung (Benutzername + Passwort). Session-Cookie, Idle ca. 12 h. Erster **Admin** per ENV beim Start (`ADMIN_USER` / `ADMIN_PASSWORD`), weitere Benutzer in der Admin-UI. Rollen: **Admin** (volle App) und **Mitarbeiter** (**Bei Mitarbeitern** inkl. Umwandeln Uni→Vintage, plus **Todos** anlegen/bearbeiten/erledigen — ADR `0027`). Eigenes Passwort änderbar; Admin kann Passwörter setzen und Benutzer deaktivieren.
+Zugang zur App nur nach Anmeldung (Benutzername + Passwort). Session-Cookie, Idle ca. 12 h. Erster **Admin** per ENV beim Start (`ADMIN_USER` / `ADMIN_PASSWORD`), weitere Benutzer in der Admin-UI. Rollen: **Admin** (volle App) und **Mitarbeiter** (**Bei Mitarbeitern** inkl. Umwandeln Uni→Vintage, plus **Todos** anlegen/bearbeiten/erledigen — ADR `0027`, plus **Produktion** Board/Timer — ADR `0030`; Maschinen-/Tarif-Stammdaten nur Admin). Eigenes Passwort änderbar; Admin kann Passwörter setzen und Benutzer deaktivieren.
 _Avoid_: Anonymer LAN-Zugriff; Rechte nur über Proxy-Basic-Auth; OAuth als Pflicht für die Manufaktur
 

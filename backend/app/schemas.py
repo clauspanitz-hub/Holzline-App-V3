@@ -699,6 +699,8 @@ class UserUpdate(BaseModel):
     role: Literal["admin", "mitarbeiter"] | None = None
     is_active: bool | None = None
     password: str | None = Field(default=None, min_length=6, max_length=200)
+    labor_rate_id: int | None = None
+    clear_labor_rate: bool = False
 
 
 class UserRead(BaseModel):
@@ -706,6 +708,7 @@ class UserRead(BaseModel):
     username: str
     role: str
     is_active: bool
+    labor_rate_id: int | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -1080,3 +1083,170 @@ class PurchaseAssistantApplyResult(BaseModel):
     material: MaterialRead
     yields: list[PurchaseAssistantYieldRead] = []
     created_material: bool = False
+
+
+# --- Produktions-Tracking (ADR 0030) ----------------------------------------
+
+
+class LaborRateCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    eur_per_hour: Money = Field(ge=0)
+
+
+class LaborRateUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    eur_per_hour: Money | None = Field(default=None, ge=0)
+
+
+class LaborRateRead(BaseModel):
+    id: int
+    name: str
+    eur_per_hour: Money
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MachineCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    note: str | None = Field(default=None, max_length=500)
+    power_w: Quantity | None = Field(default=None, ge=0)
+
+
+class MachineUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    note: str | None = Field(default=None, max_length=500)
+    power_w: Quantity | None = Field(default=None, ge=0)
+    clear_power: bool = False
+
+
+class MachineRead(BaseModel):
+    id: int
+    name: str
+    note: str | None = None
+    power_w: Quantity | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProductionSettingsRead(BaseModel):
+    energy_eur_per_kwh: Money
+
+
+class ProductionSettingsUpdate(BaseModel):
+    energy_eur_per_kwh: Money = Field(ge=0)
+
+
+class TimeTrackRead(BaseModel):
+    id: int
+    step_id: int
+    kind: Literal["labor", "machine"]
+    machine_id: int | None = None
+    labor_rate_id: int | None = None
+    user_id: int | None = None
+    started_at: datetime
+    ended_at: datetime | None = None
+    running: bool = False
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProductionStepRead(BaseModel):
+    id: int
+    process_id: int
+    name: str
+    quantity: Quantity | None = None
+    sort_hint: int = 0
+    tracks: list[TimeTrackRead] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProductionProcessRead(BaseModel):
+    id: int
+    title: str | None = None
+    product_id: int | None = None
+    product_name: str | None = None
+    quantity: Quantity | None = None
+    status: str
+    created_by_user_id: int | None = None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+    steps: list[ProductionStepRead] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProductionProcessCreate(BaseModel):
+    title: str | None = Field(default=None, max_length=300)
+    product_id: int | None = None
+    quantity: Quantity | None = Field(default=None, gt=0)
+
+
+class ProductionProcessUpdate(BaseModel):
+    title: str | None = Field(default=None, max_length=300)
+    product_id: int | None = None
+    clear_product: bool = False
+    quantity: Quantity | None = Field(default=None, gt=0)
+    clear_quantity: bool = False
+
+
+class ProductionStepCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    quantity: Quantity | None = Field(default=None, gt=0)
+
+
+class ProductionStepUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    quantity: Quantity | None = Field(default=None, gt=0)
+    clear_quantity: bool = False
+
+
+class TimeTrackStart(BaseModel):
+    kind: Literal["labor", "machine"]
+    machine_id: int | None = None
+    labor_rate_id: int | None = None
+    started_at: datetime | None = None
+
+
+class TimeTrackStop(BaseModel):
+    ended_at: datetime | None = None
+
+
+class TimeTrackUpdate(BaseModel):
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    clear_ended: bool = False
+    labor_rate_id: int | None = None
+    clear_labor_rate: bool = False
+    machine_id: int | None = None
+
+
+class ProductCostCurrent(BaseModel):
+    product_id: int
+    sample_count: int
+    labor_seconds_per_unit: Quantity
+    machine_seconds_per_unit: Quantity
+    labor_eur_per_unit: Money
+    energy_kwh_per_unit: Quantity
+    energy_eur_per_unit: Money
+    total_eur_per_unit: Money
+
+
+class ProductCostSnapshotRead(BaseModel):
+    id: int
+    product_id: int
+    process_id: int | None = None
+    captured_at: datetime
+    labor_seconds_per_unit: Quantity
+    machine_seconds_per_unit: Quantity
+    labor_eur_per_unit: Money
+    energy_kwh_per_unit: Quantity
+    energy_eur_per_unit: Money
+    total_eur_per_unit: Money
+
+    model_config = ConfigDict(from_attributes=True)

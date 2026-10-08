@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import backup, material_demand_export, services
+from app import backup, material_demand_export, production, services
 from app.auth import (
     AdminUser,
     CurrentUser,
@@ -17,7 +17,7 @@ from app.auth import (
     verify_password,
 )
 from app.database import get_db
-from app.models import Unit, User, UserRole
+from app.models import LaborRate, Unit, User, UserRole
 from app.schemas import (
     BackupImportRequest,
     BackupImportResult,
@@ -85,6 +85,24 @@ from app.schemas import (
     PurchaseAssistantApply,
     PurchaseAssistantApplyResult,
     PurchaseAssistantYieldRead,
+    LaborRateCreate,
+    LaborRateRead,
+    LaborRateUpdate,
+    MachineCreate,
+    MachineRead,
+    MachineUpdate,
+    ProductionProcessCreate,
+    ProductionProcessRead,
+    ProductionProcessUpdate,
+    ProductionSettingsRead,
+    ProductionSettingsUpdate,
+    ProductionStepCreate,
+    ProductionStepUpdate,
+    ProductCostCurrent,
+    ProductCostSnapshotRead,
+    TimeTrackStart,
+    TimeTrackStop,
+    TimeTrackUpdate,
     StockAdjustRequest,
     StockDeltaRequest,
     StockMovementRead,
@@ -904,8 +922,51 @@ def _user_read(user: User) -> UserRead:
         username=user.username,
         role=user.role.value if hasattr(user.role, "value") else str(user.role),
         is_active=user.is_active,
+        labor_rate_id=user.labor_rate_id,
         created_at=user.created_at,
         updated_at=user.updated_at,
+    )
+
+
+def _track_read(track) -> dict:
+    return {
+        "id": track.id,
+        "step_id": track.step_id,
+        "kind": track.kind,
+        "machine_id": track.machine_id,
+        "labor_rate_id": track.labor_rate_id,
+        "user_id": track.user_id,
+        "started_at": track.started_at,
+        "ended_at": track.ended_at,
+        "running": track.ended_at is None,
+    }
+
+
+def _process_read(process) -> ProductionProcessRead:
+    steps = []
+    for step in process.steps:
+        steps.append(
+            {
+                "id": step.id,
+                "process_id": step.process_id,
+                "name": step.name,
+                "quantity": step.quantity,
+                "sort_hint": step.sort_hint,
+                "tracks": [_track_read(t) for t in step.tracks],
+            }
+        )
+    return ProductionProcessRead(
+        id=process.id,
+        title=process.title,
+        product_id=process.product_id,
+        product_name=process.product.name if process.product else None,
+        quantity=process.quantity,
+        status=process.status,
+        created_by_user_id=process.created_by_user_id,
+        created_at=process.created_at,
+        updated_at=process.updated_at,
+        completed_at=process.completed_at,
+        steps=steps,
     )
 
 
@@ -1017,7 +1078,228 @@ def update_user(
                 db.delete(sess)
     if payload.password:
         user.password_hash = hash_password(payload.password)
+    if payload.clear_labor_rate:
+        user.labor_rate_id = None
+    elif payload.labor_rate_id is not None:
+        if not db.get(LaborRate, payload.labor_rate_id):
+            raise HTTPException(status_code=400, detail="Stundensatz nicht gefunden")
+        user.labor_rate_id = payload.labor_rate_id
     user.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(user)
     return _user_read(user)
+
+
+# --- Produktions-Tracking (ADR 0030) ----------------------------------------
+
+
+@router.get("/labor-rates", response_model=list[LaborRateRead])
+def labor_rates_list(_: CurrentUser, db: Session = Depends(get_db)) -> list[LaborRateRead]:
+    return production.list_labor_rates(db)
+
+
+@router.post("/labor-rates", response_model=LaborRateRead, status_code=201)
+def labor_rates_create(payload: LaborRateCreate, _: AdminUser, db: Session = Depends(get_db)) -> LaborRateRead:
+    return production.create_labor_rate(db, payload.name, payload.eur_per_hour)
+
+
+@router.patch("/labor-rates/{rate_id}", response_model=LaborRateRead)
+def labor_rates_update(
+    rate_id: int, payload: LaborRateUpdate, _: AdminUser, db: Session = Depends(get_db)
+) -> LaborRateRead:
+    return production.update_labor_rate(
+        db, rate_id, name=payload.name, eur_per_hour=payload.eur_per_hour
+    )
+
+
+@router.delete("/labor-rates/{rate_id}", status_code=204)
+def labor_rates_delete(rate_id: int, _: AdminUser, db: Session = Depends(get_db)) -> None:
+    production.delete_labor_rate(db, rate_id)
+
+
+@router.get("/machines", response_model=list[MachineRead])
+def machines_list(_: CurrentUser, db: Session = Depends(get_db)) -> list[MachineRead]:
+    return production.list_machines(db)
+
+
+@router.post("/machines", response_model=MachineRead, status_code=201)
+def machines_create(payload: MachineCreate, _: AdminUser, db: Session = Depends(get_db)) -> MachineRead:
+    return production.create_machine(db, payload.name, note=payload.note, power_w=payload.power_w)
+
+
+@router.patch("/machines/{machine_id}", response_model=MachineRead)
+def machines_update(
+    machine_id: int, payload: MachineUpdate, _: AdminUser, db: Session = Depends(get_db)
+) -> MachineRead:
+    return production.update_machine(
+        db,
+        machine_id,
+        name=payload.name,
+        note=payload.note,
+        power_w=payload.power_w,
+        clear_power=payload.clear_power,
+    )
+
+
+@router.delete("/machines/{machine_id}", status_code=204)
+def machines_delete(machine_id: int, _: AdminUser, db: Session = Depends(get_db)) -> None:
+    production.delete_machine(db, machine_id)
+
+
+@router.get("/production/settings", response_model=ProductionSettingsRead)
+def production_settings_get(_: CurrentUser, db: Session = Depends(get_db)) -> ProductionSettingsRead:
+    return ProductionSettingsRead(energy_eur_per_kwh=production.get_energy_tariff(db))
+
+
+@router.put("/production/settings", response_model=ProductionSettingsRead)
+def production_settings_put(
+    payload: ProductionSettingsUpdate, _: AdminUser, db: Session = Depends(get_db)
+) -> ProductionSettingsRead:
+    value = production.set_energy_tariff(db, payload.energy_eur_per_kwh)
+    return ProductionSettingsRead(energy_eur_per_kwh=value)
+
+
+@router.get("/production/board", response_model=list[ProductionProcessRead])
+def production_board(
+    _: CurrentUser,
+    status: Literal["active", "done"] = "active",
+    db: Session = Depends(get_db),
+) -> list[ProductionProcessRead]:
+    return [_process_read(p) for p in production.list_board(db, status=status)]
+
+
+@router.post("/production/processes", response_model=ProductionProcessRead, status_code=201)
+def production_process_create(
+    payload: ProductionProcessCreate,
+    user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> ProductionProcessRead:
+    row = production.create_process(
+        db, user, title=payload.title, product_id=payload.product_id, quantity=payload.quantity
+    )
+    return _process_read(row)
+
+
+@router.patch("/production/processes/{process_id}", response_model=ProductionProcessRead)
+def production_process_update(
+    process_id: int,
+    payload: ProductionProcessUpdate,
+    _: CurrentUser,
+    db: Session = Depends(get_db),
+) -> ProductionProcessRead:
+    row = production.update_process(
+        db,
+        process_id,
+        title=payload.title,
+        product_id=payload.product_id,
+        clear_product=payload.clear_product,
+        quantity=payload.quantity,
+        clear_quantity=payload.clear_quantity,
+    )
+    return _process_read(row)
+
+
+@router.post("/production/processes/{process_id}/complete", response_model=ProductionProcessRead)
+def production_process_complete(
+    process_id: int, _: CurrentUser, db: Session = Depends(get_db)
+) -> ProductionProcessRead:
+    return _process_read(production.complete_process(db, process_id))
+
+
+@router.post("/production/processes/{process_id}/steps", response_model=ProductionProcessRead, status_code=201)
+def production_step_create(
+    process_id: int,
+    payload: ProductionStepCreate,
+    _: CurrentUser,
+    db: Session = Depends(get_db),
+) -> ProductionProcessRead:
+    return _process_read(
+        production.add_step(db, process_id, payload.name, quantity=payload.quantity)
+    )
+
+
+@router.patch("/production/steps/{step_id}", response_model=ProductionProcessRead)
+def production_step_update(
+    step_id: int,
+    payload: ProductionStepUpdate,
+    _: CurrentUser,
+    db: Session = Depends(get_db),
+) -> ProductionProcessRead:
+    return _process_read(
+        production.update_step(
+            db,
+            step_id,
+            name=payload.name,
+            quantity=payload.quantity,
+            clear_quantity=payload.clear_quantity,
+        )
+    )
+
+
+@router.post("/production/steps/{step_id}/tracks", response_model=ProductionProcessRead, status_code=201)
+def production_track_start(
+    step_id: int,
+    payload: TimeTrackStart,
+    user: CurrentUser,
+    db: Session = Depends(get_db),
+) -> ProductionProcessRead:
+    return _process_read(
+        production.start_track(
+            db,
+            user,
+            step_id,
+            payload.kind,
+            machine_id=payload.machine_id,
+            labor_rate_id=payload.labor_rate_id,
+            started_at=payload.started_at,
+        )
+    )
+
+
+@router.post("/production/tracks/{track_id}/stop", response_model=ProductionProcessRead)
+def production_track_stop(
+    track_id: int,
+    _: CurrentUser,
+    payload: TimeTrackStop | None = None,
+    db: Session = Depends(get_db),
+) -> ProductionProcessRead:
+    ended = payload.ended_at if payload else None
+    return _process_read(production.stop_track(db, track_id, ended_at=ended))
+
+
+@router.patch("/production/tracks/{track_id}", response_model=ProductionProcessRead)
+def production_track_update(
+    track_id: int,
+    payload: TimeTrackUpdate,
+    _: CurrentUser,
+    db: Session = Depends(get_db),
+) -> ProductionProcessRead:
+    return _process_read(
+        production.update_track(
+            db,
+            track_id,
+            started_at=payload.started_at,
+            ended_at=payload.ended_at,
+            clear_ended=payload.clear_ended,
+            labor_rate_id=payload.labor_rate_id,
+            clear_labor_rate=payload.clear_labor_rate,
+            machine_id=payload.machine_id,
+        )
+    )
+
+
+@router.get("/production/product-costs/{product_id}", response_model=ProductCostCurrent)
+def production_product_cost(
+    product_id: int, _: CurrentUser, db: Session = Depends(get_db)
+) -> ProductCostCurrent:
+    return ProductCostCurrent(**production.current_product_cost(db, product_id))
+
+
+@router.get(
+    "/production/product-costs/{product_id}/history",
+    response_model=list[ProductCostSnapshotRead],
+)
+def production_product_cost_history(
+    product_id: int, _: CurrentUser, db: Session = Depends(get_db)
+) -> list[ProductCostSnapshotRead]:
+    return production.list_product_cost_history(db, product_id)
