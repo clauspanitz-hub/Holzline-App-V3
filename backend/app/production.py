@@ -83,11 +83,16 @@ def _ensure_aware(dt: datetime) -> datetime:
     return dt
 
 
+def _secs_qty(value: Decimal | float | int) -> Decimal:
+    """Sekunden auf Quantity-Schema (max. 3 Nachkommastellen) — verhindert Board-500."""
+    return max(ZERO, _dec(value)).quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+
+
 def track_duration_seconds(track: ProductionTimeTrack, *, now: datetime | None = None) -> Decimal:
     start = _ensure_aware(track.started_at)
     end = _ensure_aware(track.ended_at) if track.ended_at else _ensure_aware(now or _utcnow())
     secs = (end - start).total_seconds()
-    return max(ZERO, _dec(secs))
+    return _secs_qty(secs)
 
 
 def step_quantity(step: ProductionStep, process: ProductionProcess) -> Decimal | None:
@@ -474,6 +479,18 @@ def start_track(
         raise HTTPException(status_code=404, detail="Prozess nicht gefunden")
     if step.process.status != "active":
         raise HTTPException(status_code=400, detail="Produktionslauf ist abgeschlossen")
+    open_same = db.scalars(
+        select(ProductionTimeTrack).where(
+            ProductionTimeTrack.step_id == step_id,
+            ProductionTimeTrack.kind == kind,
+            ProductionTimeTrack.ended_at.is_(None),
+        )
+    ).first()
+    if open_same:
+        raise HTTPException(
+            status_code=400,
+            detail="Zeitspur läuft bereits — zuerst stoppen",
+        )
     rate_id = labor_rate_id
     if kind == "labor":
         if rate_id is None:
@@ -599,8 +616,10 @@ def effective_step_seconds(step: ProductionStep, kind: str) -> Decimal:
     if has_completed_tracks(step, kind):
         return measured_step_seconds(step, kind)
     if kind == "labor":
-        return _dec(step.estimated_labor_seconds) if step.estimated_labor_seconds is not None else ZERO
-    return _dec(step.estimated_machine_seconds) if step.estimated_machine_seconds is not None else ZERO
+        raw = _dec(step.estimated_labor_seconds) if step.estimated_labor_seconds is not None else ZERO
+    else:
+        raw = _dec(step.estimated_machine_seconds) if step.estimated_machine_seconds is not None else ZERO
+    return _secs_qty(raw)
 
 
 def compute_process_unit_costs(

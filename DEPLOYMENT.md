@@ -152,7 +152,8 @@ Dauerhaft im Repo:
 
 | Tag / Branch | Bedeutung |
 |--------------|-----------|
-| **`ui-v1.17`** / Branch (nach Merge `main`) | Produktion board-first: Pins gegen leeres Reload; Create sekundär; Board-Wipe-Regressionstest |
+| **`ui-v1.18`** / Branch (nach Merge `main`) | Produktion: Zeitnahme Stop/Messung + Reload behält Nesting (Board-500 nach Stop behoben) |
+| **`ui-v1.17`** / `main` | Produktion board-first: Pins gegen leeres Reload; Create sekundär; Board-Wipe-Regressionstest |
 | **`ui-v1.16`** / `main` | Produktion: „Aktive Läufe“ immer sichtbar; Race nach „Lauf starten“ (unvollständig — siehe v1.17) |
 | **`ui-v1.15`** / `main` | Produktion UX: nach Lauf-Start Board+Prozess-Schicht sichtbar (Nesting Q17/Q21) |
 | **`ui-v1.14`** / `main` | Produktions-Tracking Slice 2: Lauf→Prozesse, Multi-Link, Schätzung/Messung (ADR `0030`) |
@@ -171,13 +172,25 @@ Dauerhaft im Repo:
 | **`ui-v1`** | Slice 1 vor Kontrast-Pass (Tag fest; GitHub ließ Update nicht zu) |
 | **`ui-classic`** | UI **vor** dem Redesign |
 
-**Aktuell deployen — nach Merge Tag `ui-v1.17` (oder `main`):**
+**Aktuell deployen — nach Merge Tag `ui-v1.18` (oder `main`):**
+
+```bash
+cd /opt/holzlinge-inventar
+git fetch origin
+git fetch origin tag ui-v1.18
+git checkout ui-v1.18   # oder: git checkout main && git pull --ff-only origin main
+git log -1 --oneline
+docker compose build --no-cache
+docker compose up -d --force-recreate
+```
+
+**Vorgänger — Tag `ui-v1.17`:**
 
 ```bash
 cd /opt/holzlinge-inventar
 git fetch origin
 git fetch origin tag ui-v1.17
-git checkout ui-v1.17   # oder: git checkout main && git pull --ff-only origin main
+git checkout ui-v1.17
 git log -1 --oneline
 docker compose build --no-cache
 docker compose up -d --force-recreate

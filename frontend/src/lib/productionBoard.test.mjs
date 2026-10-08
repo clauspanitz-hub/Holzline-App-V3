@@ -3,10 +3,15 @@ import {
   mergeProductionBoard,
   pinProductionRun,
   unpinProductionRun,
+  runNestingScore,
 } from './productionBoard.js'
 
-function run(id, title = `R${id}`) {
-  return { id, title, status: 'active', steps: [] }
+function run(id, title = `R${id}`, steps = []) {
+  return { id, title, status: 'active', steps }
+}
+
+function step(id, name, tracks = []) {
+  return { id, name, tracks }
 }
 
 // Fresh create must survive a later empty server board (the ui-v1.16 residual race).
@@ -57,6 +62,32 @@ function run(id, title = `R${id}`) {
   let pins = pinProductionRun({}, run(9))
   pins = unpinProductionRun(pins, 9)
   assert.equal(Object.keys(pins).length, 0)
+}
+
+// ui-v1.18: server run without steps must not wipe richer local/pin nesting
+{
+  const rich = run(5, 'Mit Prozessen', [
+    step(1, 'Fräsen', [{ id: 10, kind: 'labor', running: false }]),
+    step(2, 'Schleifen', []),
+  ])
+  assert.ok(runNestingScore(rich) > runNestingScore(run(5)))
+
+  const pins = pinProductionRun({}, rich)
+  const merged = mergeProductionBoard([run(5, 'Mit Prozessen', [])], {
+    pins,
+    previousBoard: [rich],
+  })
+  assert.equal(merged.length, 1)
+  assert.equal(merged[0].steps.length, 2, 'reload must keep nested processes')
+  assert.equal(merged[0].steps[0].tracks.length, 1)
+}
+
+// pinProductionRun must not downgrade nesting
+{
+  const rich = run(8, 'R', [step(1, 'A')])
+  let pins = pinProductionRun({}, rich)
+  pins = pinProductionRun(pins, run(8, 'R', []))
+  assert.equal(pins[8].steps.length, 1)
 }
 
 console.log('productionBoard.test.mjs: ok')
