@@ -17,8 +17,11 @@
   let users = $state([])
   let loading = $state(false)
   let adminOpen = $state(false)
+  /** Create-Form: offen bis erster erfolgreicher Start; danach Board im Fokus. */
   let createOpen = $state(true)
   let focusRunId = $state(null)
+  /** Verhindert, dass ein veraltetes reload() Board/createOpen überschreibt (Race). */
+  let reloadSeq = 0
   let costProductId = $state('')
   let costFamilyId = $state('')
   let costCurrent = $state(null)
@@ -50,7 +53,20 @@
     return () => clearInterval(id)
   })
 
-  export async function reload() {
+  function upsertRun(run) {
+    if (!run?.id) return
+    const rest = board.filter((r) => r.id !== run.id)
+    board = [run, ...rest]
+  }
+
+  /**
+   * @param {{ keepCreateClosed?: boolean, ensureRun?: object | null }} [opts]
+   * keepCreateClosed: nach „Lauf starten“ Create nicht wieder aufklappen
+   * ensureRun: Lauf aus Create-Response, falls Board-Fetch ihn verfehlt/Race
+   */
+  export async function reload(opts = {}) {
+    const { keepCreateClosed = false, ensureRun = null } = opts
+    const seq = ++reloadSeq
     loading = true
     try {
       const tasks = [
@@ -61,17 +77,31 @@
       ]
       if (isAdmin) tasks.push(api.users.list())
       const [b, m, r, s, u] = await Promise.all(tasks)
-      board = b
+      if (seq !== reloadSeq) return
+      let next = Array.isArray(b) ? b : []
+      if (ensureRun?.id && !next.some((r) => r.id === ensureRun.id)) {
+        next = [ensureRun, ...next]
+      }
+      board = next
       machines = m
       laborRates = r
       settings = s
       energyDraft = String(s.energy_eur_per_kwh ?? '')
       if (u) users = u
-      if (!board.length) createOpen = true
+      if (keepCreateClosed) {
+        createOpen = false
+      } else if (!board.length && focusRunId == null) {
+        createOpen = true
+      }
     } catch (e) {
+      if (seq !== reloadSeq) return
+      if (ensureRun?.id) {
+        upsertRun(ensureRun)
+        if (keepCreateClosed) createOpen = false
+      }
       onToast(e.message || 'Laden fehlgeschlagen', 'error')
     } finally {
-      loading = false
+      if (seq === reloadSeq) loading = false
     }
   }
 
@@ -156,7 +186,8 @@
 
   function scrollToRun(runId) {
     queueMicrotask(() => {
-      const el = document.getElementById(`run-${runId}`)
+      const el =
+        document.getElementById(`run-${runId}`) || document.getElementById('aktive-laeufe')
       el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     })
   }
@@ -197,10 +228,10 @@
         family_ids: newRun.family_ids.length ? newRun.family_ids : null,
         quantity: newRun.quantity !== '' ? Number(newRun.quantity) : null,
       }
-      const created = await api.production.createProcess(body)
+      let latest = await api.production.createProcess(body)
       const initials = newProcesses.filter((p) => p.name.trim()).slice(0, 10)
       for (const p of initials) {
-        await api.production.addStep(created.id, {
+        latest = await api.production.addStep(latest.id, {
           name: p.name.trim(),
           quantity: p.quantity !== '' ? Number(p.quantity) : null,
           estimated_labor_seconds: minToSecs(p.est_labor_min),
@@ -210,15 +241,20 @@
       newRun = { title: '', product_ids: [], family_ids: [], quantity: '' }
       newProcesses = [emptyProcessDraft()]
       createOpen = false
-      focusRunId = created.id
-      await reload()
+      focusRunId = latest.id
+      // Sofort sichtbar — unabhängig von parallelem/stale reload()
+      upsertRun(latest)
+      await reload({ keepCreateClosed: true, ensureRun: latest })
+      createOpen = false
+      focusRunId = latest.id
+      if (!board.some((r) => r.id === latest.id)) upsertRun(latest)
       onToast(
         initials.length
           ? `Lauf gestartet · ${initials.length} Prozess(e)`
           : 'Lauf gestartet — jetzt Prozesse anlegen',
         'ok',
       )
-      scrollToRun(created.id)
+      scrollToRun(latest.id)
     } catch (e) {
       onToast(e.message || 'Fehler', 'error')
     }
@@ -404,7 +440,7 @@
     <h2>Produktion</h2>
     <div class="row-actions">
       <button type="button" class="btn secondary compact" onclick={() => reload()} disabled={loading}>Aktualisieren</button>
-      {#if board.length && !createOpen}
+      {#if !createOpen}
         <button type="button" class="btn compact" onclick={openCreateForm}>Neuer Lauf</button>
       {/if}
       {#if isAdmin}
@@ -482,11 +518,16 @@
   {/if}
 </section>
 
-{#if board.length}
+<section id="aktive-laeufe" class="aktive-laeufe" aria-labelledby="aktive-laeufe-heading">
   <div class="board-heading">
-    <h3>Aktive Läufe</h3>
-    <span class="muted">{board.length} offen</span>
+    <h3 id="aktive-laeufe-heading">Aktive Läufe</h3>
+    <span class="chip soft board-count">{board.length} offen</span>
   </div>
+  {#if !board.length}
+    <p class="empty board-empty">
+      {loading ? 'Lade Läufe…' : 'Keine aktiven Produktionsläufe — starte einen über „Neuer Lauf“ / Formular darunter.'}
+    </p>
+  {/if}
   {#each board as run}
     <section
       id="run-{run.id}"
@@ -713,17 +754,15 @@
       </div>
     </section>
   {/each}
-{:else if !createOpen}
-  <p class="empty">Keine aktiven Produktionsläufe — starte einen unten.</p>
-{/if}
+</section>
 
 {#if createOpen}
   <section id="create-run" class="panel create-panel">
     <div class="panel-header">
       <h3>Neuen Produktionslauf</h3>
-      {#if board.length}
-        <button type="button" class="btn secondary compact" onclick={() => (createOpen = false)}>Schließen</button>
-      {/if}
+      <button type="button" class="btn secondary compact" onclick={() => (createOpen = false)}>
+        {board.length ? 'Zum Board' : 'Schließen'}
+      </button>
     </div>
     <p class="muted create-hint">
       1) Hauptname + optional Produkte/Familien · 2) optional erste Prozesse · 3) Start — du landest auf dem Lauf-Board.
@@ -836,13 +875,6 @@
       <button type="button" class="btn" onclick={createRun}>Lauf starten</button>
     </div>
   </section>
-{:else if !board.length}
-  <section class="panel">
-    <p class="empty" style="margin:0">Noch kein aktiver Lauf.</p>
-    <div class="row-actions" style="margin-top:0.75rem">
-      <button type="button" class="btn" onclick={openCreateForm}>Produktionslauf anlegen</button>
-    </div>
-  </section>
 {/if}
 
 <section class="panel">
@@ -947,15 +979,30 @@
 </section>
 
 <style>
+  .aktive-laeufe {
+    margin: 1.1rem 0 0.5rem;
+    padding: 0.85rem 0.9rem 0.5rem;
+    border: 2px solid color-mix(in srgb, var(--accent, #2f6f4e) 45%, var(--border, #ccc));
+    border-radius: 0.45rem;
+    background: color-mix(in srgb, var(--accent, #2f6f4e) 6%, transparent);
+    scroll-margin-top: 1rem;
+  }
   .board-heading {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: 0.75rem;
-    margin: 1rem 0 0.35rem;
+    margin: 0 0 0.5rem;
   }
   .board-heading h3 {
     margin: 0;
+    font-size: 1.2rem;
+  }
+  .board-count {
+    font-weight: 600;
+  }
+  .board-empty {
+    margin: 0 0 0.75rem;
   }
   .process-card {
     margin-top: 0.75rem;

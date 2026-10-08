@@ -249,6 +249,24 @@ def test_slice2_create_run_then_nested_processes_like_ui():
     assert any(r.id == run.id and len(r.steps) == 3 for r in board)
 
 
+def test_board_active_includes_fresh_create_immediately():
+    """Create-Response und Board status=active müssen denselben Lauf liefern (kein Filter-Mismatch)."""
+    db = _session()
+    user = _user(db)
+    created = production.create_process(db, user, title="Sofort sichtbar")
+    assert created.status == "active"
+    board = production.list_board(db, status="active")
+    assert any(r.id == created.id for r in board)
+    done_board = production.list_board(db, status="done")
+    assert not any(r.id == created.id for r in done_board)
+    with_step = production.add_step(db, created.id, "Fräsen", estimated_labor_seconds=Decimal("60"))
+    assert with_step.status == "active"
+    board2 = production.list_board(db, status="active")
+    hit = next(r for r in board2 if r.id == created.id)
+    assert len(hit.steps) == 1
+    assert hit.steps[0].name == "Fräsen"
+
+
 def test_slice2_max_processes_and_family_average():
     db = _session()
     rate = production.create_labor_rate(db, "Werkstatt", Decimal("30"))
