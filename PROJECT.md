@@ -113,6 +113,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Maschinen- + Stundensatz-Stammdaten, Stromtarif; Produktkosten aktuell + Historie
 - [x] Entkoppelt von Fertigen; kein Shopify-Write; keine Vorlagen/Gemini
 - [x] Slice 2: Produktionslauf→Prozesse; Multi-Select Produkt+Familie; Schätzung+Messung; Familien-Ø (ADR `0030`)
+- [x] Slice 2 UX: nach „Lauf starten“ Board+Prozess-Schicht (kein Create-Dead-End; `ui-v1.15`)
 
 ## 5. Geschäftsregeln (gültig)
 - Keine Reservierungs-/Verschnittlogik.
