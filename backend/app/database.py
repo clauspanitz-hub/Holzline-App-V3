@@ -209,6 +209,7 @@ def init_db() -> None:
         migrate_purchase_sources(engine)
         migrate_manual_todos(engine)
         migrate_material_product_yields(engine)
+        migrate_production_tracking(engine)
         seed_admin_user(db)
         from app.services import backfill_incomplete_tags, ensure_system_incomplete_tags
 
@@ -725,6 +726,23 @@ def migrate_material_product_yields(engine) -> None:
                     CONSTRAINT uq_material_product_yield UNIQUE (material_id, product_id)
                 )
                 """
+            )
+        )
+
+
+def migrate_production_tracking(engine) -> None:
+    """users.labor_rate_id + Produktions-Tabellen via create_all; Spalte nachziehen (ADR 0030)."""
+    insp = inspect(engine)
+    if "users" not in insp.get_table_names():
+        return
+    cols = {c["name"] for c in insp.get_columns("users")}
+    if "labor_rate_id" in cols:
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE users ADD COLUMN labor_rate_id INTEGER "
+                "REFERENCES labor_rates(id) ON DELETE SET NULL"
             )
         )
 

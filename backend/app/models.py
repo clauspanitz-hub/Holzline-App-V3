@@ -468,10 +468,14 @@ class User(Base):
         default=UserRole.MITARBEITER,
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    labor_rate_id: Mapped[int | None] = mapped_column(
+        ForeignKey("labor_rates.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
     sessions: Mapped[list["AuthSession"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    labor_rate: Mapped["LaborRate | None"] = relationship(foreign_keys=[labor_rate_id])
 
 
 class AuthSession(Base):
@@ -640,3 +644,128 @@ class IncomingMail(Base):
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class LaborRate(Base):
+    """Stundensatz-Katalog für Produktions-Tracking (ADR 0030)."""
+
+    __tablename__ = "labor_rates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    eur_per_hour: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False, default=Decimal("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class Machine(Base):
+    """Werkstatt-Maschine (Drucker, Fräse, …) für Maschinenzeit (ADR 0030)."""
+
+    __tablename__ = "machines"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    power_w: Mapped[Decimal | None] = mapped_column(Numeric(12, 3), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class AppSetting(Base):
+    """Einfache Key/Value-Einstellungen (z. B. Stromtarif)."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+
+class ProductionProcess(Base):
+    """Laufende oder abgeschlossene Produktions-Session (ADR 0030)."""
+
+    __tablename__ = "production_processes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")  # active | done
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    product: Mapped[Product | None] = relationship()
+    created_by: Mapped[User | None] = relationship(foreign_keys=[created_by_user_id])
+    steps: Mapped[list["ProductionStep"]] = relationship(
+        back_populates="process",
+        cascade="all, delete-orphan",
+        order_by="ProductionStep.id",
+    )
+
+
+class ProductionStep(Base):
+    __tablename__ = "production_steps"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    process_id: Mapped[int] = mapped_column(
+        ForeignKey("production_processes.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    sort_hint: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    process: Mapped[ProductionProcess] = relationship(back_populates="steps")
+    tracks: Mapped[list["ProductionTimeTrack"]] = relationship(
+        back_populates="step",
+        cascade="all, delete-orphan",
+        order_by="ProductionTimeTrack.id",
+    )
+
+
+class ProductionTimeTrack(Base):
+    __tablename__ = "production_time_tracks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    step_id: Mapped[int] = mapped_column(ForeignKey("production_steps.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # labor | machine
+    machine_id: Mapped[int | None] = mapped_column(ForeignKey("machines.id", ondelete="SET NULL"), nullable=True)
+    labor_rate_id: Mapped[int | None] = mapped_column(
+        ForeignKey("labor_rates.id", ondelete="SET NULL"), nullable=True
+    )
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    step: Mapped[ProductionStep] = relationship(back_populates="tracks")
+    machine: Mapped[Machine | None] = relationship()
+    labor_rate: Mapped[LaborRate | None] = relationship()
+    user: Mapped[User | None] = relationship(foreign_keys=[user_id])
+
+
+class ProductCostSnapshot(Base):
+    """Produktkosten-Historie nach abgeschlossener Session (ADR 0030)."""
+
+    __tablename__ = "product_cost_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
+    process_id: Mapped[int | None] = mapped_column(
+        ForeignKey("production_processes.id", ondelete="SET NULL"), nullable=True
+    )
+    captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    labor_seconds_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False, default=Decimal("0"))
+    machine_seconds_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False, default=Decimal("0"))
+    labor_eur_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False, default=Decimal("0"))
+    energy_kwh_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 6), nullable=False, default=Decimal("0"))
+    energy_eur_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False, default=Decimal("0"))
+    total_eur_per_unit: Mapped[Decimal] = mapped_column(Numeric(14, 4), nullable=False, default=Decimal("0"))
+
+    product: Mapped[Product] = relationship()
+    process: Mapped[ProductionProcess | None] = relationship()

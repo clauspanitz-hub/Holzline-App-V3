@@ -17,6 +17,7 @@
   import ExtraGapPanels from './lib/components/ExtraGapPanels.svelte'
   import ToastStack from './lib/components/ToastStack.svelte'
   import AppNav from './lib/components/AppNav.svelte'
+  import ProductionTracking from './lib/components/ProductionTracking.svelte'
   import { applyCatalogFilter, applyNegativeStockFilter, emptyCatalogFilter } from './lib/catalogFilter.js'
 
   let tab = $state('todos')
@@ -2014,6 +2015,7 @@
       materials: 'Materialien',
       products: 'Produkte',
       'purchase-assistant': 'Einkaufsassistent',
+      production: 'Produktion',
       orders: 'Bestellungen',
       todos: 'Todos',
       staff: 'Bei Mitarbeitern',
@@ -2218,6 +2220,7 @@
           }
           if (jobs.length) await Promise.all(jobs)
         }
+        // production: products already in catalog bucket above
         return
       }
       const t = tab
@@ -5257,6 +5260,14 @@
         {/snippet}
       </CatalogActionList>
     </section>
+  {:else if tab === 'production'}
+    <ProductionTracking
+      {api}
+      {products}
+      {authUser}
+      isAdmin={authUser?.role === 'admin'}
+      onToast={(msg, kind) => showFlash(kind === 'error' ? 'error' : 'success', msg)}
+    />
   {:else if tab === 'purchase-assistant'}
     <section class="panel">
       <div class="panel-header">

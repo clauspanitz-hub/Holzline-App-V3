@@ -315,6 +315,53 @@ export const api = {
     tageslage: (refresh = false) =>
       request(`/api/overview/tageslage${refresh ? '?refresh=true' : ''}`),
   },
+  laborRates: {
+    list: () => request('/api/labor-rates'),
+    create: (body) => request('/api/labor-rates', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) => request(`/api/labor-rates/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    remove: (id) => request(`/api/labor-rates/${id}`, { method: 'DELETE' }),
+  },
+  machines: {
+    list: () => request('/api/machines'),
+    create: (body) => request('/api/machines', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) => request(`/api/machines/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    remove: (id) => request(`/api/machines/${id}`, { method: 'DELETE' }),
+  },
+  production: {
+    settings: () => request('/api/production/settings'),
+    updateSettings: (body) =>
+      request('/api/production/settings', { method: 'PUT', body: JSON.stringify(body) }),
+    board: (status = 'active') =>
+      request(`/api/production/board?status=${encodeURIComponent(status)}`),
+    createProcess: (body) =>
+      request('/api/production/processes', { method: 'POST', body: JSON.stringify(body) }),
+    updateProcess: (id, body) =>
+      request(`/api/production/processes/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    completeProcess: (id) =>
+      request(`/api/production/processes/${id}/complete`, { method: 'POST' }),
+    addStep: (processId, body) =>
+      request(`/api/production/processes/${processId}/steps`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    updateStep: (id, body) =>
+      request(`/api/production/steps/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    startTrack: (stepId, body) =>
+      request(`/api/production/steps/${stepId}/tracks`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    stopTrack: (trackId, body = {}) =>
+      request(`/api/production/tracks/${trackId}/stop`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    updateTrack: (id, body) =>
+      request(`/api/production/tracks/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    productCost: (productId) => request(`/api/production/product-costs/${productId}`),
+    productCostHistory: (productId) =>
+      request(`/api/production/product-costs/${productId}/history`),
+  },
 }
 
 /** Nachkommastellen eines Artikels (Produkte immer 0, Material laut Feld). */

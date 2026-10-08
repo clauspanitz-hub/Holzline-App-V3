@@ -49,6 +49,21 @@ MITARBEITER_ALLOW = (
     ("PUT", re.compile(r"^/api/materials/\d+$")),
     ("GET", re.compile(r"^/api/sets/variants/\d+/assemble-preview$")),
     ("POST", re.compile(r"^/api/sets/variants/\d+/assemble$")),
+    # Produktions-Tracking (Board/Timer; Stammdaten-Write nur Admin)
+    ("GET", re.compile(r"^/api/labor-rates$")),
+    ("GET", re.compile(r"^/api/machines$")),
+    ("GET", re.compile(r"^/api/production/settings$")),
+    ("GET", re.compile(r"^/api/production/board$")),
+    ("POST", re.compile(r"^/api/production/processes$")),
+    ("PATCH", re.compile(r"^/api/production/processes/\d+$")),
+    ("POST", re.compile(r"^/api/production/processes/\d+/complete$")),
+    ("POST", re.compile(r"^/api/production/processes/\d+/steps$")),
+    ("PATCH", re.compile(r"^/api/production/steps/\d+$")),
+    ("POST", re.compile(r"^/api/production/steps/\d+/tracks$")),
+    ("POST", re.compile(r"^/api/production/tracks/\d+/stop$")),
+    ("PATCH", re.compile(r"^/api/production/tracks/\d+$")),
+    ("GET", re.compile(r"^/api/production/product-costs/\d+$")),
+    ("GET", re.compile(r"^/api/production/product-costs/\d+/history$")),
 )
 
 PUBLIC_API_PATHS = {
