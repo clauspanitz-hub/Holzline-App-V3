@@ -64,6 +64,7 @@ MITARBEITER_ALLOW = (
     ("PATCH", re.compile(r"^/api/production/tracks/\d+$")),
     ("GET", re.compile(r"^/api/production/product-costs/\d+$")),
     ("GET", re.compile(r"^/api/production/product-costs/\d+/history$")),
+    ("GET", re.compile(r"^/api/production/family-costs/\d+$")),
 )
 
 PUBLIC_API_PATHS = {

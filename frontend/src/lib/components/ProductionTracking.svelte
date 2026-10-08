@@ -1,5 +1,11 @@
 <script>
+  import { untrack } from 'svelte'
   import { formatMoney, formatDateTime } from '../api.js'
+  import {
+    mergeProductionBoard,
+    pinProductionRun,
+    unpinProductionRun,
+  } from '../productionBoard.js'
 
   let {
     api,
@@ -17,11 +23,14 @@
   let users = $state([])
   let loading = $state(false)
   let adminOpen = $state(false)
-  /** Create-Form: offen bis erster erfolgreicher Start; danach Board im Fokus. */
-  let createOpen = $state(true)
+  /** Board-first: Create erst nach Hydration öffnen wenn keine Läufe, sonst zugeklappt. */
+  let createOpen = $state(false)
+  let boardHydrated = $state(false)
   let focusRunId = $state(null)
   /** Verhindert, dass ein veraltetes reload() Board/createOpen überschreibt (Race). */
   let reloadSeq = 0
+  /** Frisch erzeugte Läufe — überleben leere/stale Board-Fetches. */
+  let pinnedById = $state({})
   let costProductId = $state('')
   let costFamilyId = $state('')
   let costCurrent = $state(null)
@@ -55,17 +64,28 @@
 
   function upsertRun(run) {
     if (!run?.id) return
+    pinnedById = pinProductionRun(pinnedById, run)
     const rest = board.filter((r) => r.id !== run.id)
     board = [run, ...rest]
   }
 
+  function syncCreateOpen({ keepCreateClosed = false } = {}) {
+    if (keepCreateClosed) {
+      createOpen = false
+      return
+    }
+    if (!boardHydrated) return
+    // Board-first: bei aktiven Läufen Create zu; nur leer → anlegen
+    createOpen = board.length === 0 && focusRunId == null
+  }
+
   /**
-   * @param {{ keepCreateClosed?: boolean, ensureRun?: object | null }} [opts]
+   * @param {{ keepCreateClosed?: boolean, ensureRun?: object | null, allowEmptyWipe?: boolean }} [opts]
    * keepCreateClosed: nach „Lauf starten“ Create nicht wieder aufklappen
    * ensureRun: Lauf aus Create-Response, falls Board-Fetch ihn verfehlt/Race
    */
   export async function reload(opts = {}) {
-    const { keepCreateClosed = false, ensureRun = null } = opts
+    const { keepCreateClosed = false, ensureRun = null, allowEmptyWipe = false } = opts
     const seq = ++reloadSeq
     loading = true
     try {
@@ -78,27 +98,39 @@
       if (isAdmin) tasks.push(api.users.list())
       const [b, m, r, s, u] = await Promise.all(tasks)
       if (seq !== reloadSeq) return
-      let next = Array.isArray(b) ? b : []
-      if (ensureRun?.id && !next.some((r) => r.id === ensureRun.id)) {
-        next = [ensureRun, ...next]
+      if (ensureRun?.id) {
+        pinnedById = pinProductionRun(pinnedById, ensureRun)
       }
-      board = next
-      machines = m
-      laborRates = r
+      // Pins, die der Server jetzt liefert, auf Server-Stand bringen
+      if (Array.isArray(b)) {
+        let pins = pinnedById
+        for (const run of b) {
+          if (run?.id && pins[run.id]) {
+            pins = pinProductionRun(pins, run)
+          }
+        }
+        pinnedById = pins
+      }
+      board = mergeProductionBoard(b, {
+        pins: pinnedById,
+        ensureRun,
+        previousBoard: board,
+        allowEmptyWipe,
+      })
+      machines = Array.isArray(m) ? m : []
+      laborRates = Array.isArray(r) ? r : []
       settings = s
       energyDraft = String(s.energy_eur_per_kwh ?? '')
       if (u) users = u
-      if (keepCreateClosed) {
-        createOpen = false
-      } else if (!board.length && focusRunId == null) {
-        createOpen = true
-      }
+      boardHydrated = true
+      syncCreateOpen({ keepCreateClosed })
     } catch (e) {
       if (seq !== reloadSeq) return
       if (ensureRun?.id) {
         upsertRun(ensureRun)
-        if (keepCreateClosed) createOpen = false
       }
+      boardHydrated = true
+      syncCreateOpen({ keepCreateClosed })
       onToast(e.message || 'Laden fehlgeschlagen', 'error')
     } finally {
       if (seq === reloadSeq) loading = false
@@ -108,7 +140,10 @@
   $effect(() => {
     void api
     void isAdmin
-    reload()
+    // untrack: Reload-State (board/loading) darf Effect nicht neu triggern
+    untrack(() => {
+      void reload()
+    })
   })
 
   function ensureDraft(runId) {
@@ -120,9 +155,9 @@
     }
   }
 
+  /** Lesen ohne Render-Mutation (Svelte 5). */
   function draft(runId) {
-    ensureDraft(runId)
-    return stepDrafts[runId]
+    return stepDrafts[runId] ?? emptyProcessDraft()
   }
 
   function setDraft(runId, patch) {
@@ -242,7 +277,7 @@
       newProcesses = [emptyProcessDraft()]
       createOpen = false
       focusRunId = latest.id
-      // Sofort sichtbar — unabhängig von parallelem/stale reload()
+      // Sofort pin + sichtbar — überlebt paralleles/stale/leeres reload()
       upsertRun(latest)
       await reload({ keepCreateClosed: true, ensureRun: latest })
       createOpen = false
@@ -339,8 +374,10 @@
   async function completeRun(id) {
     try {
       await api.production.completeProcess(id)
+      pinnedById = unpinProductionRun(pinnedById, id)
+      board = board.filter((r) => r.id !== id)
       if (focusRunId === id) focusRunId = null
-      await reload()
+      await reload({ allowEmptyWipe: true })
       onToast('Produktionslauf abgeschlossen', 'ok')
     } catch (e) {
       onToast(e.message || 'Fehler', 'error')
@@ -525,7 +562,11 @@
   </div>
   {#if !board.length}
     <p class="empty board-empty">
-      {loading ? 'Lade Läufe…' : 'Keine aktiven Produktionsläufe — starte einen über „Neuer Lauf“ / Formular darunter.'}
+      {#if loading || !boardHydrated}
+        Lade Läufe…
+      {:else}
+        Keine aktiven Produktionsläufe — „Neuer Lauf“ oben oder Formular darunter.
+      {/if}
     </p>
   {/if}
   {#each board as run}

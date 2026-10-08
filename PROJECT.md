@@ -115,6 +115,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Slice 2: Produktionslauf→Prozesse; Multi-Select Produkt+Familie; Schätzung+Messung; Familien-Ø (ADR `0030`)
 - [x] Slice 2 UX: nach „Lauf starten“ Board+Prozess-Schicht (kein Create-Dead-End; `ui-v1.15`)
 - [x] Slice 2 UX: „Aktive Läufe“ immer sichtbar; Reload-Race nach Start behoben (`ui-v1.16`)
+- [x] Slice 2 UX: Board-first + Pin-Merge gegen leeres Reload; Create sekundär (`ui-v1.17`)
 
 ## 5. Geschäftsregeln (gültig)
 - Keine Reservierungs-/Verschnittlogik.
