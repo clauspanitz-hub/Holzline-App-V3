@@ -207,6 +207,48 @@ def test_slice2_measurement_prefers_over_estimate():
     assert costs["labor_eur_per_unit"] == Decimal("10.0000")  # 10min = 1/6 h * 60
 
 
+def test_slice2_create_run_then_nested_processes_like_ui():
+    """UX-Flow: Lauf anlegen → darunter Prozesse mit Schätzung (Create-Form / Board)."""
+    db = _session()
+    user = _user(db)
+    family = ProductFamily(name="Ringe UI")
+    db.add(family)
+    db.flush()
+    p1 = _product(db, "Ring UI", family_id=family.id)
+
+    run = production.create_process(
+        db,
+        user,
+        title="Geburtstagsring Nesting",
+        product_ids=[p1.id],
+        family_ids=[family.id],
+        quantity=Decimal("4"),
+    )
+    assert run.title == "Geburtstagsring Nesting"
+    assert run.steps == [] or len(run.steps) == 0
+
+    for name, est in (("Fräsen", 1200), ("Schleifen", 600), ("Ölen", 300)):
+        production.add_step(
+            db,
+            run.id,
+            name,
+            quantity=Decimal("4"),
+            estimated_labor_seconds=Decimal(str(est)),
+            estimated_machine_seconds=Decimal("180") if name == "Fräsen" else None,
+        )
+
+    run = production.get_process(db, run.id)
+    assert len(run.steps) == 3
+    assert [s.name for s in run.steps] == ["Fräsen", "Schleifen", "Ölen"]
+    fraesen = run.steps[0]
+    assert fraesen.estimated_labor_seconds == Decimal("1200")
+    assert fraesen.estimated_machine_seconds == Decimal("180")
+    assert production.effective_step_seconds(fraesen, "labor") == Decimal("1200")
+    assert production.effective_step_seconds(fraesen, "machine") == Decimal("180")
+    board = production.list_board(db, status="active")
+    assert any(r.id == run.id and len(r.steps) == 3 for r in board)
+
+
 def test_slice2_max_processes_and_family_average():
     db = _session()
     rate = production.create_labor_rate(db, "Werkstatt", Decimal("30"))
