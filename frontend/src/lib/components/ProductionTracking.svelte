@@ -89,23 +89,35 @@
     const seq = ++reloadSeq
     loading = true
     try {
-      const tasks = [
-        api.production.board('active'),
+      // Board separat: Meta-Fehler (Users/Maschinen) dürfen Läufe/Prozesse nicht wischen.
+      const boardPromise = api.production.board('active')
+      const metaPromise = Promise.allSettled([
         api.machines.list(),
         api.laborRates.list(),
         api.production.settings(),
-      ]
-      if (isAdmin) tasks.push(api.users.list())
-      const [b, m, r, s, u] = await Promise.all(tasks)
+        isAdmin ? api.users.list() : Promise.resolve(null),
+      ])
+      let b
+      try {
+        b = await boardPromise
+      } catch (boardErr) {
+        if (seq !== reloadSeq) return
+        if (ensureRun?.id) upsertRun(ensureRun)
+        boardHydrated = true
+        syncCreateOpen({ keepCreateClosed })
+        onToast(boardErr.message || 'Board laden fehlgeschlagen', 'error')
+        return
+      }
+      const [mRes, rRes, sRes, uRes] = await metaPromise
       if (seq !== reloadSeq) return
       if (ensureRun?.id) {
         pinnedById = pinProductionRun(pinnedById, ensureRun)
       }
-      // Pins, die der Server jetzt liefert, auf Server-Stand bringen
+      // Pins, die der Server jetzt liefert, auf Server-Stand bringen (ohne Nesting zu verlieren)
       if (Array.isArray(b)) {
         let pins = pinnedById
         for (const run of b) {
-          if (run?.id && pins[run.id]) {
+          if (run?.id && (pins[run.id] || pins[String(run.id)])) {
             pins = pinProductionRun(pins, run)
           }
         }
@@ -117,11 +129,13 @@
         previousBoard: board,
         allowEmptyWipe,
       })
-      machines = Array.isArray(m) ? m : []
-      laborRates = Array.isArray(r) ? r : []
-      settings = s
-      energyDraft = String(s.energy_eur_per_kwh ?? '')
-      if (u) users = u
+      if (mRes.status === 'fulfilled' && Array.isArray(mRes.value)) machines = mRes.value
+      if (rRes.status === 'fulfilled' && Array.isArray(rRes.value)) laborRates = rRes.value
+      if (sRes.status === 'fulfilled' && sRes.value) {
+        settings = sRes.value
+        energyDraft = String(sRes.value.energy_eur_per_kwh ?? '')
+      }
+      if (uRes.status === 'fulfilled' && Array.isArray(uRes.value)) users = uRes.value
       boardHydrated = true
       syncCreateOpen({ keepCreateClosed })
     } catch (e) {
@@ -165,10 +179,21 @@
     stepDrafts = { ...stepDrafts, [runId]: { ...stepDrafts[runId], ...patch } }
   }
 
+  /** API-Zeiten ohne TZ als UTC lesen (SQLite/naive), sonst Browser-Local-Drift. */
+  function parseApiTime(value) {
+    if (value == null || value === '') return NaN
+    const s = String(value)
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(s)) {
+      return new Date(`${s}Z`).getTime()
+    }
+    return new Date(s).getTime()
+  }
+
   function fmtDuration(startedAt, endedAt) {
     void tick
-    const start = new Date(startedAt).getTime()
-    const end = endedAt ? new Date(endedAt).getTime() : Date.now()
+    const start = parseApiTime(startedAt)
+    const end = endedAt ? parseApiTime(endedAt) : Date.now()
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return '—'
     let secs = Math.max(0, Math.floor((end - start) / 1000))
     const h = Math.floor(secs / 3600)
     secs %= 3600
@@ -316,15 +341,16 @@
       return
     }
     try {
-      await api.production.addStep(runId, {
+      const latest = await api.production.addStep(runId, {
         name: d.name.trim(),
         quantity: d.quantity !== '' ? Number(d.quantity) : null,
         estimated_labor_seconds: minToSecs(d.est_labor_min),
         estimated_machine_seconds: minToSecs(d.est_machine_min),
       })
+      upsertRun(latest)
       stepDrafts = { ...stepDrafts, [runId]: emptyProcessDraft() }
       focusRunId = runId
-      await reload()
+      await reload({ keepCreateClosed: true, ensureRun: latest })
       onToast('Prozess angelegt', 'ok')
     } catch (e) {
       onToast(e.message || 'Fehler', 'error')
@@ -333,8 +359,9 @@
 
   async function patchProcess(stepId, body) {
     try {
-      await api.production.updateStep(stepId, body)
-      await reload()
+      const latest = await api.production.updateStep(stepId, body)
+      upsertRun(latest)
+      await reload({ keepCreateClosed: true, ensureRun: latest })
     } catch (e) {
       onToast(e.message || 'Fehler', 'error')
     }
@@ -342,8 +369,9 @@
 
   async function startLabor(stepId) {
     try {
-      await api.production.startTrack(stepId, { kind: 'labor' })
-      await reload()
+      const latest = await api.production.startTrack(stepId, { kind: 'labor' })
+      upsertRun(latest)
+      await reload({ keepCreateClosed: true, ensureRun: latest })
     } catch (e) {
       onToast(e.message || 'Fehler', 'error')
     }
@@ -355,8 +383,12 @@
       return
     }
     try {
-      await api.production.startTrack(stepId, { kind: 'machine', machine_id: Number(machineId) })
-      await reload()
+      const latest = await api.production.startTrack(stepId, {
+        kind: 'machine',
+        machine_id: Number(machineId),
+      })
+      upsertRun(latest)
+      await reload({ keepCreateClosed: true, ensureRun: latest })
     } catch (e) {
       onToast(e.message || 'Fehler', 'error')
     }
@@ -364,8 +396,9 @@
 
   async function stopTrack(trackId) {
     try {
-      await api.production.stopTrack(trackId)
-      await reload()
+      const latest = await api.production.stopTrack(trackId)
+      upsertRun(latest)
+      await reload({ keepCreateClosed: true, ensureRun: latest })
     } catch (e) {
       onToast(e.message || 'Fehler', 'error')
     }

@@ -14,4 +14,4 @@ Session-Board für parallele **Produktionsläufe** mit **Prozessen** darunter (v
 | Multi-Link | `production_process_products` + `production_process_families` |
 | Kosten | Gleicher Ø-Satz für alle verknüpften Produkte (inkl. Familienmitglieder) |
 | Zeiten | `estimated_*_seconds` am Prozess; Messung aus Tracks; Preferenz Messung |
-| UI | Inline-Zellen; Produktkosten + Familien-Ø; Board-first (Create sekundär); „Aktive Läufe“ immer prominent; Pin-Merge gegen leeres/stale Reload (`ui-v1.17`) |
+| UI | Inline-Zellen; Produktkosten + Familien-Ø; Board-first (Create sekundär); „Aktive Läufe“ immer prominent; Pin-Merge gegen leeres Reload (`ui-v1.17`); Stop/Messung ohne Board-500, Nesting bleibt nach Reload (`ui-v1.18`) |

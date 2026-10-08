@@ -929,6 +929,15 @@ def _user_read(user: User) -> UserRead:
     )
 
 
+def _dt_utc(dt):
+    """Naive DB-Zeiten als UTC lesen; für JSON immer timezone-aware."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _track_read(track) -> dict:
     return {
         "id": track.id,
@@ -937,8 +946,8 @@ def _track_read(track) -> dict:
         "machine_id": track.machine_id,
         "labor_rate_id": track.labor_rate_id,
         "user_id": track.user_id,
-        "started_at": track.started_at,
-        "ended_at": track.ended_at,
+        "started_at": _dt_utc(track.started_at),
+        "ended_at": _dt_utc(track.ended_at),
         "running": track.ended_at is None,
     }
 
