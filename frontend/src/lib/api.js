@@ -361,6 +361,7 @@ export const api = {
     productCost: (productId) => request(`/api/production/product-costs/${productId}`),
     productCostHistory: (productId) =>
       request(`/api/production/product-costs/${productId}/history`),
+    familyCost: (familyId) => request(`/api/production/family-costs/${familyId}`),
   },
 }
 

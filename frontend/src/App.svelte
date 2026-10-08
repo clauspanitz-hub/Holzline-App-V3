@@ -5264,6 +5264,7 @@
     <ProductionTracking
       {api}
       {products}
+      productFamilies={productFamilyCatalog}
       {authUser}
       isAdmin={authUser?.role === 'admin'}
       onToast={(msg, kind) => showFlash(kind === 'error' ? 'error' : 'success', msg)}

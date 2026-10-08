@@ -100,6 +100,7 @@ from app.schemas import (
     ProductionStepUpdate,
     ProductCostCurrent,
     ProductCostSnapshotRead,
+    FamilyCostCurrent,
     TimeTrackStart,
     TimeTrackStop,
     TimeTrackUpdate,
@@ -943,23 +944,50 @@ def _track_read(track) -> dict:
 
 
 def _process_read(process) -> ProductionProcessRead:
+    from app import production as prod_svc
+
     steps = []
     for step in process.steps:
+        measured_labor = prod_svc.measured_step_seconds(step, "labor")
+        measured_machine = prod_svc.measured_step_seconds(step, "machine")
         steps.append(
             {
                 "id": step.id,
                 "process_id": step.process_id,
                 "name": step.name,
                 "quantity": step.quantity,
+                "estimated_labor_seconds": step.estimated_labor_seconds,
+                "estimated_machine_seconds": step.estimated_machine_seconds,
+                "measured_labor_seconds": measured_labor,
+                "measured_machine_seconds": measured_machine,
+                "effective_labor_seconds": prod_svc.effective_step_seconds(step, "labor"),
+                "effective_machine_seconds": prod_svc.effective_step_seconds(step, "machine"),
                 "sort_hint": step.sort_hint,
                 "tracks": [_track_read(t) for t in step.tracks],
             }
         )
+    products = [{"id": p.id, "name": p.name} for p in (process.product_links or [])]
+    if not products and process.product:
+        products = [{"id": process.product.id, "name": process.product.name}]
+    families = [
+        {"id": f.id, "name": f.name, "parent_id": f.parent_id}
+        for f in (process.family_links or [])
+    ]
+    product_ids = [p["id"] for p in products]
+    family_ids = [f["id"] for f in families]
     return ProductionProcessRead(
         id=process.id,
         title=process.title,
-        product_id=process.product_id,
-        product_name=process.product.name if process.product else None,
+        product_id=process.product_id or (product_ids[0] if product_ids else None),
+        product_name=(
+            process.product.name
+            if process.product
+            else (products[0]["name"] if products else None)
+        ),
+        product_ids=product_ids,
+        family_ids=family_ids,
+        products=products,
+        families=families,
         quantity=process.quantity,
         status=process.status,
         created_by_user_id=process.created_by_user_id,
@@ -1175,7 +1203,13 @@ def production_process_create(
     db: Session = Depends(get_db),
 ) -> ProductionProcessRead:
     row = production.create_process(
-        db, user, title=payload.title, product_id=payload.product_id, quantity=payload.quantity
+        db,
+        user,
+        title=payload.title,
+        product_id=payload.product_id,
+        product_ids=payload.product_ids,
+        family_ids=payload.family_ids,
+        quantity=payload.quantity,
     )
     return _process_read(row)
 
@@ -1193,6 +1227,9 @@ def production_process_update(
         title=payload.title,
         product_id=payload.product_id,
         clear_product=payload.clear_product,
+        product_ids=payload.product_ids,
+        family_ids=payload.family_ids,
+        clear_links=payload.clear_links,
         quantity=payload.quantity,
         clear_quantity=payload.clear_quantity,
     )
@@ -1214,7 +1251,14 @@ def production_step_create(
     db: Session = Depends(get_db),
 ) -> ProductionProcessRead:
     return _process_read(
-        production.add_step(db, process_id, payload.name, quantity=payload.quantity)
+        production.add_step(
+            db,
+            process_id,
+            payload.name,
+            quantity=payload.quantity,
+            estimated_labor_seconds=payload.estimated_labor_seconds,
+            estimated_machine_seconds=payload.estimated_machine_seconds,
+        )
     )
 
 
@@ -1232,6 +1276,10 @@ def production_step_update(
             name=payload.name,
             quantity=payload.quantity,
             clear_quantity=payload.clear_quantity,
+            estimated_labor_seconds=payload.estimated_labor_seconds,
+            clear_estimated_labor=payload.clear_estimated_labor,
+            estimated_machine_seconds=payload.estimated_machine_seconds,
+            clear_estimated_machine=payload.clear_estimated_machine,
         )
     )
 
@@ -1293,6 +1341,13 @@ def production_product_cost(
     product_id: int, _: CurrentUser, db: Session = Depends(get_db)
 ) -> ProductCostCurrent:
     return ProductCostCurrent(**production.current_product_cost(db, product_id))
+
+
+@router.get("/production/family-costs/{family_id}", response_model=FamilyCostCurrent)
+def production_family_cost(
+    family_id: int, _: CurrentUser, db: Session = Depends(get_db)
+) -> FamilyCostCurrent:
+    return FamilyCostCurrent(**production.current_family_cost(db, family_id))
 
 
 @router.get(

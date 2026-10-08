@@ -1,4 +1,4 @@
-"""Tests für Produktions-Tracking (ADR 0030)."""
+"""Tests für Produktions-Tracking Slice 1+2 (ADR 0030)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, seed_locations
-from app.models import LaborRate, Product, Unit, User, UserRole
+from app.models import LaborRate, Product, ProductFamily, Unit, User, UserRole
 from app.auth import hash_password
 from app import production
 
@@ -47,8 +47,8 @@ def _user(db: Session, rate: LaborRate | None = None) -> User:
     return u
 
 
-def _product(db: Session, name: str = "Ring") -> Product:
-    p = Product(name=name, sku=None, selling_price=Decimal("20"))
+def _product(db: Session, name: str = "Ring", *, family_id: int | None = None) -> Product:
+    p = Product(name=name, sku=None, selling_price=Decimal("20"), family_id=family_id)
     db.add(p)
     db.flush()
     return p
@@ -121,3 +121,127 @@ def test_user_default_labor_rate_on_start():
     process = production.start_track(db, user, process.steps[0].id, "labor")
     track = process.steps[0].tracks[0]
     assert track.labor_rate_id == rate.id
+
+
+def test_slice2_multi_link_same_cost_and_estimates():
+    db = _session()
+    rate = production.create_labor_rate(db, "Werkstatt", Decimal("60"))
+    user = _user(db, rate)
+    family = ProductFamily(name="Ringe")
+    db.add(family)
+    db.flush()
+    p1 = _product(db, "Ring Buche", family_id=family.id)
+    p2 = _product(db, "Ring Eiche", family_id=family.id)
+    p3 = _product(db, "Einzel")
+
+    run = production.create_process(
+        db,
+        user,
+        title="Geburtstagsring aus Buche",
+        product_ids=[p3.id],
+        family_ids=[family.id],
+        quantity=Decimal("3"),
+    )
+    assert {p.id for p in run.product_links} == {p3.id}
+    assert {f.id for f in run.family_links} == {family.id}
+
+    # Prozess mit Schätzung (keine Messung)
+    production.add_step(
+        db,
+        run.id,
+        "Fräsen",
+        quantity=Decimal("3"),
+        estimated_labor_seconds=Decimal("1800"),  # 30 Min
+    )
+    run = production.get_process(db, run.id)
+    step = run.steps[0]
+    assert step.estimated_labor_seconds == Decimal("1800")
+    assert production.effective_step_seconds(step, "labor") == Decimal("1800")
+
+    costs = production.compute_process_unit_costs(db, run)
+    # 1800s / 3 = 600s/unit; labor €: (0.5h/3)*60 = 10
+    assert costs["labor_seconds_per_unit"] == Decimal("600")
+    assert costs["labor_eur_per_unit"] == Decimal("10.0000")
+
+    run = production.complete_process(db, run.id)
+    linked = production.linked_product_ids(db, run)
+    assert linked == {p1.id, p2.id, p3.id}
+
+    # Gleicher Snapshot-Satz für alle Verknüpfungen (Q19 A)
+    for pid in (p1.id, p2.id, p3.id):
+        hist = production.list_product_cost_history(db, pid)
+        assert len(hist) == 1
+        assert hist[0].labor_eur_per_unit == Decimal("10.0000")
+        assert hist[0].total_eur_per_unit == Decimal("10.0000")
+
+    fam_cost = production.current_family_cost(db, family.id)
+    assert fam_cost["sample_product_count"] == 2
+    assert fam_cost["prices_differ"] is False
+    assert fam_cost["avg_total_eur_per_unit"] == Decimal("10.0000")
+
+
+def test_slice2_measurement_prefers_over_estimate():
+    db = _session()
+    rate = production.create_labor_rate(db, "Werkstatt", Decimal("60"))
+    user = _user(db, rate)
+    product = _product(db)
+
+    run = production.create_process(db, user, title="Messung", product_ids=[product.id], quantity=Decimal("1"))
+    production.add_step(
+        db,
+        run.id,
+        "Schleifen",
+        estimated_labor_seconds=Decimal("3600"),
+    )
+    run = production.get_process(db, run.id)
+    step = run.steps[0]
+    start = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
+    production.start_track(db, user, step.id, "labor", started_at=start)
+    run = production.get_process(db, run.id)
+    production.stop_track(db, run.steps[0].tracks[0].id, ended_at=start + timedelta(minutes=10))
+    run = production.get_process(db, run.id)
+    assert production.measured_step_seconds(run.steps[0], "labor") == Decimal("600")
+    assert production.effective_step_seconds(run.steps[0], "labor") == Decimal("600")
+    costs = production.compute_process_unit_costs(db, run)
+    assert costs["labor_seconds_per_unit"] == Decimal("600")
+    assert costs["labor_eur_per_unit"] == Decimal("10.0000")  # 10min = 1/6 h * 60
+
+
+def test_slice2_max_processes_and_family_average():
+    db = _session()
+    rate = production.create_labor_rate(db, "Werkstatt", Decimal("30"))
+    user = _user(db, rate)
+    family = ProductFamily(name="Ziffern")
+    db.add(family)
+    db.flush()
+    a = _product(db, "Ziffer A", family_id=family.id)
+    b = _product(db, "Ziffer B", family_id=family.id)
+
+    run = production.create_process(db, user, title="Batch", family_ids=[family.id], quantity=Decimal("1"))
+    for i in range(10):
+        production.add_step(db, run.id, f"Schritt {i + 1}", estimated_labor_seconds=Decimal("60"))
+    try:
+        production.add_step(db, run.id, "Zu viel")
+        assert False, "expected max processes error"
+    except Exception as exc:
+        assert getattr(exc, "status_code", None) == 400
+
+    production.complete_process(db, run.id)
+    # same cost both products
+    assert production.current_product_cost(db, a.id)["total_eur_per_unit"] == production.current_product_cost(
+        db, b.id
+    )["total_eur_per_unit"]
+
+    # Force different current costs by completing a second run only for product A
+    run2 = production.create_process(db, user, title="Nur A", product_ids=[a.id], quantity=Decimal("1"))
+    production.add_step(db, run2.id, "Extra", estimated_labor_seconds=Decimal("3600"))
+    production.complete_process(db, run2.id)
+
+    fam = production.current_family_cost(db, family.id)
+    assert fam["prices_differ"] is True
+    # Ø of two different totals
+    ca = production.current_product_cost(db, a.id)["total_eur_per_unit"]
+    cb = production.current_product_cost(db, b.id)["total_eur_per_unit"]
+    assert ca != cb
+    expected = ((ca + cb) / 2).quantize(Decimal("0.0001"))
+    assert fam["avg_total_eur_per_unit"] == expected

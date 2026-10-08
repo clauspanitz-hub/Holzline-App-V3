@@ -1154,11 +1154,28 @@ class TimeTrackRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ProductionLinkProductRead(BaseModel):
+    id: int
+    name: str
+
+
+class ProductionLinkFamilyRead(BaseModel):
+    id: int
+    name: str
+    parent_id: int | None = None
+
+
 class ProductionStepRead(BaseModel):
     id: int
     process_id: int
     name: str
     quantity: Quantity | None = None
+    estimated_labor_seconds: Quantity | None = None
+    estimated_machine_seconds: Quantity | None = None
+    measured_labor_seconds: Quantity = 0
+    measured_machine_seconds: Quantity = 0
+    effective_labor_seconds: Quantity = 0
+    effective_machine_seconds: Quantity = 0
     sort_hint: int = 0
     tracks: list[TimeTrackRead] = []
 
@@ -1166,10 +1183,16 @@ class ProductionStepRead(BaseModel):
 
 
 class ProductionProcessRead(BaseModel):
+    """Produktionslauf (Slice 2). `steps` = Prozesse unter dem Lauf."""
+
     id: int
     title: str | None = None
     product_id: int | None = None
     product_name: str | None = None
+    product_ids: list[int] = []
+    family_ids: list[int] = []
+    products: list[ProductionLinkProductRead] = []
+    families: list[ProductionLinkFamilyRead] = []
     quantity: Quantity | None = None
     status: str
     created_by_user_id: int | None = None
@@ -1184,6 +1207,8 @@ class ProductionProcessRead(BaseModel):
 class ProductionProcessCreate(BaseModel):
     title: str | None = Field(default=None, max_length=300)
     product_id: int | None = None
+    product_ids: list[int] | None = None
+    family_ids: list[int] | None = None
     quantity: Quantity | None = Field(default=None, gt=0)
 
 
@@ -1191,6 +1216,9 @@ class ProductionProcessUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=300)
     product_id: int | None = None
     clear_product: bool = False
+    product_ids: list[int] | None = None
+    family_ids: list[int] | None = None
+    clear_links: bool = False
     quantity: Quantity | None = Field(default=None, gt=0)
     clear_quantity: bool = False
 
@@ -1198,12 +1226,18 @@ class ProductionProcessUpdate(BaseModel):
 class ProductionStepCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     quantity: Quantity | None = Field(default=None, gt=0)
+    estimated_labor_seconds: Quantity | None = Field(default=None, ge=0)
+    estimated_machine_seconds: Quantity | None = Field(default=None, ge=0)
 
 
 class ProductionStepUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     quantity: Quantity | None = Field(default=None, gt=0)
     clear_quantity: bool = False
+    estimated_labor_seconds: Quantity | None = Field(default=None, ge=0)
+    clear_estimated_labor: bool = False
+    estimated_machine_seconds: Quantity | None = Field(default=None, ge=0)
+    clear_estimated_machine: bool = False
 
 
 class TimeTrackStart(BaseModel):
@@ -1237,6 +1271,27 @@ class ProductCostCurrent(BaseModel):
     total_eur_per_unit: Money
 
 
+class FamilyCostProductItem(BaseModel):
+    product_id: int
+    product_name: str
+    sample_count: int
+    total_eur_per_unit: Money
+    labor_eur_per_unit: Money
+    energy_eur_per_unit: Money
+
+
+class FamilyCostCurrent(BaseModel):
+    family_id: int
+    family_name: str
+    product_count: int
+    sample_product_count: int
+    prices_differ: bool
+    avg_total_eur_per_unit: Money
+    avg_labor_eur_per_unit: Money
+    avg_energy_eur_per_unit: Money
+    products: list[FamilyCostProductItem] = []
+
+
 class ProductCostSnapshotRead(BaseModel):
     id: int
     product_id: int
@@ -1245,8 +1300,8 @@ class ProductCostSnapshotRead(BaseModel):
     labor_seconds_per_unit: Quantity
     machine_seconds_per_unit: Quantity
     labor_eur_per_unit: Money
-    energy_kwh_per_unit: Quantity
     energy_eur_per_unit: Money
+    energy_kwh_per_unit: Quantity
     total_eur_per_unit: Money
 
     model_config = ConfigDict(from_attributes=True)
