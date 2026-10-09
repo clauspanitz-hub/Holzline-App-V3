@@ -685,8 +685,8 @@ def compute_process_unit_costs(
 
     energy_eur = energy_kwh * tariff
     return {
-        "labor_seconds_per_unit": labor_secs,
-        "machine_seconds_per_unit": machine_secs,
+        "labor_seconds_per_unit": _secs_qty(labor_secs),
+        "machine_seconds_per_unit": _secs_qty(machine_secs),
         "labor_eur_per_unit": _money(labor_eur),
         "energy_kwh_per_unit": energy_kwh.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP),
         "energy_eur_per_unit": _money(energy_eur),

@@ -10,10 +10,13 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from datetime import datetime, timedelta, timezone
+
 from app.auth import hash_password, mitarbeiter_allowed, require_user
 from app.database import Base, get_db, seed_locations
-from app.models import User, UserRole
+from app.models import Product, ProductFamily, User, UserRole
 from app.routers import router
+from app import production
 
 
 def _session() -> Session:
@@ -183,4 +186,66 @@ def test_reload_board_keeps_nested_steps_and_stopped_tracks():
     # Schema Quantity: max 3 decimal places (was the Board-500 root cause)
     measured = Decimal(str(hit["steps"][0]["measured_labor_seconds"]))
     assert measured == measured.quantize(Decimal("0.001"))
+    db.close()
+
+
+def test_product_cost_endpoints_accept_energy_and_unit_cost_precision():
+    """Nach Lauf mit Maschinenenergie dürfen Produkt-/Familienkosten nicht mit 500 sterben.
+
+    compute_process_unit_costs liefert kWh mit 6 und € mit 4 Nachkommastellen
+    (Numeric am Snapshot). Response-Models mit Money/Quantity (2/3) haben die
+    Endpunkte nach 'Kosten laden' gekillt.
+    """
+    db = _session()
+    rate = production.create_labor_rate(db, "Werkstatt", Decimal("60"))
+    user = User(
+        username="claus",
+        password_hash=hash_password("secret12"),
+        role=UserRole.ADMIN,
+        labor_rate_id=rate.id,
+    )
+    db.add(user)
+    db.flush()
+    machine = production.create_machine(db, "Fräse", power_w=Decimal("1000"))
+    production.set_energy_tariff(db, Decimal("0.40"))
+    family = ProductFamily(name="Ringe")
+    db.add(family)
+    db.flush()
+    product = Product(name="Ring", selling_price=Decimal("20"), family_id=family.id)
+    db.add(product)
+    db.commit()
+    db.refresh(user)
+    db.refresh(product)
+    db.refresh(family)
+
+    process = production.create_process(
+        db, user, title="Ringe", product_id=product.id, family_ids=[family.id], quantity=Decimal("9")
+    )
+    production.add_step(db, process.id, "Fräsen", quantity=Decimal("9"))
+    process = production.get_process(db, process.id)
+    step = process.steps[0]
+    start = datetime(2026, 10, 8, 10, 0, tzinfo=timezone.utc)
+    production.start_track(db, user, step.id, "labor", started_at=start)
+    production.start_track(db, user, step.id, "machine", machine_id=machine.id, started_at=start)
+    process = production.get_process(db, process.id)
+    production.stop_track(db, process.steps[0].tracks[0].id, ended_at=start + timedelta(minutes=90))
+    production.stop_track(db, process.steps[0].tracks[1].id, ended_at=start + timedelta(minutes=90))
+    production.complete_process(db, process.id)
+
+    client = _client(db, user)
+    current = client.get(f"/api/production/product-costs/{product.id}")
+    assert current.status_code == 200, current.text
+    body = current.json()
+    assert Decimal(str(body["energy_kwh_per_unit"])) == Decimal("0.166667")
+    assert Decimal(str(body["energy_eur_per_unit"])) == Decimal("0.0667")
+    assert Decimal(str(body["total_eur_per_unit"])) == Decimal("10.0667")
+
+    history = client.get(f"/api/production/product-costs/{product.id}/history")
+    assert history.status_code == 200, history.text
+    assert len(history.json()) == 1
+    assert Decimal(str(history.json()[0]["energy_kwh_per_unit"])) == Decimal("0.166667")
+
+    family_cost = client.get(f"/api/production/family-costs/{family.id}")
+    assert family_cost.status_code == 200, family_cost.text
+    assert Decimal(str(family_cost.json()["avg_total_eur_per_unit"])) == Decimal("10.0667")
     db.close()
