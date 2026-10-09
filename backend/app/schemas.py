@@ -10,6 +10,7 @@ from app.models import Unit
 Quantity = Annotated[Decimal, Field(max_digits=14, decimal_places=3)]
 Money = Annotated[Decimal, Field(max_digits=14, decimal_places=2)]
 UnitCost = Annotated[Decimal, Field(max_digits=14, decimal_places=4)]
+EnergyKwh = Annotated[Decimal, Field(max_digits=14, decimal_places=6)]
 
 
 class UnitInfo(BaseModel):
@@ -1265,19 +1266,19 @@ class ProductCostCurrent(BaseModel):
     sample_count: int
     labor_seconds_per_unit: Quantity
     machine_seconds_per_unit: Quantity
-    labor_eur_per_unit: Money
-    energy_kwh_per_unit: Quantity
-    energy_eur_per_unit: Money
-    total_eur_per_unit: Money
+    labor_eur_per_unit: UnitCost
+    energy_kwh_per_unit: EnergyKwh
+    energy_eur_per_unit: UnitCost
+    total_eur_per_unit: UnitCost
 
 
 class FamilyCostProductItem(BaseModel):
     product_id: int
     product_name: str
     sample_count: int
-    total_eur_per_unit: Money
-    labor_eur_per_unit: Money
-    energy_eur_per_unit: Money
+    total_eur_per_unit: UnitCost
+    labor_eur_per_unit: UnitCost
+    energy_eur_per_unit: UnitCost
 
 
 class FamilyCostCurrent(BaseModel):
@@ -1286,9 +1287,9 @@ class FamilyCostCurrent(BaseModel):
     product_count: int
     sample_product_count: int
     prices_differ: bool
-    avg_total_eur_per_unit: Money
-    avg_labor_eur_per_unit: Money
-    avg_energy_eur_per_unit: Money
+    avg_total_eur_per_unit: UnitCost
+    avg_labor_eur_per_unit: UnitCost
+    avg_energy_eur_per_unit: UnitCost
     products: list[FamilyCostProductItem] = []
 
 
@@ -1299,9 +1300,9 @@ class ProductCostSnapshotRead(BaseModel):
     captured_at: datetime
     labor_seconds_per_unit: Quantity
     machine_seconds_per_unit: Quantity
-    labor_eur_per_unit: Money
-    energy_eur_per_unit: Money
-    energy_kwh_per_unit: Quantity
-    total_eur_per_unit: Money
+    labor_eur_per_unit: UnitCost
+    energy_eur_per_unit: UnitCost
+    energy_kwh_per_unit: EnergyKwh
+    total_eur_per_unit: UnitCost
 
     model_config = ConfigDict(from_attributes=True)
