@@ -18,6 +18,7 @@ from app.models import (
     ProductCostSnapshot,
     ProductFamily,
     ProductionProcess,
+    ProductionProcessTemplate,
     ProductionStep,
     ProductionTimeTrack,
     User,
@@ -222,6 +223,7 @@ def _process_query():
         selectinload(ProductionProcess.product_links),
         selectinload(ProductionProcess.family_links),
         selectinload(ProductionProcess.created_by),
+        selectinload(ProductionProcess.template),
     )
 
 
@@ -232,9 +234,89 @@ def get_process(db: Session, process_id: int) -> ProductionProcess:
     return row
 
 
+def get_template(db: Session, template_id: int) -> ProductionProcessTemplate:
+    row = db.get(ProductionProcessTemplate, template_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Prozess-Vorlage nicht gefunden")
+    return row
+
+
 def list_board(db: Session, *, status: str = "active") -> list[ProductionProcess]:
     q = _process_query().where(ProductionProcess.status == status).order_by(ProductionProcess.id.desc())
     return list(db.scalars(q).all())
+
+
+def run_total_measured_seconds(process: ProductionProcess) -> Decimal:
+    total = ZERO
+    for step in process.steps:
+        total += measured_step_seconds(step, "labor")
+        total += measured_step_seconds(step, "machine")
+    return total
+
+
+def _ensure_template_for_run(
+    db: Session, row: ProductionProcess, *, name_hint: str | None = None
+) -> ProductionProcessTemplate:
+    if row.template_id:
+        tmpl = db.get(ProductionProcessTemplate, row.template_id)
+        if tmpl:
+            return tmpl
+    label = (name_hint or row.title or f"Lauf #{row.id}").strip() or f"Lauf #{row.id}"
+    tmpl = ProductionProcessTemplate(name=label[:300])
+    db.add(tmpl)
+    db.flush()
+    row.template_id = tmpl.id
+    return tmpl
+
+
+def list_templates_with_done_runs(db: Session) -> list[dict[str, Any]]:
+    """Abgeschlossen-Ansicht: Vorlagen mit nested done-Läufen (neueste zuerst)."""
+    done_runs = list(
+        db.scalars(
+            _process_query()
+            .where(ProductionProcess.status == "done")
+            .order_by(ProductionProcess.completed_at.desc(), ProductionProcess.id.desc())
+        ).all()
+    )
+    by_template: dict[int, dict[str, Any]] = {}
+    orphan_runs: list[ProductionProcess] = []
+    for run in done_runs:
+        tid = run.template_id
+        if tid is None:
+            orphan_runs.append(run)
+            continue
+        if tid not in by_template:
+            tmpl = run.template
+            by_template[tid] = {
+                "id": tid,
+                "name": tmpl.name if tmpl else (run.title or f"Vorlage #{tid}"),
+                "created_at": tmpl.created_at if tmpl else run.created_at,
+                "updated_at": tmpl.updated_at if tmpl else run.updated_at,
+                "runs": [],
+            }
+        by_template[tid]["runs"].append(run)
+    # Orphans: each gets its own synthetic group (should be rare after backfill)
+    for run in orphan_runs:
+        key = -run.id
+        by_template[key] = {
+            "id": None,
+            "name": run.title or f"Lauf #{run.id}",
+            "created_at": run.created_at,
+            "updated_at": run.updated_at,
+            "runs": [run],
+        }
+    # Sort templates by latest completed_at among runs
+    groups = list(by_template.values())
+
+    def _latest(g: dict[str, Any]) -> datetime:
+        runs = g["runs"]
+        if not runs:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        best = runs[0].completed_at or runs[0].updated_at
+        return _ensure_aware(best)
+
+    groups.sort(key=_latest, reverse=True)
+    return groups
 
 
 def _family_ids_expanded(db: Session, family_ids: list[int]) -> set[int]:
@@ -325,9 +407,19 @@ def create_process(
     product_ids: list[int] | None = None,
     family_ids: list[int] | None = None,
     quantity: Decimal | None = None,
+    template_id: int | None = None,
 ) -> ProductionProcess:
+    clean_title = title.strip() if title and title.strip() else None
+    tmpl: ProductionProcessTemplate | None = None
+    if template_id is not None:
+        tmpl = get_template(db, template_id)
+    else:
+        tmpl = ProductionProcessTemplate(name=(clean_title or "Produktionslauf")[:300])
+        db.add(tmpl)
+        db.flush()
     row = ProductionProcess(
-        title=(title.strip() if title and title.strip() else None),
+        template_id=tmpl.id,
+        title=clean_title,
         quantity=_qty(quantity),
         status="active",
         created_by_user_id=user.id,
@@ -357,10 +449,28 @@ def update_process(
     clear_links: bool = False,
     quantity: Decimal | None = None,
     clear_quantity: bool = False,
+    history_note: str | None = None,
+    clear_history_note: bool = False,
 ) -> ProductionProcess:
     row = get_process(db, process_id)
+    archive = row.status == "done"
+    # Q25 B: Archiv nur Meta (Name/Notizen/Verknüpfungen); Menge/Struktur/Zeiten unveränderlich
+    if archive and (quantity is not None or clear_quantity):
+        raise HTTPException(
+            status_code=400,
+            detail="Archiv: gemessene Zeiten und Prozessstruktur unveränderlich — nur Meta editierbar",
+        )
     if title is not None:
         row.title = title.strip() or None
+        if row.template_id and row.template and title.strip():
+            # Keep Vorlage name in sync with latest meta title when editing
+            if archive or not row.template.name:
+                row.template.name = title.strip()[:300]
+                row.template.updated_at = _utcnow()
+    if clear_history_note:
+        row.history_note = None
+    elif history_note is not None:
+        row.history_note = history_note.strip() or None
     if clear_links or clear_product:
         _set_run_links(db, row, clear_links=True)
     elif product_ids is not None or family_ids is not None or product_id is not None:
@@ -376,10 +486,11 @@ def update_process(
             legacy = None
         fids = family_ids if family_ids is not None else [f.id for f in row.family_links]
         _set_run_links(db, row, product_ids=pids, family_ids=fids, legacy_product_id=legacy)
-    if clear_quantity:
-        row.quantity = None
-    elif quantity is not None:
-        row.quantity = _qty(quantity)
+    if not archive:
+        if clear_quantity:
+            row.quantity = None
+        elif quantity is not None:
+            row.quantity = _qty(quantity)
     row.updated_at = _utcnow()
     db.commit()
     return get_process(db, process_id)
@@ -439,6 +550,11 @@ def update_step(
     step = db.get(ProductionStep, step_id)
     if not step:
         raise HTTPException(status_code=404, detail="Prozess nicht gefunden")
+    if step.process.status != "active":
+        raise HTTPException(
+            status_code=400,
+            detail="Archiv: gemessene Zeiten und Prozessstruktur unveränderlich",
+        )
     if name is not None:
         clean = name.strip()
         if not clean:
@@ -548,6 +664,11 @@ def update_track(
     track = db.get(ProductionTimeTrack, track_id)
     if not track:
         raise HTTPException(status_code=404, detail="Zeitspur nicht gefunden")
+    if track.step.process.status != "active":
+        raise HTTPException(
+            status_code=400,
+            detail="Archiv: gemessene Zeiten und Prozessstruktur unveränderlich",
+        )
     if started_at is not None:
         track.started_at = _ensure_aware(started_at)
     if clear_ended:
@@ -694,10 +815,21 @@ def compute_process_unit_costs(
     }
 
 
-def complete_process(db: Session, process_id: int) -> ProductionProcess:
+def complete_process(
+    db: Session,
+    process_id: int,
+    *,
+    history_note: str | None = None,
+) -> ProductionProcess:
     process = get_process(db, process_id)
     if process.status == "done":
+        if history_note is not None:
+            process.history_note = history_note.strip() or None
+            process.updated_at = _utcnow()
+            db.commit()
+            return get_process(db, process_id)
         return process
+    _ensure_template_for_run(db, process)
     now = _utcnow()
     for step in process.steps:
         for track in step.tracks:
@@ -707,6 +839,8 @@ def complete_process(db: Session, process_id: int) -> ProductionProcess:
     process.status = "done"
     process.completed_at = now
     process.updated_at = now
+    if history_note is not None:
+        process.history_note = history_note.strip() or None
     db.flush()
 
     target_ids = linked_product_ids(db, process)
@@ -728,6 +862,52 @@ def complete_process(db: Session, process_id: int) -> ProductionProcess:
             )
     db.commit()
     return get_process(db, process_id)
+
+
+def retime_process(
+    db: Session,
+    user: User,
+    process_id: int,
+    *,
+    history_note: str | None = None,
+) -> ProductionProcess:
+    """Neuer aktiver Lauf unter derselben Prozess-Vorlage (Q23/Q24); Quell-Lauf bleibt Historie."""
+    source = get_process(db, process_id)
+    tmpl = _ensure_template_for_run(db, source)
+    if source.title and tmpl.name.startswith("Lauf #"):
+        tmpl.name = source.title[:300]
+        tmpl.updated_at = _utcnow()
+
+    product_ids = [p.id for p in (source.product_links or [])]
+    if not product_ids and source.product_id:
+        product_ids = [source.product_id]
+    family_ids = [f.id for f in (source.family_links or [])]
+
+    row = ProductionProcess(
+        template_id=tmpl.id,
+        title=source.title,
+        quantity=source.quantity,
+        status="active",
+        history_note=(history_note.strip() or None) if history_note is not None else None,
+        created_by_user_id=user.id,
+    )
+    db.add(row)
+    db.flush()
+    _set_run_links(db, row, product_ids=product_ids, family_ids=family_ids)
+    for step in sorted(source.steps, key=lambda s: (s.sort_hint, s.id)):
+        db.add(
+            ProductionStep(
+                process_id=row.id,
+                name=step.name,
+                quantity=step.quantity,
+                estimated_labor_seconds=step.estimated_labor_seconds,
+                estimated_machine_seconds=step.estimated_machine_seconds,
+                sort_hint=step.sort_hint,
+            )
+        )
+    tmpl.updated_at = _utcnow()
+    db.commit()
+    return get_process(db, row.id)
 
 
 def _runs_for_product(db: Session, product_id: int) -> list[ProductionProcess]:

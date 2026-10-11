@@ -696,17 +696,37 @@ production_process_families = Table(
 )
 
 
+class ProductionProcessTemplate(Base):
+    """Prozess-Vorlage: gruppiert Historie + aktive Re-Times (Q24 A)."""
+
+    __tablename__ = "production_process_templates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    runs: Mapped[list["ProductionProcess"]] = relationship(
+        back_populates="template",
+        order_by="ProductionProcess.id.desc()",
+    )
+
+
 class ProductionProcess(Base):
     """Produktionslauf (Slice 2) / früher „Prozess“ (Slice 1) — ADR 0030."""
 
     __tablename__ = "production_processes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    template_id: Mapped[int | None] = mapped_column(
+        ForeignKey("production_process_templates.id", ondelete="SET NULL"), nullable=True
+    )
     title: Mapped[str | None] = mapped_column(String(300), nullable=True)  # Hauptname
     # Legacy Einzel-Link (Slice 1); Slice 2 bevorzugt junction product_links
     product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
     quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")  # active | done
+    history_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by_user_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
@@ -714,6 +734,7 @@ class ProductionProcess(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    template: Mapped[ProductionProcessTemplate | None] = relationship(back_populates="runs")
     product: Mapped[Product | None] = relationship(foreign_keys=[product_id])
     product_links: Mapped[list["Product"]] = relationship(secondary=production_process_products)
     family_links: Mapped[list["ProductFamily"]] = relationship(secondary=production_process_families)

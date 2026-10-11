@@ -17,6 +17,10 @@
   } = $props()
 
   let board = $state([])
+  /** Abgeschlossen: Vorlagen mit nested done-Läufen */
+  let templates = $state([])
+  /** active | done — Board-Filter (Q27) */
+  let boardFilter = $state('active')
   let machines = $state([])
   let laborRates = $state([])
   let settings = $state({ energy_eur_per_kwh: 0 })
@@ -27,6 +31,11 @@
   let createOpen = $state(false)
   let boardHydrated = $state(false)
   let focusRunId = $state(null)
+  /** Detail-Lauf im Abgeschlossen-Filter (Tap auf Historie-Zeile) */
+  let detailRun = $state(null)
+  let expandedTemplates = $state({})
+  let completeNoteById = $state({})
+  let retimeNoteByTemplate = $state({})
   /** Verhindert, dass ein veraltetes reload() Board/createOpen überschreibt (Race). */
   let reloadSeq = 0
   /** Frisch erzeugte Läufe — überleben leere/stale Board-Fetches. */
@@ -75,8 +84,20 @@
       return
     }
     if (!boardHydrated) return
+    if (boardFilter !== 'active') {
+      createOpen = false
+      return
+    }
     // Board-first: bei aktiven Läufen Create zu; nur leer → anlegen
     createOpen = board.length === 0 && focusRunId == null
+  }
+
+  async function setBoardFilter(next) {
+    if (boardFilter === next) return
+    boardFilter = next
+    detailRun = null
+    createOpen = false
+    await reload({ keepCreateClosed: true, allowEmptyWipe: true })
   }
 
   /**
@@ -90,7 +111,8 @@
     loading = true
     try {
       // Board separat: Meta-Fehler (Users/Maschinen) dürfen Läufe/Prozesse nicht wischen.
-      const boardPromise = api.production.board('active')
+      const boardPromise =
+        boardFilter === 'done' ? api.production.templates() : api.production.board('active')
       const metaPromise = Promise.allSettled([
         api.machines.list(),
         api.laborRates.list(),
@@ -102,7 +124,7 @@
         b = await boardPromise
       } catch (boardErr) {
         if (seq !== reloadSeq) return
-        if (ensureRun?.id) upsertRun(ensureRun)
+        if (boardFilter === 'active' && ensureRun?.id) upsertRun(ensureRun)
         boardHydrated = true
         syncCreateOpen({ keepCreateClosed })
         onToast(boardErr.message || 'Board laden fehlgeschlagen', 'error')
@@ -110,25 +132,33 @@
       }
       const [mRes, rRes, sRes, uRes] = await metaPromise
       if (seq !== reloadSeq) return
-      if (ensureRun?.id) {
-        pinnedById = pinProductionRun(pinnedById, ensureRun)
-      }
-      // Pins, die der Server jetzt liefert, auf Server-Stand bringen (ohne Nesting zu verlieren)
-      if (Array.isArray(b)) {
-        let pins = pinnedById
-        for (const run of b) {
-          if (run?.id && (pins[run.id] || pins[String(run.id)])) {
-            pins = pinProductionRun(pins, run)
-          }
+      if (boardFilter === 'done') {
+        templates = Array.isArray(b) ? b : []
+        if (detailRun?.id) {
+          const flat = templates.flatMap((t) => t.runs || [])
+          detailRun = flat.find((r) => r.id === detailRun.id) || detailRun
         }
-        pinnedById = pins
+      } else {
+        if (ensureRun?.id) {
+          pinnedById = pinProductionRun(pinnedById, ensureRun)
+        }
+        // Pins, die der Server jetzt liefert, auf Server-Stand bringen (ohne Nesting zu verlieren)
+        if (Array.isArray(b)) {
+          let pins = pinnedById
+          for (const run of b) {
+            if (run?.id && (pins[run.id] || pins[String(run.id)])) {
+              pins = pinProductionRun(pins, run)
+            }
+          }
+          pinnedById = pins
+        }
+        board = mergeProductionBoard(b, {
+          pins: pinnedById,
+          ensureRun,
+          previousBoard: board,
+          allowEmptyWipe,
+        })
       }
-      board = mergeProductionBoard(b, {
-        pins: pinnedById,
-        ensureRun,
-        previousBoard: board,
-        allowEmptyWipe,
-      })
       if (mRes.status === 'fulfilled' && Array.isArray(mRes.value)) machines = mRes.value
       if (rRes.status === 'fulfilled' && Array.isArray(rRes.value)) laborRates = rRes.value
       if (sRes.status === 'fulfilled' && sRes.value) {
@@ -140,7 +170,7 @@
       syncCreateOpen({ keepCreateClosed })
     } catch (e) {
       if (seq !== reloadSeq) return
-      if (ensureRun?.id) {
+      if (boardFilter === 'active' && ensureRun?.id) {
         upsertRun(ensureRun)
       }
       boardHydrated = true
@@ -406,15 +436,91 @@
 
   async function completeRun(id) {
     try {
-      await api.production.completeProcess(id)
+      const raw = completeNoteById[id]
+      const history_note =
+        raw == null || String(raw).trim() === '' ? null : String(raw).trim()
+      await api.production.completeProcess(id, { history_note })
       pinnedById = unpinProductionRun(pinnedById, id)
       board = board.filter((r) => r.id !== id)
       if (focusRunId === id) focusRunId = null
+      const nextNotes = { ...completeNoteById }
+      delete nextNotes[id]
+      completeNoteById = nextNotes
       await reload({ allowEmptyWipe: true })
       onToast('Produktionslauf abgeschlossen', 'ok')
     } catch (e) {
       onToast(e.message || 'Fehler', 'error')
     }
+  }
+
+  function toggleTemplate(id) {
+    const key = id == null ? 'orphan' : String(id)
+    expandedTemplates = { ...expandedTemplates, [key]: !expandedTemplates[key] }
+  }
+
+  function isTemplateOpen(id) {
+    const key = id == null ? 'orphan' : String(id)
+    return !!expandedTemplates[key]
+  }
+
+  function openHistoryDetail(run) {
+    detailRun = run
+    queueMicrotask(() => {
+      document.getElementById('history-detail')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    })
+  }
+
+  async function retimeFromRun(run, templateId) {
+    try {
+      const tid = templateId ?? run.template_id
+      const noteKey = tid != null ? String(tid) : `run-${run.id}`
+      const raw = retimeNoteByTemplate[noteKey]
+      const history_note =
+        raw == null || String(raw).trim() === '' ? null : String(raw).trim()
+      let latest
+      if (tid != null) {
+        latest = await api.production.retimeTemplate(tid, { history_note })
+      } else {
+        latest = await api.production.retimeProcess(run.id, { history_note })
+      }
+      boardFilter = 'active'
+      detailRun = null
+      upsertRun(latest)
+      focusRunId = latest.id
+      await reload({ keepCreateClosed: true, ensureRun: latest, allowEmptyWipe: true })
+      onToast('Neuer Lauf gestartet (erneut timen)', 'ok')
+      scrollToRun(latest.id)
+    } catch (e) {
+      onToast(e.message || 'Fehler', 'error')
+    }
+  }
+
+  async function patchArchiveMeta(id, body) {
+    try {
+      const latest = await api.production.updateProcess(id, body)
+      if (detailRun?.id === id) detailRun = latest
+      await reload({ keepCreateClosed: true, allowEmptyWipe: true })
+      onToast('Meta gespeichert', 'ok')
+    } catch (e) {
+      onToast(e.message || 'Fehler', 'error')
+    }
+  }
+
+  function fmtDateShort(value) {
+    if (!value) return '—'
+    const t = parseApiTime(value)
+    if (!Number.isFinite(t)) return '—'
+    return new Date(t).toLocaleDateString('de-DE', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    })
+  }
+
+  function statusLabel(status) {
+    if (status === 'done') return 'abgeschlossen'
+    if (status === 'active') return 'aktiv'
+    return status || '—'
   }
 
   async function saveMachine() {
@@ -590,9 +696,212 @@
 
 <section id="aktive-laeufe" class="aktive-laeufe" aria-labelledby="aktive-laeufe-heading">
   <div class="board-heading">
-    <h3 id="aktive-laeufe-heading">Aktive Läufe</h3>
-    <span class="chip soft board-count">{board.length} offen</span>
+    <h3 id="aktive-laeufe-heading">Produktions-Board</h3>
+    <span class="chip soft board-count">
+      {boardFilter === 'active' ? `${board.length} offen` : `${templates.length} Vorlage(n)`}
+    </span>
   </div>
+  <div class="board-filter" role="tablist" aria-label="Board-Filter">
+    <button
+      type="button"
+      role="tab"
+      class="btn compact"
+      class:secondary={boardFilter !== 'active'}
+      aria-selected={boardFilter === 'active'}
+      onclick={() => setBoardFilter('active')}
+    >Aktive</button>
+    <button
+      type="button"
+      role="tab"
+      class="btn compact"
+      class:secondary={boardFilter !== 'done'}
+      aria-selected={boardFilter === 'done'}
+      onclick={() => setBoardFilter('done')}
+    >Abgeschlossen</button>
+  </div>
+
+  {#if boardFilter === 'done'}
+    {#if !templates.length}
+      <p class="empty board-empty">
+        {#if loading || !boardHydrated}
+          Lade Historie…
+        {:else}
+          Noch keine abgeschlossenen Läufe.
+        {/if}
+      </p>
+    {/if}
+    {#each templates as tmpl}
+      {@const tkey = tmpl.id == null ? 'orphan' : String(tmpl.id)}
+      <div class="template-block">
+        <button
+          type="button"
+          class="template-toggle"
+          aria-expanded={isTemplateOpen(tmpl.id)}
+          onclick={() => toggleTemplate(tmpl.id)}
+        >
+          <span>{isTemplateOpen(tmpl.id) ? '▼' : '▶'}</span>
+          <strong>{tmpl.name || `Vorlage #${tmpl.id}`}</strong>
+          <span class="chip soft">{tmpl.runs?.length ?? 0} Lauf/Läufe</span>
+        </button>
+        {#if isTemplateOpen(tmpl.id)}
+          <div class="history-rows">
+            {#each tmpl.runs || [] as run}
+              <button
+                type="button"
+                class="history-row"
+                class:selected={detailRun?.id === run.id}
+                onclick={() => openHistoryDetail(run)}
+              >
+                <span class="history-ts">{formatDateTime(run.completed_at) || fmtDateShort(run.completed_at)}</span>
+                <span class="history-note">{run.history_note || '—'}</span>
+                <span class="history-short muted">
+                  {fmtDateShort(run.completed_at)} · {statusLabel(run.status)} · {fmtSecs(run.total_measured_seconds)}
+                </span>
+              </button>
+            {/each}
+            <div class="retime-bar">
+              <label class="retime-note">Notiz (optional)
+                <input
+                  value={retimeNoteByTemplate[tkey] ?? ''}
+                  oninput={(e) => {
+                    retimeNoteByTemplate = {
+                      ...retimeNoteByTemplate,
+                      [tkey]: e.currentTarget.value,
+                    }
+                  }}
+                  placeholder="kurze Änderungsbeschreibung"
+                />
+              </label>
+              <button
+                type="button"
+                class="btn compact"
+                disabled={!(tmpl.runs?.length)}
+                onclick={() => retimeFromRun(tmpl.runs[0], tmpl.id)}
+              >Erneut timen</button>
+            </div>
+          </div>
+        {/if}
+      </div>
+    {/each}
+
+    {#if detailRun}
+      <section id="history-detail" class="panel process-card archive-detail">
+        <div class="panel-header">
+          <h3>{detailRun.title || runLinksLabel(detailRun) || `Lauf #${detailRun.id}`}</h3>
+          <button type="button" class="btn secondary compact" onclick={() => (detailRun = null)}>Schließen</button>
+        </div>
+        <p class="muted run-meta">
+          {formatDateTime(detailRun.completed_at)} · {statusLabel(detailRun.status)} ·
+          Gesamtzeit {fmtSecs(detailRun.total_measured_seconds)} ·
+          Vorlage: {detailRun.template_name || '—'}
+        </p>
+        {#if detailRun.history_note}
+          <p class="history-note-display">{detailRun.history_note}</p>
+        {/if}
+
+        <details class="run-meta-details" open>
+          <summary>Archiv-Meta (Name, Notiz, Verknüpfungen)</summary>
+          <div class="form-grid">
+            <label>Hauptname
+              <input
+                value={detailRun.title ?? ''}
+                onchange={(e) => patchArchiveMeta(detailRun.id, { title: e.currentTarget.value })}
+              />
+            </label>
+            <label>Historie-Notiz
+              <input
+                value={detailRun.history_note ?? ''}
+                onchange={(e) => {
+                  const v = e.currentTarget.value
+                  if (v === '') patchArchiveMeta(detailRun.id, { clear_history_note: true })
+                  else patchArchiveMeta(detailRun.id, { history_note: v })
+                }}
+              />
+            </label>
+          </div>
+          <div class="multi-pick compact">
+            <div>
+              <div class="multi-pick-title">Produkte</div>
+              <div class="check-grid">
+                {#each products as p}
+                  <label class="check-row">
+                    <input
+                      type="checkbox"
+                      checked={(detailRun.product_ids || []).includes(p.id)}
+                      onchange={() => {
+                        const next = toggleId(detailRun.product_ids || [], p.id)
+                        patchArchiveMeta(detailRun.id, {
+                          product_ids: next,
+                          family_ids: detailRun.family_ids || [],
+                        })
+                      }}
+                    />
+                    <span>{p.name}</span>
+                  </label>
+                {/each}
+              </div>
+            </div>
+            <div>
+              <div class="multi-pick-title">Familien</div>
+              <div class="check-grid">
+                {#each productFamilies as f}
+                  <label class="check-row">
+                    <input
+                      type="checkbox"
+                      checked={(detailRun.family_ids || []).includes(f.id)}
+                      onchange={() => {
+                        const next = toggleId(detailRun.family_ids || [], f.id)
+                        patchArchiveMeta(detailRun.id, {
+                          product_ids: detailRun.product_ids || [],
+                          family_ids: next,
+                        })
+                      }}
+                    />
+                    <span>{familyLabel(f)}</span>
+                  </label>
+                {/each}
+              </div>
+            </div>
+          </div>
+        </details>
+
+        <div class="process-section">
+          <div class="process-section-head">
+            <h4>Prozesse (nur Lesen)</h4>
+            <span class="chip soft">{detailRun.steps?.length ?? 0}</span>
+          </div>
+          {#each detailRun.steps || [] as step}
+            <div class="step-block">
+              <div class="step-head">
+                <strong>{step.name}</strong>
+                <span class="muted">Stück: {step.quantity ?? detailRun.quantity ?? '—'}</span>
+                <span class="muted">Messung A {fmtSecs(step.measured_labor_seconds)} / M {fmtSecs(step.measured_machine_seconds)}</span>
+                <span class="chip soft">effektiv A {fmtSecs(step.effective_labor_seconds)} / M {fmtSecs(step.effective_machine_seconds)}</span>
+              </div>
+              <div class="track-list">
+                {#each step.tracks || [] as track}
+                  <div class="track-row">
+                    <span class="chip">{track.kind === 'labor' ? 'Arbeit' : 'Maschine'}</span>
+                    <span class="timer">{fmtDuration(track.started_at, track.ended_at)}</span>
+                    {#if track.ended_at}
+                      <span class="muted">bis {formatDateTime(track.ended_at)}</span>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/each}
+        </div>
+        <div class="row-actions wrap" style="margin-top:0.75rem">
+          <button
+            type="button"
+            class="btn"
+            onclick={() => retimeFromRun(detailRun, detailRun.template_id)}
+          >Erneut timen</button>
+        </div>
+      </section>
+    {/if}
+  {:else}
   {#if !board.length}
     <p class="empty board-empty">
       {#if loading || !boardHydrated}
@@ -612,6 +921,15 @@
         <h3>{run.title || runLinksLabel(run) || `Lauf #${run.id}`}</h3>
         <button type="button" class="btn secondary compact" onclick={() => completeRun(run.id)}>Abschließen</button>
       </div>
+      <label class="complete-note">Notiz beim Abschließen (optional)
+        <input
+          value={completeNoteById[run.id] ?? ''}
+          oninput={(e) => {
+            completeNoteById = { ...completeNoteById, [run.id]: e.currentTarget.value }
+          }}
+          placeholder="kurze Änderungsbeschreibung"
+        />
+      </label>
       <p class="muted run-meta">
         Verknüpfung: {runLinksLabel(run)} · Stückzahl: {run.quantity ?? '—'} · Default-Satz: {defaultRateLabel()}
       </p>
@@ -828,9 +1146,10 @@
       </div>
     </section>
   {/each}
+  {/if}
 </section>
 
-{#if createOpen}
+{#if createOpen && boardFilter === 'active'}
   <section id="create-run" class="panel create-panel">
     <div class="panel-header">
       <h3>Neuen Produktionslauf</h3>
@@ -1075,8 +1394,96 @@
   .board-count {
     font-weight: 600;
   }
+  .board-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0 0 0.75rem;
+  }
   .board-empty {
     margin: 0 0 0.75rem;
+  }
+  .template-block {
+    margin: 0.5rem 0;
+    border: 1px solid color-mix(in srgb, var(--border, #ccc) 80%, transparent);
+    border-radius: 0.35rem;
+    background: color-mix(in srgb, var(--bg, #fff) 92%, transparent);
+  }
+  .template-toggle {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    text-align: left;
+    padding: 0.65rem 0.75rem;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+  }
+  .history-rows {
+    padding: 0 0.5rem 0.65rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .history-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.15rem 0.75rem;
+    text-align: left;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid color-mix(in srgb, var(--border, #ccc) 70%, transparent);
+    border-radius: 0.3rem;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+  }
+  .history-row.selected {
+    outline: 2px solid color-mix(in srgb, var(--accent, #2f6f4e) 50%, transparent);
+  }
+  @media (min-width: 720px) {
+    .history-row {
+      grid-template-columns: 1.2fr 1fr 1.2fr;
+      align-items: baseline;
+    }
+  }
+  .history-ts {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+  .history-note {
+    font-size: 0.95em;
+  }
+  .history-short {
+    font-size: 0.9em;
+  }
+  .retime-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: end;
+    margin-top: 0.35rem;
+  }
+  .retime-note,
+  .complete-note {
+    flex: 1;
+    min-width: 12rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.9em;
+    margin: 0.35rem 0;
+  }
+  .archive-detail {
+    margin-top: 0.85rem;
+  }
+  .history-note-display {
+    margin: 0 0 0.5rem;
+    font-style: italic;
   }
   .process-card {
     margin-top: 0.75rem;
