@@ -1186,6 +1186,8 @@ class ProductionProcessRead(BaseModel):
     """Produktionslauf (Slice 2). `steps` = Prozesse unter dem Lauf."""
 
     id: int
+    template_id: int | None = None
+    template_name: str | None = None
     title: str | None = None
     product_id: int | None = None
     product_name: str | None = None
@@ -1195,6 +1197,8 @@ class ProductionProcessRead(BaseModel):
     families: list[ProductionLinkFamilyRead] = []
     quantity: Quantity | None = None
     status: str
+    history_note: str | None = None
+    total_measured_seconds: Quantity = 0
     created_by_user_id: int | None = None
     created_at: datetime
     updated_at: datetime
@@ -1221,6 +1225,24 @@ class ProductionProcessUpdate(BaseModel):
     clear_links: bool = False
     quantity: Quantity | None = Field(default=None, gt=0)
     clear_quantity: bool = False
+    history_note: str | None = Field(default=None, max_length=2000)
+    clear_history_note: bool = False
+
+
+class ProductionProcessComplete(BaseModel):
+    history_note: str | None = Field(default=None, max_length=2000)
+
+
+class ProductionRetimeRequest(BaseModel):
+    history_note: str | None = Field(default=None, max_length=2000)
+
+
+class ProductionTemplateRead(BaseModel):
+    id: int | None = None
+    name: str
+    created_at: datetime
+    updated_at: datetime
+    runs: list[ProductionProcessRead] = []
 
 
 class ProductionStepCreate(BaseModel):

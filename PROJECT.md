@@ -49,10 +49,11 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **tageslage_cache:** ein Eintrag pro Kalendertag (Zusammenfassung, Spruch, Nächste Schritte; ADR `0016`)
 - **incoming_mails:** IMAP-Warteschlange (Rohtext; Etsy-Parser → Bestellung zur Prüfung; ADR `0018`)
 
-### Phase 5 (Produktion) — Slice 1+2
+### Phase 5 (Produktion) — Slice 1+2 + Abgeschlossen-Historie
 - **labor_rates / machines / app_settings:** Stundensätze, Maschinen (inkl. `power_w`), Stromtarif
 - **users.labor_rate_id:** Default-Stundensatz
-- **production_processes** (= Produktionslauf) **/ production_steps** (= Prozesse) **/ production_time_tracks:** parallele Sessions (labor|machine); Schätzung + Messung
+- **production_process_templates:** Prozess-Vorlage (gruppiert Historie + Re-Times)
+- **production_processes** (= Produktionslauf) **/ production_steps** (= Prozesse) **/ production_time_tracks:** parallele Sessions (labor|machine); Schätzung + Messung; `template_id`, optionales `history_note`
 - **production_process_products / production_process_families:** Multi-Link Produkte und Familien am Lauf
 - **product_cost_snapshots:** Historie nach Lauf-Abschluss für alle verknüpften Produkttypen (ADR `0030`)
 
@@ -117,6 +118,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Slice 2 UX: „Aktive Läufe“ immer sichtbar; Reload-Race nach Start behoben (`ui-v1.16`)
 - [x] Slice 2 UX: Board-first + Pin-Merge gegen leeres Reload; Create sekundär (`ui-v1.17`)
 - [x] Slice 2 Fix: Zeitnahme Stop/Messung + Reload behält Läufe/Prozesse/Tracks (`ui-v1.18`)
+- [x] Abgeschlossen-Historie: Board-Filter → Vorlage → Lauf-Zeilen; erneut timen; Archiv-Meta; `ui-v1.19` (Q23–Q30)
 
 ## 5. Geschäftsregeln (gültig)
 - Keine Reservierungs-/Verschnittlogik.

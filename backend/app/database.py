@@ -211,6 +211,7 @@ def init_db() -> None:
         migrate_material_product_yields(engine)
         migrate_production_tracking(engine)
         migrate_production_tracking_slice2(engine)
+        migrate_production_completed_runs(engine)
         seed_admin_user(db)
         from app.services import backfill_incomplete_tags, ensure_system_incomplete_tags
 
@@ -786,6 +787,54 @@ def migrate_production_tracking_slice2(engine) -> None:
                     WHERE product_id IS NOT NULL
                     """
                 )
+            )
+
+
+def migrate_production_completed_runs(engine) -> None:
+    """Abgeschlossene Läufe: Prozess-Vorlage + history_note + Backfill (Q23–Q30)."""
+    from app.models import Base as _Base
+
+    insp = inspect(engine)
+    tables = set(insp.get_table_names())
+    if "production_processes" not in tables:
+        return
+
+    _Base.metadata.create_all(
+        engine,
+        tables=[_Base.metadata.tables["production_process_templates"]],
+    )
+
+    proc_cols = {c["name"] for c in insp.get_columns("production_processes")}
+    with engine.begin() as conn:
+        if "template_id" not in proc_cols:
+            conn.execute(
+                text(
+                    "ALTER TABLE production_processes ADD COLUMN template_id INTEGER "
+                    "REFERENCES production_process_templates(id) ON DELETE SET NULL"
+                )
+            )
+        if "history_note" not in proc_cols:
+            conn.execute(text("ALTER TABLE production_processes ADD COLUMN history_note TEXT"))
+
+        # Backfill: 1 Vorlage pro bestehendem Lauf ohne template_id
+        rows = conn.execute(
+            text(
+                "SELECT id, title FROM production_processes WHERE template_id IS NULL ORDER BY id"
+            )
+        ).fetchall()
+        for pid, title in rows:
+            name = (title or f"Lauf #{pid}")[:300]
+            conn.execute(
+                text(
+                    "INSERT INTO production_process_templates (name, created_at, updated_at) "
+                    "VALUES (:name, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                ),
+                {"name": name},
+            )
+            tmpl_id = conn.execute(text("SELECT last_insert_rowid()")).scalar()
+            conn.execute(
+                text("UPDATE production_processes SET template_id = :tid WHERE id = :pid"),
+                {"tid": tmpl_id, "pid": pid},
             )
 
 

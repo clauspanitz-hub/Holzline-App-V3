@@ -333,12 +333,30 @@ export const api = {
       request('/api/production/settings', { method: 'PUT', body: JSON.stringify(body) }),
     board: (status = 'active') =>
       request(`/api/production/board?status=${encodeURIComponent(status)}`),
+    templates: () => request('/api/production/templates'),
     createProcess: (body) =>
       request('/api/production/processes', { method: 'POST', body: JSON.stringify(body) }),
     updateProcess: (id, body) =>
       request(`/api/production/processes/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
-    completeProcess: (id) =>
-      request(`/api/production/processes/${id}/complete`, { method: 'POST' }),
+    completeProcess: (id, body = {}) =>
+      request(`/api/production/processes/${id}/complete`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    retimeProcess: (id, body = {}) =>
+      request(`/api/production/processes/${id}/retime`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    retimeTemplate: (id, body = {}) =>
+      request(`/api/production/templates/${id}/retime`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
+    deleteProcess: (id) =>
+      request(`/api/production/processes/${id}`, { method: 'DELETE' }),
+    deleteTemplate: (id) =>
+      request(`/api/production/templates/${id}`, { method: 'DELETE' }),
     addStep: (processId, body) =>
       request(`/api/production/processes/${processId}/steps`, {
         method: 'POST',
@@ -346,6 +364,8 @@ export const api = {
       }),
     updateStep: (id, body) =>
       request(`/api/production/steps/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    deleteStep: (id) =>
+      request(`/api/production/steps/${id}`, { method: 'DELETE' }),
     startTrack: (stepId, body) =>
       request(`/api/production/steps/${stepId}/tracks`, {
         method: 'POST',

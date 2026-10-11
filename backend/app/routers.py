@@ -91,11 +91,14 @@ from app.schemas import (
     MachineCreate,
     MachineRead,
     MachineUpdate,
+    ProductionProcessComplete,
     ProductionProcessCreate,
     ProductionProcessRead,
     ProductionProcessUpdate,
+    ProductionRetimeRequest,
     ProductionSettingsRead,
     ProductionSettingsUpdate,
+    ProductionTemplateRead,
     ProductionStepCreate,
     ProductionStepUpdate,
     ProductCostCurrent,
@@ -986,6 +989,8 @@ def _process_read(process) -> ProductionProcessRead:
     family_ids = [f["id"] for f in families]
     return ProductionProcessRead(
         id=process.id,
+        template_id=process.template_id,
+        template_name=process.template.name if process.template else None,
         title=process.title,
         product_id=process.product_id or (product_ids[0] if product_ids else None),
         product_name=(
@@ -999,6 +1004,8 @@ def _process_read(process) -> ProductionProcessRead:
         families=families,
         quantity=process.quantity,
         status=process.status,
+        history_note=process.history_note,
+        total_measured_seconds=prod_svc.run_total_measured_seconds(process),
         created_by_user_id=process.created_by_user_id,
         created_at=process.created_at,
         updated_at=process.updated_at,
@@ -1205,6 +1212,25 @@ def production_board(
     return [_process_read(p) for p in production.list_board(db, status=status)]
 
 
+@router.get("/production/templates", response_model=list[ProductionTemplateRead])
+def production_templates_list(
+    _: CurrentUser,
+    db: Session = Depends(get_db),
+) -> list[ProductionTemplateRead]:
+    """Abgeschlossen-Ansicht: Vorlagen mit done-Läufen (Q27)."""
+    groups = production.list_templates_with_done_runs(db)
+    return [
+        ProductionTemplateRead(
+            id=g["id"],
+            name=g["name"],
+            created_at=g["created_at"],
+            updated_at=g["updated_at"],
+            runs=[_process_read(r) for r in g["runs"]],
+        )
+        for g in groups
+    ]
+
+
 @router.post("/production/processes", response_model=ProductionProcessRead, status_code=201)
 def production_process_create(
     payload: ProductionProcessCreate,
@@ -1241,15 +1267,68 @@ def production_process_update(
         clear_links=payload.clear_links,
         quantity=payload.quantity,
         clear_quantity=payload.clear_quantity,
+        history_note=payload.history_note,
+        clear_history_note=payload.clear_history_note,
     )
     return _process_read(row)
 
 
 @router.post("/production/processes/{process_id}/complete", response_model=ProductionProcessRead)
 def production_process_complete(
-    process_id: int, _: CurrentUser, db: Session = Depends(get_db)
+    process_id: int,
+    _: CurrentUser,
+    payload: ProductionProcessComplete | None = None,
+    db: Session = Depends(get_db),
 ) -> ProductionProcessRead:
-    return _process_read(production.complete_process(db, process_id))
+    note = payload.history_note if payload else None
+    return _process_read(production.complete_process(db, process_id, history_note=note))
+
+
+@router.post(
+    "/production/processes/{process_id}/retime",
+    response_model=ProductionProcessRead,
+    status_code=201,
+)
+def production_process_retime(
+    process_id: int,
+    user: CurrentUser,
+    payload: ProductionRetimeRequest | None = None,
+    db: Session = Depends(get_db),
+) -> ProductionProcessRead:
+    note = payload.history_note if payload else None
+    return _process_read(production.retime_process(db, user, process_id, history_note=note))
+
+
+@router.post(
+    "/production/templates/{template_id}/retime",
+    response_model=ProductionProcessRead,
+    status_code=201,
+)
+def production_template_retime(
+    template_id: int,
+    user: CurrentUser,
+    payload: ProductionRetimeRequest | None = None,
+    db: Session = Depends(get_db),
+) -> ProductionProcessRead:
+    """Erneut timen von Vorlage: klont den jüngsten done-Lauf (Fallback: jüngster Lauf)."""
+    from app.models import ProductionProcess as _PP
+
+    production.get_template(db, template_id)
+    source = db.scalars(
+        production._process_query()
+        .where(_PP.template_id == template_id, _PP.status == "done")
+        .order_by(_PP.completed_at.desc(), _PP.id.desc())
+    ).first()
+    if source is None:
+        source = db.scalars(
+            production._process_query()
+            .where(_PP.template_id == template_id)
+            .order_by(_PP.id.desc())
+        ).first()
+    if not source:
+        raise HTTPException(status_code=400, detail="Vorlage hat keine Läufe zum erneuten Timen")
+    note = payload.history_note if payload else None
+    return _process_read(production.retime_process(db, user, source.id, history_note=note))
 
 
 @router.post("/production/processes/{process_id}/steps", response_model=ProductionProcessRead, status_code=201)
@@ -1291,6 +1370,27 @@ def production_step_update(
             clear_estimated_machine=payload.clear_estimated_machine,
         )
     )
+
+
+@router.delete("/production/steps/{step_id}", response_model=ProductionProcessRead)
+def production_step_delete(
+    step_id: int, _: CurrentUser, db: Session = Depends(get_db)
+) -> ProductionProcessRead:
+    return _process_read(production.delete_step(db, step_id))
+
+
+@router.delete("/production/processes/{process_id}", status_code=204)
+def production_process_delete(
+    process_id: int, _: CurrentUser, db: Session = Depends(get_db)
+) -> None:
+    production.delete_process(db, process_id)
+
+
+@router.delete("/production/templates/{template_id}", status_code=204)
+def production_template_delete(
+    template_id: int, _: CurrentUser, db: Session = Depends(get_db)
+) -> None:
+    production.delete_template(db, template_id)
 
 
 @router.post("/production/steps/{step_id}/tracks", response_model=ProductionProcessRead, status_code=201)
