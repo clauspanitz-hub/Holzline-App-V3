@@ -535,6 +535,56 @@ def add_step(
     return get_process(db, process_id)
 
 
+def delete_step(db: Session, step_id: int) -> ProductionProcess:
+    """Prozess (Schritt) unter einem aktiven Lauf löschen — Archiv unveränderlich (Q25)."""
+    step = db.get(ProductionStep, step_id)
+    if not step:
+        raise HTTPException(status_code=404, detail="Prozess nicht gefunden")
+    process = step.process
+    process_id = process.id
+    if process.status != "active":
+        raise HTTPException(
+            status_code=400,
+            detail="Archiv: gemessene Zeiten und Prozessstruktur unveränderlich",
+        )
+    db.delete(step)
+    process.updated_at = _utcnow()
+    db.commit()
+    return get_process(db, process_id)
+
+
+def delete_process(db: Session, process_id: int) -> None:
+    """Produktionslauf hard-löschen (active oder done). Leere Vorlage wird mitentfernt."""
+    row = get_process(db, process_id)
+    template_id = row.template_id
+    db.delete(row)
+    db.flush()
+    if template_id is not None:
+        remaining = db.scalars(
+            select(ProductionProcess.id).where(ProductionProcess.template_id == template_id).limit(1)
+        ).first()
+        if remaining is None:
+            tmpl = db.get(ProductionProcessTemplate, template_id)
+            if tmpl:
+                db.delete(tmpl)
+    db.commit()
+
+
+def delete_template(db: Session, template_id: int) -> None:
+    """Prozess-Vorlage nur löschen wenn keine Läufe mehr hängen."""
+    tmpl = get_template(db, template_id)
+    remaining = db.scalars(
+        select(ProductionProcess.id).where(ProductionProcess.template_id == template_id).limit(1)
+    ).first()
+    if remaining is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Vorlage hat noch Läufe — zuerst Läufe löschen",
+        )
+    db.delete(tmpl)
+    db.commit()
+
+
 def update_step(
     db: Session,
     step_id: int,

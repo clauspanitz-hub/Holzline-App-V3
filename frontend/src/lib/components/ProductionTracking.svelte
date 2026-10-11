@@ -506,6 +506,56 @@
     }
   }
 
+  async function deleteStep(stepId, stepName) {
+    const label = stepName || 'Prozess'
+    if (!confirm(`Prozess „${label}“ löschen?`)) return
+    try {
+      const latest = await api.production.deleteStep(stepId)
+      upsertRun(latest)
+      await reload({ keepCreateClosed: true, ensureRun: latest })
+      onToast('Prozess gelöscht', 'ok')
+    } catch (e) {
+      onToast(e.message || 'Fehler', 'error')
+    }
+  }
+
+  async function deleteRun(run, { fromArchive = false } = {}) {
+    if (!run?.id) return
+    const label = run.title || runLinksLabel(run) || `Lauf #${run.id}`
+    const msg = fromArchive || run.status === 'done'
+      ? `Abgeschlossenen Lauf „${label}“ unwiderruflich löschen?`
+      : `Lauf „${label}“ löschen?`
+    if (!confirm(msg)) return
+    try {
+      await api.production.deleteProcess(run.id)
+      pinnedById = unpinProductionRun(pinnedById, run.id)
+      board = board.filter((r) => r.id !== run.id)
+      if (focusRunId === run.id) focusRunId = null
+      if (detailRun?.id === run.id) detailRun = null
+      await reload({ keepCreateClosed: true, allowEmptyWipe: true })
+      onToast('Lauf gelöscht', 'ok')
+    } catch (e) {
+      onToast(e.message || 'Fehler', 'error')
+    }
+  }
+
+  async function deleteTemplateIfEmpty(tmpl) {
+    if (!tmpl?.id) return
+    if ((tmpl.runs?.length ?? 0) > 0) {
+      onToast('Vorlage hat noch Läufe — zuerst Läufe löschen', 'error')
+      return
+    }
+    if (!confirm(`Leere Vorlage „${tmpl.name || tmpl.id}“ löschen?`)) return
+    try {
+      await api.production.deleteTemplate(tmpl.id)
+      if (detailRun?.template_id === tmpl.id) detailRun = null
+      await reload({ keepCreateClosed: true, allowEmptyWipe: true })
+      onToast('Vorlage gelöscht', 'ok')
+    } catch (e) {
+      onToast(e.message || 'Fehler', 'error')
+    }
+  }
+
   function fmtDateShort(value) {
     if (!value) return '—'
     const t = parseApiTime(value)
@@ -746,18 +796,24 @@
         {#if isTemplateOpen(tmpl.id)}
           <div class="history-rows">
             {#each tmpl.runs || [] as run}
-              <button
-                type="button"
-                class="history-row"
-                class:selected={detailRun?.id === run.id}
-                onclick={() => openHistoryDetail(run)}
-              >
-                <span class="history-ts">{formatDateTime(run.completed_at) || fmtDateShort(run.completed_at)}</span>
-                <span class="history-note">{run.history_note || '—'}</span>
-                <span class="history-short muted">
-                  {fmtDateShort(run.completed_at)} · {statusLabel(run.status)} · {fmtSecs(run.total_measured_seconds)}
-                </span>
-              </button>
+              <div class="history-row-wrap" class:selected={detailRun?.id === run.id}>
+                <button
+                  type="button"
+                  class="history-row"
+                  onclick={() => openHistoryDetail(run)}
+                >
+                  <span class="history-ts">{formatDateTime(run.completed_at) || fmtDateShort(run.completed_at)}</span>
+                  <span class="history-note">{run.history_note || '—'}</span>
+                  <span class="history-short muted">
+                    {fmtDateShort(run.completed_at)} · {statusLabel(run.status)} · {fmtSecs(run.total_measured_seconds)}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  class="btn secondary compact history-delete"
+                  onclick={() => deleteRun(run, { fromArchive: true })}
+                >Löschen</button>
+              </div>
             {/each}
             <div class="retime-bar">
               <label class="retime-note">Notiz (optional)
@@ -778,6 +834,13 @@
                 disabled={!(tmpl.runs?.length)}
                 onclick={() => retimeFromRun(tmpl.runs[0], tmpl.id)}
               >Erneut timen</button>
+              {#if tmpl.id != null && !(tmpl.runs?.length)}
+                <button
+                  type="button"
+                  class="btn secondary compact"
+                  onclick={() => deleteTemplateIfEmpty(tmpl)}
+                >Vorlage löschen</button>
+              {/if}
             </div>
           </div>
         {/if}
@@ -898,6 +961,11 @@
             class="btn"
             onclick={() => retimeFromRun(detailRun, detailRun.template_id)}
           >Erneut timen</button>
+          <button
+            type="button"
+            class="btn secondary compact"
+            onclick={() => deleteRun(detailRun, { fromArchive: true })}
+          >Lauf löschen</button>
         </div>
       </section>
     {/if}
@@ -919,7 +987,10 @@
     >
       <div class="panel-header">
         <h3>{run.title || runLinksLabel(run) || `Lauf #${run.id}`}</h3>
-        <button type="button" class="btn secondary compact" onclick={() => completeRun(run.id)}>Abschließen</button>
+        <div class="row-actions">
+          <button type="button" class="btn secondary compact" onclick={() => completeRun(run.id)}>Abschließen</button>
+          <button type="button" class="btn secondary compact" onclick={() => deleteRun(run)}>Löschen</button>
+        </div>
       </div>
       <label class="complete-note">Notiz beim Abschließen (optional)
         <input
@@ -1018,6 +1089,11 @@
               <span class="muted">Schätzung A {fmtSecs(step.estimated_labor_seconds)} / M {fmtSecs(step.estimated_machine_seconds)}</span>
               <span class="muted">Messung A {fmtSecs(step.measured_labor_seconds)} / M {fmtSecs(step.measured_machine_seconds)}</span>
               <span class="chip soft">effektiv A {fmtSecs(step.effective_labor_seconds)} / M {fmtSecs(step.effective_machine_seconds)}</span>
+              <button
+                type="button"
+                class="btn secondary compact"
+                onclick={() => deleteStep(step.id, step.name)}
+              >Prozess löschen</button>
             </div>
 
             <div class="form-grid inline-est">
@@ -1429,6 +1505,16 @@
     flex-direction: column;
     gap: 0.35rem;
   }
+  .history-row-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: stretch;
+  }
+  .history-row-wrap.selected {
+    outline: 2px solid color-mix(in srgb, var(--accent, #2f6f4e) 50%, transparent);
+    border-radius: 0.3rem;
+  }
   .history-row {
     display: grid;
     grid-template-columns: 1fr;
@@ -1441,9 +1527,11 @@
     cursor: pointer;
     font: inherit;
     color: inherit;
+    flex: 1;
+    min-width: 12rem;
   }
-  .history-row.selected {
-    outline: 2px solid color-mix(in srgb, var(--accent, #2f6f4e) 50%, transparent);
+  .history-delete {
+    align-self: center;
   }
   @media (min-width: 720px) {
     .history-row {

@@ -353,6 +353,10 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(body),
       }),
+    deleteProcess: (id) =>
+      request(`/api/production/processes/${id}`, { method: 'DELETE' }),
+    deleteTemplate: (id) =>
+      request(`/api/production/templates/${id}`, { method: 'DELETE' }),
     addStep: (processId, body) =>
       request(`/api/production/processes/${processId}/steps`, {
         method: 'POST',
@@ -360,6 +364,8 @@ export const api = {
       }),
     updateStep: (id, body) =>
       request(`/api/production/steps/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    deleteStep: (id) =>
+      request(`/api/production/steps/${id}`, { method: 'DELETE' }),
     startTrack: (stepId, body) =>
       request(`/api/production/steps/${stepId}/tracks`, {
         method: 'POST',

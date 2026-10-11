@@ -14,8 +14,9 @@ from sqlalchemy.pool import StaticPool
 from app import production
 from app.auth import hash_password, require_user
 from app.database import Base, get_db, seed_locations
-from app.models import User, UserRole
+from app.models import ProductionProcess, ProductionProcessTemplate, User, UserRole
 from app.routers import router
+from fastapi import HTTPException
 
 
 def _session() -> Session:
@@ -219,3 +220,76 @@ def test_api_templates_and_retime_and_board_done():
 
     active = client.get("/api/production/board", params={"status": "active"})
     assert any(r["id"] == fresh["id"] for r in active.json())
+
+
+def test_delete_step_active_only_and_delete_run_clears_empty_template():
+    db = _session()
+    user = _user(db)
+    run = production.create_process(db, user, title="Löschbar")
+    production.add_step(db, run.id, "Fräsen")
+    production.add_step(db, run.id, "Schleifen")
+    run = production.get_process(db, run.id)
+    tmpl_id = run.template_id
+    step_a, step_b = run.steps[0].id, run.steps[1].id
+
+    after = production.delete_step(db, step_b)
+    assert len(after.steps) == 1
+    assert after.steps[0].id == step_a
+
+    done = production.complete_process(db, run.id)
+    try:
+        production.delete_step(db, done.steps[0].id)
+        assert False, "expected 400"
+    except HTTPException as exc:
+        assert exc.status_code == 400
+
+    production.delete_process(db, done.id)
+    assert db.get(ProductionProcess, done.id) is None
+    assert db.get(ProductionProcessTemplate, tmpl_id) is None
+
+
+def test_delete_template_rejects_when_runs_exist():
+    db = _session()
+    user = _user(db)
+    run = production.create_process(db, user, title="Mit Lauf")
+    tmpl_id = run.template_id
+    try:
+        production.delete_template(db, tmpl_id)
+        assert False, "expected 400"
+    except HTTPException as exc:
+        assert exc.status_code == 400
+        assert "Läufe" in exc.detail
+
+    production.delete_process(db, run.id)
+    # already auto-removed with last run; recreate empty template edge case
+    tmpl = ProductionProcessTemplate(name="Leer")
+    db.add(tmpl)
+    db.commit()
+    production.delete_template(db, tmpl.id)
+    assert db.get(ProductionProcessTemplate, tmpl.id) is None
+
+
+def test_api_delete_run_and_step():
+    db = _session()
+    user = _user(db)
+    db.commit()
+    client = _client(db, user)
+
+    created = client.post("/api/production/processes", json={"title": "API Delete"})
+    assert created.status_code == 201
+    run_id = created.json()["id"]
+    step = client.post(
+        f"/api/production/processes/{run_id}/steps",
+        json={"name": "Fräsen"},
+    )
+    assert step.status_code == 201
+    step_id = step.json()["steps"][0]["id"]
+
+    deleted_step = client.delete(f"/api/production/steps/{step_id}")
+    assert deleted_step.status_code == 200
+    assert deleted_step.json()["steps"] == []
+
+    gone = client.delete(f"/api/production/processes/{run_id}")
+    assert gone.status_code == 204
+    board = client.get("/api/production/board", params={"status": "active"})
+    assert board.json() == []

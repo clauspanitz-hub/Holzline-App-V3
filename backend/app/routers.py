@@ -1372,6 +1372,27 @@ def production_step_update(
     )
 
 
+@router.delete("/production/steps/{step_id}", response_model=ProductionProcessRead)
+def production_step_delete(
+    step_id: int, _: CurrentUser, db: Session = Depends(get_db)
+) -> ProductionProcessRead:
+    return _process_read(production.delete_step(db, step_id))
+
+
+@router.delete("/production/processes/{process_id}", status_code=204)
+def production_process_delete(
+    process_id: int, _: CurrentUser, db: Session = Depends(get_db)
+) -> None:
+    production.delete_process(db, process_id)
+
+
+@router.delete("/production/templates/{template_id}", status_code=204)
+def production_template_delete(
+    template_id: int, _: CurrentUser, db: Session = Depends(get_db)
+) -> None:
+    production.delete_template(db, template_id)
+
+
 @router.post("/production/steps/{step_id}/tracks", response_model=ProductionProcessRead, status_code=201)
 def production_track_start(
     step_id: int,
