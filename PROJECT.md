@@ -128,6 +128,7 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 ### Team-Nachrichten — Umgesetzt (MVP)
 - [x] Flache Pinnwand + gemeinsames Scratchpad; Absender-Schalter Claus|Simona (ADR `0031`, `ui-v1.20`)
 - [x] Desktop rechte Rail überall eingeloggt; Mobile Button→Sheet; Bearbeiten/Löschen
+- [x] Rail-Layout: Nachrichten + Notizen je ~50% Höhe (`ui-v1.21`)
 - [x] Kein Ungelesen, Push, Telegram, Threads
 
 ## 5. Geschäftsregeln (gültig)

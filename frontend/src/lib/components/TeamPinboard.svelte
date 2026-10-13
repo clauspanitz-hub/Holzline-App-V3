@@ -215,7 +215,6 @@
     </header>
     <textarea
       class="team-note-pad"
-      rows="6"
       placeholder="Gemeinsames Scratchpad…"
       bind:value={noteBody}
       oninput={scheduleNoteSave}
@@ -239,7 +238,7 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    flex: 1 1 58%;
+    flex: 1 1 50%;
     min-height: 0;
   }
 
@@ -247,7 +246,8 @@
     display: flex;
     flex-direction: column;
     gap: 0.4rem;
-    flex: 0 0 auto;
+    flex: 1 1 50%;
+    min-height: 0;
   }
 
   .team-section-head {
@@ -255,6 +255,7 @@
     align-items: baseline;
     justify-content: space-between;
     gap: 0.5rem;
+    flex-shrink: 0;
   }
 
   .team-section-head h3 {
@@ -272,7 +273,7 @@
 
   .team-message-list {
     flex: 1 1 auto;
-    min-height: 8rem;
+    min-height: 0;
     max-height: none;
     overflow-y: auto;
     display: flex;
@@ -322,6 +323,7 @@
     flex-direction: column;
     gap: 0.4rem;
     padding-top: 0.25rem;
+    flex-shrink: 0;
   }
 
   .team-author-switch {
@@ -359,6 +361,9 @@
   }
 
   .team-note-pad {
-    min-height: 7rem;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    resize: none;
   }
 </style>
