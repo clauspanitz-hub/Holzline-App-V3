@@ -1327,3 +1327,38 @@ class ProductCostSnapshotRead(BaseModel):
     total_eur_per_unit: Money
 
     model_config = ConfigDict(from_attributes=True)
+
+
+TeamAuthor = Literal["claus", "simona"]
+
+
+class TeamMessageCreate(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+    author: TeamAuthor
+
+
+class TeamMessageUpdate(BaseModel):
+    text: str | None = Field(default=None, min_length=1, max_length=4000)
+    author: TeamAuthor | None = None
+
+
+class TeamMessageRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    text: str
+    author: TeamAuthor
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class TeamNoteUpdate(BaseModel):
+    body: str = Field(default="", max_length=20000)
+
+
+class TeamNoteRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    body: str
+    updated_at: datetime
