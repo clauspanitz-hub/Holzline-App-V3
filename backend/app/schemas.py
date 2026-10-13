@@ -1362,3 +1362,11 @@ class TeamNoteRead(BaseModel):
     id: int
     body: str
     updated_at: datetime
+
+
+class ProductSalesStatRead(BaseModel):
+    """Verkaufte Stückzahl je Lagerprodukt (shipped, all-time; ADR 0032)."""
+
+    product_id: int
+    product_name: str
+    quantity_sold: Quantity

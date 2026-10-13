@@ -1056,6 +1056,88 @@ table .row-actions .btn {
   color-scheme: light;
 }
 
+.family-select-sales-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.35rem;
+  padding: 0.25rem 0.35rem;
+  font-size: 0.85rem;
+  color: var(--field-ink);
+  cursor: pointer;
+  user-select: none;
+}
+
+.family-select-sales-toggle input {
+  width: auto;
+  margin: 0;
+}
+
+.family-select-option-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.family-select-family-label {
+  display: inline;
+  margin-left: 0.35rem;
+  font-size: 0.8rem;
+  padding: 0;
+}
+
+.family-select-sales-qty {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  padding: 0;
+}
+
+.sales-rank-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.sales-rank-list li {
+  display: grid;
+  grid-template-columns: 2rem 1fr auto;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.sales-rank-list li:last-child {
+  border-bottom: none;
+}
+
+.sales-rank-pos {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sales-rank-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sales-rank-qty {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.sales-stats-table td:last-child,
+.sales-stats-table th:last-child {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sales-stats-table td:first-child,
+.sales-stats-table th:first-child {
+  width: 3.5rem;
+}
+
 .family-select-group,
 .family-select-option {
   display: flex;

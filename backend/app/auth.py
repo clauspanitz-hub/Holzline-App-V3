@@ -72,6 +72,8 @@ MITARBEITER_ALLOW = (
     ("DELETE", re.compile(r"^/api/team/messages/\d+$")),
     ("GET", re.compile(r"^/api/team/note$")),
     ("PUT", re.compile(r"^/api/team/note$")),
+    # Verkaufsstatistik (ADR 0032) — read-only für Picker-Sort + Statistik-UI
+    ("GET", re.compile(r"^/api/stats/product-sales$")),
 )
 
 PUBLIC_API_PATHS = {

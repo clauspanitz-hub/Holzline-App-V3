@@ -272,7 +272,7 @@ Eine nachvollziehbare Umbuchung oder Umwandlung, relevant vor allem mit virtuell
 _Avoid_: Tag-Historie; implizite Umbuchung ohne Eintrag
 
 **Benutzer** / **Login**:
-Zugang zur App nur nach Anmeldung (Benutzername + Passwort). Session-Cookie, Idle ca. 12 h. Erster **Admin** per ENV beim Start (`ADMIN_USER` / `ADMIN_PASSWORD`), weitere Benutzer in der Admin-UI. Rollen: **Admin** (volle App) und **Mitarbeiter** (**Bei Mitarbeitern** inkl. Umwandeln Uni→Vintage, plus **Todos** anlegen/bearbeiten/erledigen — ADR `0027`, plus **Produktion** Board/Timer — ADR `0030`, plus **Team-Pinnwand** — ADR `0031`; Maschinen-/Tarif-Stammdaten nur Admin). Eigenes Passwort änderbar; Admin kann Passwörter setzen und Benutzer deaktivieren.
+Zugang zur App nur nach Anmeldung (Benutzername + Passwort). Session-Cookie, Idle ca. 12 h. Erster **Admin** per ENV beim Start (`ADMIN_USER` / `ADMIN_PASSWORD`), weitere Benutzer in der Admin-UI. Rollen: **Admin** (volle App) und **Mitarbeiter** (**Bei Mitarbeitern** inkl. Umwandeln Uni→Vintage, plus **Todos** anlegen/bearbeiten/erledigen — ADR `0027`, plus **Produktion** Board/Timer — ADR `0030`, plus **Team-Pinnwand** — ADR `0031`, plus Lesen **Verkaufsstatistik** — ADR `0032`; Maschinen-/Tarif-Stammdaten nur Admin). Eigenes Passwort änderbar; Admin kann Passwörter setzen und Benutzer deaktivieren.
 _Avoid_: Anonymer LAN-Zugriff; Rechte nur über Proxy-Basic-Auth; OAuth als Pflicht für die Manufaktur
 
 **Team-Pinnwand** / **Team-Nachrichten**:
@@ -282,4 +282,8 @@ _Avoid_: Chat-Thread; Objekt-Kommentar an Bestellung/Produkt; Login-User als Abs
 **Notizen** (Team-Scratchpad):
 Ein gemeinsames Freitext-Pad unter den Nachrichten; beide sehen und bearbeiten denselben Inhalt.
 _Avoid_: Pro-Person-Notizen; mehrere Pads; Markdown-Rich-Editor im MVP
+
+**Verkaufsstatistik** / **Verkaufs-Ranking**:
+Stückzahlen verkaufter Lagerprodukte aus Bestellungen mit Status **versendet** (`shipped`), Zeitraum Gesamt. Set-Positionen zählen über die Varianten-Stückliste nur **Produkte** (Menge × `quantity_required`); BOM-Materialien, reine Material- und Freitext-Positionen zählen nicht. UI: Top-10 auf der Übersicht und volle Rangliste unter **Statistik**. Produkt-Picker können optional **nach Verkauf sortieren** (Schalter, Standard aus; Reihenfolge häufig zuerst). Kein Telegram, kein Shop-Write, kein Rolling-Fenster, keine Metrik „Anzahl Bestellungen“ (ADR `0032`).
+_Avoid_: Offene/prüfende Bestellungen als verkauft; Set-Varianten als eigene Ranking-Zeile ohne BOM; Material-Verkaufsstatistik im MVP
 

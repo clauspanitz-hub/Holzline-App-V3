@@ -26,6 +26,7 @@
         { id: 'todos', label: 'Todos', badge: openTodos || undefined },
         { id: 'production', label: 'Produktion' },
         { id: 'overview', label: 'Übersicht' },
+        { id: 'stats', label: 'Statistik' },
         { id: 'staff', label: 'Bei Mitarbeitern', badge: staffCount || undefined },
       ],
     },
