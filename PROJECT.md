@@ -62,6 +62,10 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **team_notes:** Singleton-Scratchpad (`body`, `updated_at`)
 - UI: Desktop rechte Rail; Mobile Button→Sheet; kein Ungelesen/Push/Telegram
 
+### Verkaufsstatistik (neuer Slice, ADR `0032`)
+- Keine neue Persistenz — Ableitung aus `orders` / `order_lines` / `set_bom_lines` (nur `shipped`)
+- API `GET /api/stats/product-sales`; UI Top-10 Übersicht + Statistik; Opt-in Picker-Sort
+
 **Einheiten:** `Stk`, `m`, `kg`, `g`, `m²`, `l`, `ml`
 
 ## 4. Phasen-Roadmap
@@ -131,6 +135,11 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Rail-Layout: Nachrichten + Notizen je ~50% Höhe (`ui-v1.21`)
 - [x] Kein Ungelesen, Push, Telegram, Threads
 
+### Verkaufsstatistik — Umgesetzt (MVP)
+- [x] Stückzahlen aus `shipped`-Bestellungen (Gesamt); Sets über BOM-Produkte (ADR `0032`, `ui-v1.22`)
+- [x] Top-10 auf Übersicht + Nav-Seite Statistik; Opt-in „nach Verkauf sortieren“ an Produkt-Pickern
+- [x] Kein Telegram, Shop-Write, Rolling-Fenster, Order-Count-Metrik
+
 ## 5. Geschäftsregeln (gültig)
 - Keine Reservierungs-/Verschnittlogik.
 - **Auth (Phase 2):** Pflicht-Login; Rollen Admin und Mitarbeiter (ADR `0010`).
@@ -146,3 +155,4 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - Einkaufsassistent: Stückpreis = Einkaufspreis ÷ Ausbeute; Übernehmen setzt BOM `1/N` und `material_product_yields` (ADR `0028`); kein Shopify-Write.
 - Produktions-Tracking: parallele Zeitspuren Arbeit/Maschine; Produktkosten pro Typ (Ø×live Tarife + Session-Historie); Lauf mit Multi-Link + Schätzung/Messung; kein Bestands-Write in Slice 1–2 (ADR `0030`).
 - **Team-Pinnwand:** Nachrichten mit Namen-Schalter Claus|Simona (nicht Login-User); gemeinsames Notiz-Pad; Shell-Rail Desktop / Sheet Mobile; kein Ungelesen/Push/Telegram (ADR `0031`).
+- **Verkaufsstatistik:** Nur `shipped`; Metrik Stückzahl all-time; Set-BOM nur Produkte; Top-10 + Statistik-Seite; Picker-Sort Opt-in Standard aus (ADR `0032`).

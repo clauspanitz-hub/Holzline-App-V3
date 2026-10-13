@@ -337,6 +337,14 @@ export const api = {
     getNote: () => request('/api/team/note'),
     putNote: (body) => request('/api/team/note', { method: 'PUT', body: JSON.stringify(body) }),
   },
+  stats: {
+    productSales: (limit) => {
+      const q = new URLSearchParams()
+      if (limit != null && limit !== '') q.set('limit', String(limit))
+      const qs = q.toString()
+      return request(`/api/stats/product-sales${qs ? `?${qs}` : ''}`)
+    },
+  },
   production: {
     settings: () => request('/api/production/settings'),
     updateSettings: (body) =>

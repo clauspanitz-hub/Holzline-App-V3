@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import backup, material_demand_export, production, services, team
+from app import backup, material_demand_export, production, sales_stats, services, team
 from app.auth import (
     AdminUser,
     CurrentUser,
@@ -112,6 +112,7 @@ from app.schemas import (
     TeamMessageUpdate,
     TeamNoteRead,
     TeamNoteUpdate,
+    ProductSalesStatRead,
     StockAdjustRequest,
     StockDeltaRequest,
     StockMovementRead,
@@ -1513,3 +1514,16 @@ def team_note_put(
     payload: TeamNoteUpdate, _: CurrentUser, db: Session = Depends(get_db)
 ) -> TeamNoteRead:
     return team.upsert_note(db, payload)
+
+
+# --- Verkaufsstatistik (ADR 0032) ---
+
+
+@router.get("/stats/product-sales", response_model=list[ProductSalesStatRead])
+def stats_product_sales(
+    _: CurrentUser,
+    db: Session = Depends(get_db),
+    limit: int | None = Query(default=None, ge=1, le=500),
+) -> list[ProductSalesStatRead]:
+    """Stückzahlen verkaufter Lagerprodukte (nur shipped, Gesamtzeitraum)."""
+    return sales_stats.product_sales(db, limit=limit)

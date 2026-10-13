@@ -152,6 +152,9 @@ Dauerhaft im Repo:
 
 | Tag / Branch | Bedeutung |
 |--------------|-----------|
+| **`ui-v1.22`** / Branch (nach Merge `main`) | Verkaufsstatistik: Top-10 + Statistik-Seite; Opt-in Picker „nach Verkauf sortieren“ (ADR `0032`) |
+| **`ui-v1.21`** / `main` | Pinnwand Rail: Nachrichten/Notizen ~50/50 |
+| **`ui-v1.20`** / `main` | Team-Pinnwand + Scratchpad (ADR `0031`) |
 | **`ui-v1.18`** / Branch (nach Merge `main`) | Produktion: Zeitnahme Stop/Messung + Reload behält Nesting (Board-500 nach Stop behoben) |
 | **`ui-v1.17`** / `main` | Produktion board-first: Pins gegen leeres Reload; Create sekundär; Board-Wipe-Regressionstest |
 | **`ui-v1.16`** / `main` | Produktion: „Aktive Läufe“ immer sichtbar; Race nach „Lauf starten“ (unvollständig — siehe v1.17) |
@@ -172,13 +175,25 @@ Dauerhaft im Repo:
 | **`ui-v1`** | Slice 1 vor Kontrast-Pass (Tag fest; GitHub ließ Update nicht zu) |
 | **`ui-classic`** | UI **vor** dem Redesign |
 
-**Aktuell deployen — nach Merge Tag `ui-v1.18` (oder `main`):**
+**Aktuell deployen — nach Merge Tag `ui-v1.22` (oder `main`):**
+
+```bash
+cd /opt/holzlinge-inventar
+git fetch origin
+git fetch origin tag ui-v1.22
+git checkout ui-v1.22   # oder: git checkout main && git pull --ff-only origin main
+git log -1 --oneline
+docker compose build --no-cache
+docker compose up -d --force-recreate
+```
+
+**Vorgänger — Tag `ui-v1.18`:**
 
 ```bash
 cd /opt/holzlinge-inventar
 git fetch origin
 git fetch origin tag ui-v1.18
-git checkout ui-v1.18   # oder: git checkout main && git pull --ff-only origin main
+git checkout ui-v1.18
 git log -1 --oneline
 docker compose build --no-cache
 docker compose up -d --force-recreate

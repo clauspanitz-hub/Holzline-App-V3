@@ -52,8 +52,19 @@
   let overviewTodosOpen = $state(true)
   /** Tageslage standard zu — Fokus bleibt auf Bestellungen/Todos (weniger Dichte). */
   let overviewTageslageOpen = $state(false)
+  let overviewSalesOpen = $state(true)
   let tageslage = $state(null)
   let tageslageLoading = $state(false)
+  /** @type {{ product_id: number, product_name: string, quantity_sold: string|number }[]} */
+  let productSales = $state([])
+  const PICKER_SALES_SORT_KEY = 'holzlinge-picker-sort-by-sales'
+  let pickerSortBySales = $state(
+    typeof localStorage !== 'undefined' && localStorage.getItem(PICKER_SALES_SORT_KEY) === '1',
+  )
+  const productSalesQtyById = $derived(
+    Object.fromEntries(productSales.map((r) => [r.product_id, Number(r.quantity_sold)])),
+  )
+  const productSalesTop10 = $derived(productSales.slice(0, 10))
   let extraMatCriticalOpen = $state(false)
   let extraMatIncompleteOpen = $state(false)
   let extraMatIgnoredOpen = $state(false)
@@ -1986,6 +1997,25 @@
     return c ? String(c.medium_id) : ''
   }
 
+  function setPickerSortBySales(on) {
+    pickerSortBySales = !!on
+    try {
+      localStorage.setItem(PICKER_SALES_SORT_KEY, pickerSortBySales ? '1' : '0')
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }
+
+  async function loadProductSales() {
+    if (!authUser) return
+    try {
+      productSales = (await api.stats.productSales()) || []
+    } catch (error) {
+      if (error.status === 401) throw error
+      showFlash('error', error.message)
+    }
+  }
+
   async function loadTageslage({ refresh: force = false } = {}) {
     if (!authUser || authUser.role === 'mitarbeiter') return
     tageslageLoading = true
@@ -2002,6 +2032,9 @@
     loadedBuckets = { catalog: false, inventory: false, orders: false, sets: false, queue: false }
     await ensureTabData({ silent })
     if (tab === 'overview') await loadTageslage()
+    if (tab === 'overview' || tab === 'stats' || tab === 'orders' || tab === 'todos') {
+      await loadProductSales()
+    }
   }
 
   async function selectTab(next) {
@@ -2009,11 +2042,15 @@
     navOpen = false
     await ensureTabData({ silent: true })
     if (next === 'overview') await loadTageslage()
+    if (next === 'overview' || next === 'stats' || next === 'orders' || next === 'todos') {
+      await loadProductSales()
+    }
   }
 
   function tabTitle() {
     const labels = {
       overview: 'Übersicht',
+      stats: 'Statistik',
       materials: 'Materialien',
       products: 'Produkte',
       'purchase-assistant': 'Einkaufsassistent',
@@ -4817,6 +4854,34 @@
       {/if}
     </section>
 
+    <section class="panel overview-panel" class:collapsed={!overviewSalesOpen}>
+      <div class="panel-header">
+        <h2>
+          <button type="button" class="group-toggle overview-section-toggle" onclick={() => (overviewSalesOpen = !overviewSalesOpen)}>
+            {overviewSalesOpen ? '▼' : '▶'} Top verkaufte Produkte
+            <span class="empty">({productSalesTop10.length})</span>
+          </button>
+        </h2>
+        <button type="button" class="btn secondary" onclick={() => selectTab('stats')}>Alle → Statistik</button>
+      </div>
+      {#if overviewSalesOpen}
+        <p class="overview-section-job">Stückzahlen aus versendeten Bestellungen (Gesamt) — Sets über Stückliste aufgelöst.</p>
+        {#if productSalesTop10.length}
+          <ol class="sales-rank-list">
+            {#each productSalesTop10 as row, i (row.product_id)}
+              <li>
+                <span class="sales-rank-pos">{i + 1}.</span>
+                <span class="sales-rank-name">{row.product_name}</span>
+                <span class="sales-rank-qty">{formatQty(row.quantity_sold)}</span>
+              </li>
+            {/each}
+          </ol>
+        {:else}
+          <p class="empty">Noch keine versendeten Produktverkäufe.</p>
+        {/if}
+      {/if}
+    </section>
+
     <section class="panel overview-panel tageslage-panel" class:collapsed={!overviewTageslageOpen}>
       <div class="panel-header">
         <h2>
@@ -5111,6 +5176,42 @@
     </section>
     <BackupPanel onFlash={showFlash} onImported={refresh} />
     </div>
+  {:else if tab === 'stats'}
+    <section class="panel stats-panel">
+      <div class="panel-header">
+        <h2>Verkaufsstatistik</h2>
+        <button type="button" class="btn secondary" disabled={saving} onclick={() => loadProductSales()}>Aktualisieren</button>
+      </div>
+      <p class="overview-section-job">
+        Stückzahlen je Lagerprodukt aus Bestellungen mit Status versendet (Gesamtzeitraum).
+        Set-Positionen zählen über die Produkt-Stückliste; Materialien und Freitext nicht.
+      </p>
+      {#if productSales.length}
+        <div class="table-wrap">
+          <table class="sales-stats-table">
+            <thead>
+              <tr>
+                <th scope="col">Rang</th>
+                <th scope="col">Produkt</th>
+                <th scope="col">Stückzahl</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each productSales as row, i (row.product_id)}
+                <tr>
+                  <td>{i + 1}</td>
+                  <td>{row.product_name}</td>
+                  <td>{formatQty(row.quantity_sold)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {:else}
+        <p class="empty">Noch keine versendeten Produktverkäufe.</p>
+      {/if}
+    </section>
+
   {:else if tab === 'materials'}
     <ExtraGapPanels
       kind="material"
@@ -5614,6 +5715,9 @@
                       items={products}
                       emptyLabel="unzugeordnet"
                       inline
+                      salesQtyById={productSalesQtyById}
+                      sortBySales={pickerSortBySales}
+                      onSortBySalesChange={setPickerSortBySales}
                       onchange={(v) => setReviewLineProduct(order, ln, v)}
                     />
                   </label>
@@ -5686,6 +5790,9 @@
                 value={line.product_id}
                 items={products}
                 emptyLabel="Freitext / Set / später"
+                salesQtyById={productSalesQtyById}
+                sortBySales={pickerSortBySales}
+                onSortBySalesChange={setPickerSortBySales}
                 onchange={(v) => onOrderProductPicked(i, v)}
               />
             </label>
@@ -6645,12 +6752,14 @@
         {/if}
         {#if todoForm.kind === 'manufacture' || todoForm.kind === 'create_article'}
           <label>Produkt (optional)
-            <select bind:value={todoForm.product_id}>
-              <option value="">— keines —</option>
-              {#each products as p}
-                <option value={String(p.id)}>{p.name}</option>
-              {/each}
-            </select>
+            <FamilySelect
+              bind:value={todoForm.product_id}
+              items={products}
+              emptyLabel="— keines —"
+              salesQtyById={productSalesQtyById}
+              sortBySales={pickerSortBySales}
+              onSortBySalesChange={setPickerSortBySales}
+            />
           </label>
         {/if}
         {#if todoForm.kind === 'purchase'}
@@ -6708,6 +6817,9 @@
                 value={line.product_id}
                 items={products}
                 emptyLabel="— kein Produkt —"
+                salesQtyById={productSalesQtyById}
+                sortBySales={pickerSortBySales}
+                onSortBySalesChange={setPickerSortBySales}
                 onchange={(v) => onEditLineProduct(i, v)}
               />
             </label>
