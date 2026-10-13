@@ -212,6 +212,7 @@ def init_db() -> None:
         migrate_production_tracking(engine)
         migrate_production_tracking_slice2(engine)
         migrate_production_completed_runs(engine)
+        migrate_team_messages(engine, db)
         seed_admin_user(db)
         from app.services import backfill_incomplete_tags, ensure_system_incomplete_tags
 
@@ -836,6 +837,20 @@ def migrate_production_completed_runs(engine) -> None:
                 text("UPDATE production_processes SET template_id = :tid WHERE id = :pid"),
                 {"tid": tmpl_id, "pid": pid},
             )
+
+
+def migrate_team_messages(engine, db: Session) -> None:
+    """Team-Pinnwand + Scratchpad-Singleton (ADR 0031). create_all legt Tabellen an; hier Seed."""
+    from app.models import TeamNote
+    from app.team import TEAM_NOTE_ID, _utcnow
+
+    insp = inspect(engine)
+    tables = set(insp.get_table_names())
+    if "team_notes" not in tables:
+        return
+    if db.get(TeamNote, TEAM_NOTE_ID) is None:
+        db.add(TeamNote(id=TEAM_NOTE_ID, body="", updated_at=_utcnow()))
+        db.commit()
 
 
 def migrate_purchase_todos(engine) -> None:

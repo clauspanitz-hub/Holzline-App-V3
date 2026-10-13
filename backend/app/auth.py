@@ -65,6 +65,13 @@ MITARBEITER_ALLOW = (
     ("GET", re.compile(r"^/api/production/product-costs/\d+$")),
     ("GET", re.compile(r"^/api/production/product-costs/\d+/history$")),
     ("GET", re.compile(r"^/api/production/family-costs/\d+$")),
+    # Team-Pinnwand + Scratchpad (ADR 0031)
+    ("GET", re.compile(r"^/api/team/messages$")),
+    ("POST", re.compile(r"^/api/team/messages$")),
+    ("PATCH", re.compile(r"^/api/team/messages/\d+$")),
+    ("DELETE", re.compile(r"^/api/team/messages/\d+$")),
+    ("GET", re.compile(r"^/api/team/note$")),
+    ("PUT", re.compile(r"^/api/team/note$")),
 )
 
 PUBLIC_API_PATHS = {

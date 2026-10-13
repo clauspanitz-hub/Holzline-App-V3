@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import backup, material_demand_export, production, services
+from app import backup, material_demand_export, production, services, team
 from app.auth import (
     AdminUser,
     CurrentUser,
@@ -107,6 +107,11 @@ from app.schemas import (
     TimeTrackStart,
     TimeTrackStop,
     TimeTrackUpdate,
+    TeamMessageCreate,
+    TeamMessageRead,
+    TeamMessageUpdate,
+    TeamNoteRead,
+    TeamNoteUpdate,
     StockAdjustRequest,
     StockDeltaRequest,
     StockMovementRead,
@@ -1467,3 +1472,44 @@ def production_product_cost_history(
     product_id: int, _: CurrentUser, db: Session = Depends(get_db)
 ) -> list[ProductCostSnapshotRead]:
     return production.list_product_cost_history(db, product_id)
+
+
+# --- Team-Pinnwand + Scratchpad (ADR 0031) ---
+
+
+@router.get("/team/messages", response_model=list[TeamMessageRead])
+def team_messages_list(_: CurrentUser, db: Session = Depends(get_db)) -> list[TeamMessageRead]:
+    return team.list_messages(db)
+
+
+@router.post("/team/messages", response_model=TeamMessageRead, status_code=201)
+def team_messages_create(
+    payload: TeamMessageCreate, _: CurrentUser, db: Session = Depends(get_db)
+) -> TeamMessageRead:
+    return team.create_message(db, payload)
+
+
+@router.patch("/team/messages/{message_id}", response_model=TeamMessageRead)
+def team_messages_update(
+    message_id: int, payload: TeamMessageUpdate, _: CurrentUser, db: Session = Depends(get_db)
+) -> TeamMessageRead:
+    return team.update_message(db, message_id, payload)
+
+
+@router.delete("/team/messages/{message_id}", status_code=204)
+def team_messages_delete(
+    message_id: int, _: CurrentUser, db: Session = Depends(get_db)
+) -> None:
+    team.delete_message(db, message_id)
+
+
+@router.get("/team/note", response_model=TeamNoteRead)
+def team_note_get(_: CurrentUser, db: Session = Depends(get_db)) -> TeamNoteRead:
+    return team.get_note(db)
+
+
+@router.put("/team/note", response_model=TeamNoteRead)
+def team_note_put(
+    payload: TeamNoteUpdate, _: CurrentUser, db: Session = Depends(get_db)
+) -> TeamNoteRead:
+    return team.upsert_note(db, payload)

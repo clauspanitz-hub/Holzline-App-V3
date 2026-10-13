@@ -327,6 +327,16 @@ export const api = {
     update: (id, body) => request(`/api/machines/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     remove: (id) => request(`/api/machines/${id}`, { method: 'DELETE' }),
   },
+  team: {
+    messages: () => request('/api/team/messages'),
+    createMessage: (body) =>
+      request('/api/team/messages', { method: 'POST', body: JSON.stringify(body) }),
+    updateMessage: (id, body) =>
+      request(`/api/team/messages/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    deleteMessage: (id) => request(`/api/team/messages/${id}`, { method: 'DELETE' }),
+    getNote: () => request('/api/team/note'),
+    putNote: (body) => request('/api/team/note', { method: 'PUT', body: JSON.stringify(body) }),
+  },
   production: {
     settings: () => request('/api/production/settings'),
     updateSettings: (body) =>

@@ -57,6 +57,11 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - **production_process_products / production_process_families:** Multi-Link Produkte und Familien am Lauf
 - **product_cost_snapshots:** Historie nach Lauf-Abschluss für alle verknüpften Produkttypen (ADR `0030`)
 
+### Team-Nachrichten (neuer Slice, ADR `0031`)
+- **team_messages:** flache Pinnwand (`text`, `author` claus|simona, `created_at`, `updated_at`); CRUD
+- **team_notes:** Singleton-Scratchpad (`body`, `updated_at`)
+- UI: Desktop rechte Rail; Mobile Button→Sheet; kein Ungelesen/Push/Telegram
+
 **Einheiten:** `Stk`, `m`, `kg`, `g`, `m²`, `l`, `ml`
 
 ## 4. Phasen-Roadmap
@@ -120,6 +125,11 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - [x] Slice 2 Fix: Zeitnahme Stop/Messung + Reload behält Läufe/Prozesse/Tracks (`ui-v1.18`)
 - [x] Abgeschlossen-Historie: Board-Filter → Vorlage → Lauf-Zeilen; erneut timen; Archiv-Meta; `ui-v1.19` (Q23–Q30)
 
+### Team-Nachrichten — Umgesetzt (MVP)
+- [x] Flache Pinnwand + gemeinsames Scratchpad; Absender-Schalter Claus|Simona (ADR `0031`, `ui-v1.20`)
+- [x] Desktop rechte Rail überall eingeloggt; Mobile Button→Sheet; Bearbeiten/Löschen
+- [x] Kein Ungelesen, Push, Telegram, Threads
+
 ## 5. Geschäftsregeln (gültig)
 - Keine Reservierungs-/Verschnittlogik.
 - **Auth (Phase 2):** Pflicht-Login; Rollen Admin und Mitarbeiter (ADR `0010`).
@@ -134,3 +144,4 @@ Eine schlanke, modulare Webanwendung zur Verwaltung von Materialien, Produkten, 
 - Material ohne Varianten-System; unterschiedliche Ausbeuten nur über Produkt-Stücklisten-Mengen.
 - Einkaufsassistent: Stückpreis = Einkaufspreis ÷ Ausbeute; Übernehmen setzt BOM `1/N` und `material_product_yields` (ADR `0028`); kein Shopify-Write.
 - Produktions-Tracking: parallele Zeitspuren Arbeit/Maschine; Produktkosten pro Typ (Ø×live Tarife + Session-Historie); Lauf mit Multi-Link + Schätzung/Messung; kein Bestands-Write in Slice 1–2 (ADR `0030`).
+- **Team-Pinnwand:** Nachrichten mit Namen-Schalter Claus|Simona (nicht Login-User); gemeinsames Notiz-Pad; Shell-Rail Desktop / Sheet Mobile; kein Ungelesen/Push/Telegram (ADR `0031`).

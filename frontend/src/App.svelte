@@ -18,10 +18,12 @@
   import ToastStack from './lib/components/ToastStack.svelte'
   import AppNav from './lib/components/AppNav.svelte'
   import ProductionTracking from './lib/components/ProductionTracking.svelte'
+  import TeamPinboard from './lib/components/TeamPinboard.svelte'
   import { applyCatalogFilter, applyNegativeStockFilter, emptyCatalogFilter } from './lib/catalogFilter.js'
 
   let tab = $state('todos')
   let navOpen = $state(false)
+  let teamSheetOpen = $state(false)
   let authUser = $state(null)
   let authChecked = $state(false)
   let loginForm = $state({ username: '', password: '' })
@@ -6543,7 +6545,37 @@
   {/if}
   {/if}
   </div>
+
+  {#if authUser}
+    <aside class="team-rail" aria-label="Team-Pinnwand">
+      <TeamPinboard onError={(msg) => showFlash('error', msg)} />
+    </aside>
+    <button
+      type="button"
+      class="team-fab"
+      aria-expanded={teamSheetOpen}
+      onclick={() => (teamSheetOpen = true)}
+    >
+      Pinnwand
+    </button>
+  {/if}
 </div>
+
+{#if authUser && teamSheetOpen}
+  <div
+    class="team-sheet-backdrop"
+    role="presentation"
+    onclick={(e) => e.target === e.currentTarget && (teamSheetOpen = false)}
+  >
+    <div class="team-sheet" role="dialog" aria-modal="true" aria-label="Team-Pinnwand">
+      <header class="team-sheet-head">
+        <h2>Pinnwand</h2>
+        <button type="button" class="btn secondary" onclick={() => (teamSheetOpen = false)}>Schließen</button>
+      </header>
+      <TeamPinboard onError={(msg) => showFlash('error', msg)} />
+    </div>
+  </div>
+{/if}
 
 {#if passwordModal}
   <div class="modal-backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && (passwordModal = false)}>

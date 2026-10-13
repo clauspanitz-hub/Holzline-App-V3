@@ -813,3 +813,25 @@ class ProductCostSnapshot(Base):
 
     product: Mapped[Product] = relationship()
     process: Mapped[ProductionProcess | None] = relationship()
+
+
+class TeamMessage(Base):
+    """Flache Team-Pinnwand-Nachricht (ADR 0031). Absender ≠ Login-User."""
+
+    __tablename__ = "team_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    author: Mapped[str] = mapped_column(String(20), nullable=False)  # claus | simona
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TeamNote(Base):
+    """Gemeinsames Scratchpad (Singleton, id=1) — ADR 0031."""
+
+    __tablename__ = "team_notes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)

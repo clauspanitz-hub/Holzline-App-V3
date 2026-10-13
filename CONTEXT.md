@@ -272,6 +272,14 @@ Eine nachvollziehbare Umbuchung oder Umwandlung, relevant vor allem mit virtuell
 _Avoid_: Tag-Historie; implizite Umbuchung ohne Eintrag
 
 **Benutzer** / **Login**:
-Zugang zur App nur nach Anmeldung (Benutzername + Passwort). Session-Cookie, Idle ca. 12 h. Erster **Admin** per ENV beim Start (`ADMIN_USER` / `ADMIN_PASSWORD`), weitere Benutzer in der Admin-UI. Rollen: **Admin** (volle App) und **Mitarbeiter** (**Bei Mitarbeitern** inkl. Umwandeln Uni→Vintage, plus **Todos** anlegen/bearbeiten/erledigen — ADR `0027`, plus **Produktion** Board/Timer — ADR `0030`; Maschinen-/Tarif-Stammdaten nur Admin). Eigenes Passwort änderbar; Admin kann Passwörter setzen und Benutzer deaktivieren.
+Zugang zur App nur nach Anmeldung (Benutzername + Passwort). Session-Cookie, Idle ca. 12 h. Erster **Admin** per ENV beim Start (`ADMIN_USER` / `ADMIN_PASSWORD`), weitere Benutzer in der Admin-UI. Rollen: **Admin** (volle App) und **Mitarbeiter** (**Bei Mitarbeitern** inkl. Umwandeln Uni→Vintage, plus **Todos** anlegen/bearbeiten/erledigen — ADR `0027`, plus **Produktion** Board/Timer — ADR `0030`, plus **Team-Pinnwand** — ADR `0031`; Maschinen-/Tarif-Stammdaten nur Admin). Eigenes Passwort änderbar; Admin kann Passwörter setzen und Benutzer deaktivieren.
 _Avoid_: Anonymer LAN-Zugriff; Rechte nur über Proxy-Basic-Auth; OAuth als Pflicht für die Manufaktur
+
+**Team-Pinnwand** / **Team-Nachrichten**:
+Gemeinsame flache Nachrichtenliste (Text + Zeitstempel + Absender Claus/Simona). Absender per **Namen-Schalter**, nicht aus dem Login. Bearbeiten und Löschen erlaubt. Desktop: persistente rechte Rail; Mobile: Button öffnet Sheet. Kein Ungelesen, Push, Telegram, Threads (ADR `0031`).
+_Avoid_: Chat-Thread; Objekt-Kommentar an Bestellung/Produkt; Login-User als Absender; Telegram-Webhook (anderes Feature)
+
+**Notizen** (Team-Scratchpad):
+Ein gemeinsames Freitext-Pad unter den Nachrichten; beide sehen und bearbeiten denselben Inhalt.
+_Avoid_: Pro-Person-Notizen; mehrere Pads; Markdown-Rich-Editor im MVP
 
